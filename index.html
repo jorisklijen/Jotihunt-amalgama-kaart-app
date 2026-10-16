@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gelderland Scouting Kaart & Jotihunt Live</title>
+    <title>Scouting Amalgama Jotihunt app</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Leaflet Draw CSS -->
@@ -109,6 +109,11 @@
             overflow: hidden;
             margin-right: 8px;
         }
+        #header-main-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
         #header h1 {
             margin: 0;
             font-size: 14px;
@@ -126,7 +131,7 @@
         .header-right {
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 6px;
             font-size: 12px;
             flex-shrink: 0;
         }
@@ -142,14 +147,19 @@
             transition: background 0.2s;
             white-space: nowrap;
         }
-        .header-btn:hover {
-            background-color: #2980b9;
-        }
+        .header-btn:hover { background-color: #2980b9; }
         #btn-fetch-latest { background-color: #e67e22; }
         #btn-fetch-latest:hover { background-color: #d35400; }
         #clear-rd-btn { background-color: #c0392b; }
         #btn-logout { background-color: #7f8c8d; }
         #btn-logout:hover { background-color: #95a5a6; }
+
+        /* Franse lelie status icoon */
+        #api-fleur-icon {
+            display: inline-block;
+            vertical-align: middle;
+            transition: fill 0.3s;
+        }
 
         /* Notificatiebanner */
         #notification-banner {
@@ -233,7 +243,6 @@
             transition: background-color 0.2s;
         }
         
-        /* Status kleuren */
         .status-actief { background-color: #d4efdf; color: #27ae60; border: 1px solid #2ecc71; }
         .status-gevangen { background-color: #fadbd8; color: #c0392b; border: 1px solid #e74c3c; }
         .status-rust { background-color: #fcf3cf; color: #b7950b; border: 1px solid #f1c40f; }
@@ -252,6 +261,7 @@
             filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
         }
 
+        /* Marker labels die alleen zichtbaar zijn bij zoom >= 12 */
         .marker-label {
             background: white;
             border: 1px solid #777;
@@ -261,29 +271,28 @@
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.3);
             display: none;
+            pointer-events: none;
         }
         .zoom-in-to-show .marker-label {
-            display: block;
+            display: block !important;
         }
-        
+
         /* Labels voor gebruikers */
         .user-gps-label-active {
             background: #27ae60 !important;
             color: #ffffff !important;
             border: 1px solid #ffffff !important;
             font-weight: bold;
-            display: block !important;
         }
         .user-gps-label-inactive {
             background: #7f8c8d !important;
             color: #ffffff !important;
             border: 1px solid #e74c3c !important;
             font-weight: bold;
-            display: block !important;
         }
 
         /* Windrichting labels op de cirkel */
-        .compass-label {
+        .compass-label-cardinal {
             background: #2c3e50;
             color: #ffffff;
             border: 1px solid #e67e22;
@@ -296,8 +305,30 @@
             font-size: 12px;
             box-shadow: 0 1px 4px rgba(0,0,0,0.4);
         }
+        .compass-label-inter {
+            background: #34495e;
+            color: #ecf0f1;
+            border: 1px dashed #e67e22;
+            border-radius: 50%;
+            width: 19px;
+            height: 19px;
+            line-height: 19px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 9px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
         .popup-content {
             text-align: center;
+        }
+        .popup-content input[type="color"] {
+            border: none;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            vertical-align: middle;
+            margin: 5px;
         }
     </style>
 </head>
@@ -318,7 +349,13 @@
     <div id="app-container">
         <div id="header">
             <div id="header-title-box">
-                <h1>Gelderland Kaart</h1>
+                <div id="header-main-title">
+                    <!-- Scouting Franse Lelie Logo in Header -->
+                    <svg id="header-fleur" viewBox="0 0 24 24" width="20" height="20" fill="#f1c40f">
+                        <path d="M12 2C11.5 5 9.5 8 7 9c2 1 3 3 3 5 0 2-1 4-2 4 2 0 4-1 4-3 0 2 2 3 4 3-1 0-2-2-2-4 0-2 1-4 3-5-2.5-1-4.5-4-5-7zm-1 17h2v3h-2v-3z"/>
+                    </svg>
+                    <h1>Scouting Amalgama Jotihunt app</h1>
+                </div>
                 <div id="user-badge">Niet ingelogd</div>
             </div>
             <div class="header-right">
@@ -326,7 +363,11 @@
                 <button class="header-btn" id="btn-add-rd" onclick="addMarkerByRD()" style="display:none;">+ RD</button>
                 <button class="header-btn" id="clear-rd-btn" onclick="clearRdPoints()" style="display:none;">Wis</button>
                 <button class="header-btn" id="btn-logout" onclick="logout()" title="Uitloggen">Uitloggen</button>
-                <div><span id="api-status" style="color: #2ecc71;">●</span></div>
+                
+                <!-- Franse lelie status icoon (Groen bij verbinding, rood bij fout) -->
+                <svg id="api-fleur-icon" viewBox="0 0 24 24" width="20" height="20" fill="#2ecc71" title="API Status">
+                    <path d="M12 2C11.5 5 9.5 8 7 9c2 1 3 3 3 5 0 2-1 4-2 4 2 0 4-1 4-3 0 2 2 3 4 3-1 0-2-2-2-4 0-2 1-4 3-5-2.5-1-4.5-4-5-7zm-1 17h2v3h-2v-3z"/>
+                </svg>
             </div>
         </div>
 
@@ -376,7 +417,6 @@
         var currentUserName = "";
         var currentUserId = "";
 
-        // Toon automatisch alleen het Naam veld bij pincode 1111
         document.getElementById('pin-input').addEventListener('input', function() {
             var val = this.value.trim();
             var nameField = document.getElementById('username-input');
@@ -479,6 +519,7 @@
 
             setTimeout(function() {
                 map.invalidateSize();
+                checkZoomLevel();
             }, 100);
         }
 
@@ -523,11 +564,9 @@
             requestWakeLock();
             sendCurrentLocation();
 
-            // Interval ingesteld op exact elke 20 seconden
             if (intervalTimer) clearInterval(intervalTimer);
             intervalTimer = setInterval(sendCurrentLocation, 20000);
 
-            // Web Worker Heartbeat voor achtergrondactiviteit elke 20 sec
             try {
                 var blob = new Blob([
                     "setInterval(function() { postMessage('tick'); }, 20000);"
@@ -537,7 +576,7 @@
                     sendCurrentLocation();
                 };
             } catch (e) {
-                console.warn("Worker niet beschikbaar, gebruikt setInterval:", e);
+                console.warn("Worker niet beschikbaar, setInterval actief:", e);
             }
 
             document.addEventListener("visibilitychange", function() {
@@ -563,7 +602,7 @@
             }
         }
 
-        /* ================= KAART & LEAFLET ================= */
+        /* ================= KAART & COÖRDINATEN ================= */
         proj4.defs("EPSG:28992", "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.387638888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.417,50.3319,465.524,-0.398957,0.343988,-1.8774,4.0725 +units=m +no_defs");
         proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 
@@ -590,25 +629,37 @@
             var parts = coordInput.split(/[\s,;]+/);
             if (parts.length < 2) return null;
 
-            var val1 = parseFloat(parts[0].replace(',', '.'));
-            var val2 = parseFloat(parts[1].replace(',', '.'));
+            var val1Str = parts[0].replace(',', '.');
+            var val2Str = parts[1].replace(',', '.');
+            var val1 = parseFloat(val1Str);
+            var val2 = parseFloat(val2Str);
+
             if (isNaN(val1) || isNaN(val2)) return null;
 
             if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
                 return [val1, val2];
             } else {
-                var xStr = parts[0].replace(',', '.').split('.')[0];
-                var yStr = parts[1].replace(',', '.').split('.')[0];
+                var xPart = val1Str.split('.')[0];
+                var yPart = val2Str.split('.')[0];
 
-                while (xStr.length < 6) { xStr += "0"; }
-                while (yStr.length < 6) { yStr += "0"; }
+                var x = parseFloat(xPart);
+                var y = parseFloat(yPart);
 
-                var x = parseFloat(xStr);
-                var y = parseFloat(yStr);
+                if (xPart.length === 4) x = x * 100;
+                else if (xPart.length === 5) x = x * 10;
+
+                if (yPart.length === 4) y = y * 100;
+                else if (yPart.length === 5) y = y * 10;
+
+                while (x.toString().length < 6) { x = x * 10; }
+                while (y.toString().length < 6) { y = y * 10; }
 
                 try {
                     var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
-                    return [latLngArray[1], latLngArray[0]];
+                    if (latLngArray[1] >= 50 && latLngArray[1] <= 54 && latLngArray[0] >= 3 && latLngArray[0] <= 8) {
+                        return [latLngArray[1], latLngArray[0]];
+                    }
+                    return null;
                 } catch (e) {
                     console.error("Fout bij RD conversie:", e);
                     return null;
@@ -616,37 +667,26 @@
             }
         }
 
-        var map = L.map('map').setView([51.9851, 5.8987], 10);
+        var map = L.map('map', { closePopupOnClick: true }).setView([51.9851, 5.8987], 10);
 
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
             maxZoom: 19,
             attribution: 'Tiles &copy; Esri'
         }).addTo(map);
 
-        function checkZoomLevel() {
-            var mapContainer = document.getElementById('map');
-            if (map.getZoom() >= 12) {
-                mapContainer.classList.add('zoom-in-to-show');
-            } else {
-                mapContainer.classList.remove('zoom-in-to-show');
-            }
-        }
-        map.on('zoomend', checkZoomLevel);
-
         var fixedHouseLayer = new L.FeatureGroup().addTo(map);
         var drawnItems = new L.FeatureGroup().addTo(map);
         var rdPointsLayer = new L.FeatureGroup().addTo(map);
         var rdRouteLayer = new L.FeatureGroup().addTo(map);
         var usersLiveLayer = new L.FeatureGroup().addTo(map);
+        var circleOverlayLayer = new L.FeatureGroup(); // Bevat 450m cirkel en kompasroos
         var liveUserMarkers = {};
 
-        /* ================= 450M CIRKEL & WINDRICHTINGEN ROND CLUBGEBOUW ================= */
-        // Locatie Scouting Amalgama: 51.83915, 5.78562
+        /* ================= 450M CIRKEL & KOMPAS (NO, ZO, ZW, NW) ================= */
         var amalgamaLat = 51.83915;
         var amalgamaLng = 5.78562;
         var radiusMeters = 450;
 
-        // 450m cirkel met subtiele tint
         L.circle([amalgamaLat, amalgamaLng], {
             radius: radiusMeters,
             color: '#e67e22',
@@ -654,28 +694,80 @@
             dashArray: '5, 5',
             fillColor: '#e67e22',
             fillOpacity: 0.12
-        }).addTo(map).bindTooltip("450m Straal Amalgama", { direction: 'top' });
+        }).addTo(circleOverlayLayer);
 
-        // Coördinaten berekenen op de 450m rand voor windrichtingen
         var latOffset = radiusMeters / 111320; 
         var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180)));
+        var diagOffsetLat = latOffset * 0.7071;
+        var diagOffsetLng = lngOffset * 0.7071;
 
-        var directions = [
-            { label: 'N', lat: amalgamaLat + latOffset, lng: amalgamaLng },
-            { label: 'Z', lat: amalgamaLat - latOffset, lng: amalgamaLng },
-            { label: 'O', lat: amalgamaLat, lng: amalgamaLng + lngOffset },
-            { label: 'W', lat: amalgamaLat, lng: amalgamaLng - lngOffset }
+        var allDirections = [
+            { label: 'N', lat: amalgamaLat + latOffset, lng: amalgamaLng, isCardinal: true },
+            { label: 'O', lat: amalgamaLat, lng: amalgamaLng + lngOffset, isCardinal: true },
+            { label: 'Z', lat: amalgamaLat - latOffset, lng: amalgamaLng, isCardinal: true },
+            { label: 'W', lat: amalgamaLat, lng: amalgamaLng - lngOffset, isCardinal: true },
+            { label: 'NO', lat: amalgamaLat + diagOffsetLat, lng: amalgamaLng + diagOffsetLng, isCardinal: false },
+            { label: 'ZO', lat: amalgamaLat - diagOffsetLat, lng: amalgamaLng + diagOffsetLng, isCardinal: false },
+            { label: 'ZW', lat: amalgamaLat - diagOffsetLat, lng: amalgamaLng - diagOffsetLng, isCardinal: false },
+            { label: 'NW', lat: amalgamaLat + diagOffsetLat, lng: amalgamaLng - diagOffsetLng, isCardinal: false }
         ];
 
-        directions.forEach(function(dir) {
+        allDirections.forEach(function(dir) {
+            var cls = dir.isCardinal ? 'compass-label-cardinal' : 'compass-label-inter';
+            var sz = dir.isCardinal ? 22 : 19;
             var icon = L.divIcon({
                 className: 'compass-icon-wrapper',
-                html: `<div class="compass-label">${dir.label}</div>`,
-                iconSize: [22, 22],
-                iconAnchor: [11, 11]
+                html: `<div class="${cls}">${dir.label}</div>`,
+                iconSize: [sz, sz],
+                iconAnchor: [sz/2, sz/2]
             });
-            L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(map);
+            L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(circleOverlayLayer);
         });
+
+        // Automatisch tonen van de cirkel, kompas en namen alleen bij zoom >= 12
+        function checkZoomLevel() {
+            var currentZoom = map.getZoom();
+            var mapContainer = document.getElementById('map');
+            if (currentZoom >= 12) {
+                mapContainer.classList.add('zoom-in-to-show');
+                if (!map.hasLayer(circleOverlayLayer)) {
+                    map.addLayer(circleOverlayLayer);
+                }
+            } else {
+                mapContainer.classList.remove('zoom-in-to-show');
+                if (map.hasLayer(circleOverlayLayer)) {
+                    map.removeLayer(circleOverlayLayer);
+                }
+            }
+        }
+        map.on('zoomend', checkZoomLevel);
+
+        // Hulpfunctie: Zorgt dat een marker een permanent label heeft bij zoom >= 12 en hoverbaar is bij zoom < 12
+        function attachSmartTooltip(marker, labelText, extraClass = '') {
+            marker.bindTooltip(labelText, {
+                permanent: true,
+                direction: 'right',
+                className: 'marker-label ' + extraClass
+            });
+
+            marker.on('mouseover', function(e) {
+                if (map.getZoom() < 12) {
+                    var tip = marker.getTooltip();
+                    if (tip && tip.getElement()) {
+                        tip.getElement().style.display = 'block';
+                    }
+                }
+            });
+
+            marker.on('mouseout', function(e) {
+                if (map.getZoom() < 12) {
+                    var tip = marker.getTooltip();
+                    if (tip && tip.getElement()) {
+                        tip.getElement().style.display = 'none';
+                    }
+                }
+            });
+        }
 
         function setupDrawTools() {
             var drawControl = new L.Control.Draw({
@@ -703,7 +795,16 @@
             });
 
             var marker = L.marker(latlng, { icon: customIcon });
-            marker.bindTooltip(name, { permanent: true, direction: 'right', className: 'marker-label' });
+            attachSmartTooltip(marker, name);
+
+            var popupContent = `
+                <div class="popup-content">
+                    <b>Naam:</b> ${isAdmin ? `<input type="text" id="popup-name" value="${name}" style="width: 140px; margin-bottom: 5px;"><br>` : name}<br>
+                    <b>Kleur:</b> ${isAdmin ? `<input type="color" id="popup-color" value="${color}"><br>` : ''}
+                    ${isAdmin ? `<button onclick="window.updateMarker(this)" style="background: #2ecc71; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; margin-top: 5px;">Opslaan</button>` : ''}
+                </div>
+            `;
+            marker.bindPopup(popupContent);
             return marker;
         }
 
@@ -722,11 +823,24 @@
             });
 
             var marker = L.marker(latlng, { icon: customIcon });
-            marker.bindTooltip(name + " (" + timeStr + ")", { permanent: true, direction: 'right', className: 'marker-label' });
+            attachSmartTooltip(marker, name + " (" + timeStr + ")");
+
+            var popupContent = `
+                <div class="popup-content">
+                    <b>${name}</b><br>
+                    <span style="font-size: 12px; color: #2c3e50; font-weight: bold;">Tijd: ${timeStr}</span><br>
+                    ${isAdmin ? `
+                        <div style="margin-top: 8px; border-top: 1px solid #ddd; padding-top: 5px;">
+                            <button onclick="window.editRdPoint(this)" title="Bewerk punt" style="background: #f39c12; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">✏️ Bewerk</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            marker.bindPopup(popupContent);
             return marker;
         }
 
-        /* ================= LIVE GEBRUIKERS (GROEN/WIT vs GRIJS/ROOD) ================= */
+        /* ================= LIVE GEBRUIKERS WEERGAVE ================= */
         function createUserIcon(isActive) {
             var fillColor = isActive ? "#2ecc71" : "#7f8c8d";
             var strokeColor = isActive ? "#ffffff" : "#e74c3c";
@@ -759,7 +873,6 @@
                 var u = users[userId];
                 if (!u || !u.lat || !u.lng) return;
 
-                // Verberg markers die langer dan 20 minuten helemaal geen update hebben gegeven
                 if (now - (u.lastSeen || 0) > 20 * 60 * 1000) {
                     if (liveUserMarkers[userId]) {
                         usersLiveLayer.removeLayer(liveUserMarkers[userId]);
@@ -768,13 +881,12 @@
                     return;
                 }
 
-                // Actief = laatste update binnen 3 minuten (180 sec)
                 var isActive = (now - (u.lastSeen || 0)) <= (3 * 60 * 1000);
                 var minutesAgo = Math.floor((now - u.lastSeen) / 60000);
                 var timeAgoText = minutesAgo <= 0 ? "Zojuist" : minutesAgo + "m geleden";
 
                 var icon = createUserIcon(isActive);
-                var labelClass = isActive ? 'marker-label user-gps-label-active' : 'marker-label user-gps-label-inactive';
+                var labelClass = isActive ? 'user-gps-label-active' : 'user-gps-label-inactive';
                 var statusText = isActive ? '<span style="color:#2ecc71; font-weight:bold;">● Actief</span>' : '<span style="color:#e74c3c; font-weight:bold;">● Inactief</span>';
 
                 if (liveUserMarkers[userId]) {
@@ -784,7 +896,7 @@
                     liveUserMarkers[userId].getPopup().setContent(`<b>🚗 ${u.name}</b><br>Status: ${statusText}<br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
                 } else {
                     var m = L.marker([u.lat, u.lng], { icon: icon });
-                    m.bindTooltip("🚗 " + u.name, { permanent: true, direction: 'top', className: labelClass });
+                    attachSmartTooltip(m, "🚗 " + u.name, labelClass);
                     m.bindPopup(`<b>🚗 ${u.name}</b><br>Status: ${statusText}<br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
                     usersLiveLayer.addLayer(m);
                     liveUserMarkers[userId] = m;
@@ -846,15 +958,88 @@
                     drawnItems.addLayer(m);
                 } else if (item.type === 'polyline') {
                     var pl = L.polyline(item.latlngs, { color: item.color, weight: 4, className: 'route-line' });
-                    pl.bindTooltip(item.name, { permanent: true, direction: 'center', className: 'marker-label' });
+                    attachSmartTooltip(pl, item.name);
                     pl.bindPopup("<b>" + item.name + "</b>");
                     drawnItems.addLayer(pl);
                 }
             });
         });
 
+        window.editRdPoint = function(btn) {
+            if (!isAdmin) return;
+            
+            rdPointsLayer.eachLayer(function(layer) {
+                if (layer.getPopup() && layer.getPopup().getElement() && layer.getPopup().getElement().contains(btn)) {
+                    var currentLatlng = layer.getLatLng();
+
+                    var foundArea = "";
+                    var foundObj = null;
+                    for (var area in rdPointsByArea) {
+                        var idx = rdPointsByArea[area].findIndex(p => p.marker === layer);
+                        if (idx !== -1) {
+                            foundArea = area;
+                            foundObj = rdPointsByArea[area][idx];
+                            break;
+                        }
+                    }
+
+                    var currentBaseName = foundObj ? foundObj.baseName : "Punt";
+                    var currentTime = foundObj ? foundObj.time : "12:00";
+                    var firebaseKey = foundObj ? foundObj.firebaseKey : null;
+
+                    var newName = prompt("Bewerk naam voor dit punt:", currentBaseName);
+                    if (newName === null) return;
+
+                    var newTime = prompt("Bewerk tijdstip (UU:MM):", currentTime);
+                    if (!newTime) newTime = currentTime;
+
+                    var rawAreaInput = prompt("Koppel aan deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar):\nLaat leeg voor geen koppeling", foundArea);
+                    if (rawAreaInput === null) rawAreaInput = foundArea;
+                    
+                    var newArea = parseTargetArea(rawAreaInput);
+
+                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 1800, 4500 OF 51.9851, 5.8987", "");
+                    
+                    var targetLatlng = [currentLatlng.lat, currentLatlng.lng];
+
+                    if (coordInput && coordInput.trim() !== "") {
+                        var converted = parseCoordInput(coordInput);
+                        if (converted) {
+                            targetLatlng = converted;
+                        } else {
+                            alert("Ongeldige coördinaten. Locatie blijft ongewijzigd.");
+                        }
+                    }
+
+                    var markerColor = "#000000";
+                    var areaSuffix = "";
+
+                    if (newArea && areaColors[newArea]) {
+                        markerColor = areaColors[newArea];
+                        areaSuffix = " [" + newArea + "]";
+                    } else {
+                        newArea = "";
+                    }
+
+                    var fullName = newName + areaSuffix;
+
+                    if (firebaseKey) {
+                        db.ref('rdPoints/' + firebaseKey).set({
+                            latlng: targetLatlng,
+                            time: newTime,
+                            baseName: newName,
+                            area: newArea,
+                            fullName: fullName,
+                            color: markerColor
+                        });
+                    }
+                }
+            });
+        };
+
         function updateRdRoutes() {
             rdRouteLayer.clearLayers();
+
             for (var area in rdPointsByArea) {
                 var points = rdPointsByArea[area];
                 if (points.length < 2) continue;
@@ -874,31 +1059,33 @@
 
         function clearRdPoints() {
             if (!isAdmin) return;
-            var pinInput = prompt("Voer de admin-pincode in om de RD-lijnen te wissen:", "");
-            if (pinInput === "6546") {
+            var pinInput = prompt("Voer de pincode in om de RD-lijnen te wissen:", "");
+            if (pinInput === null) return;
+
+            if (pinInput.trim() === "6546") {
                 db.ref('rdPoints').remove().then(function() {
-                    alert("RD-punten succesvol gewist.");
+                    alert("RD-punten en tijdlijnen zijn succesvol gewist voor iedereen.");
                 });
-            } else if (pinInput !== null) {
-                alert("Onjuiste pincode!");
+            } else {
+                alert("Onjuiste pincode! Het wissen is geannuleerd.");
             }
         }
 
         function addMarkerByRD() {
             if (!isAdmin) return;
-            var name = prompt("Voer een naam in voor dit punt:", "Punt");
+            var name = prompt("Voer een naam in voor dit punt (bijv. Hint / Sighting):", "Punt");
             if (!name) return;
 
-            var coordInput = prompt("Voer coördinaten in (RD of GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
+            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
             if (!coordInput) return;
 
             var latlng = parseCoordInput(coordInput);
             if (!latlng) {
-                alert("Ongeldige coördinaten ingevoerd.");
+                alert("Ongeldige coördinaten ingevoerd. Zorg dat je getallen gebruikt.");
                 return;
             }
 
-            var rawAreaInput = prompt("Koppel aan deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor geen koppeling:", "");
+            var rawAreaInput = prompt("Koppel aan deelgebied (kies uit: Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor geen koppeling:", "");
             var chosenArea = parseTargetArea(rawAreaInput);
 
             var markerColor = "#000000";
@@ -912,20 +1099,49 @@
             }
 
             var now = new Date();
-            var defaultTime = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
-            var timeInput = prompt("Voer tijdstip in (UU:MM):", defaultTime) || defaultTime;
+            var hours = String(now.getHours()).padStart(2, '0');
+            var minutes = String(now.getMinutes()).padStart(2, '0');
+            var defaultTime = hours + ":" + minutes;
+
+            var timeInput = prompt("Voer het tijdstip in (UU:MM):", defaultTime);
+            if (!timeInput) timeInput = defaultTime;
+
+            var fullName = name + areaSuffix;
 
             db.ref('rdPoints').push({
                 latlng: latlng,
                 time: timeInput,
                 baseName: name,
                 area: areaKey,
-                fullName: name + areaSuffix,
+                fullName: fullName,
                 color: markerColor
             }).then(function() {
                 map.setView(latlng, 14);
+            }).catch(function(error) {
+                console.error("Fout bij opslaan in Firebase:", error);
+                alert("Kon het punt niet opslaan in de database.");
             });
         }
+
+        window.updateMarker = function(btn) {
+            if (!isAdmin) return;
+            var popupDiv = btn.closest('.leaflet-popup-content');
+            [fixedHouseLayer, drawnItems, rdPointsLayer].forEach(function(group) {
+                group.eachLayer(function(layer) {
+                    if (layer.getPopup() && layer.getPopup().getElement() && layer.getPopup().getElement().contains(btn)) {
+                        var nameInput = popupDiv.querySelector('input[type="text"]');
+                        var colorInput = popupDiv.querySelector('input[type="color"]');
+                        if (nameInput && colorInput) {
+                            var latlng = layer.getLatLng();
+                            group.removeLayer(layer);
+                            var newMarker = createHouseMarker(latlng, nameInput.value, colorInput.value);
+                            group.addLayer(newMarker);
+                            newMarker.openPopup();
+                        }
+                    }
+                });
+            });
+        };
 
         var allLocations = [
             {name: "André de Thaye en Lido'76", area: "Golf", lat: 51.98140, lng: 5.93388},
@@ -1106,9 +1322,11 @@
                                 }
                             });
                         }
-                        document.getElementById('api-status').style.color = "#2ecc71";
+                        document.getElementById('api-fleur-icon').setAttribute('fill', '#2ecc71');
                     }
-                }).catch(() => { document.getElementById('api-status').style.color = "#e74c3c"; });
+                }).catch(() => { 
+                    document.getElementById('api-fleur-icon').setAttribute('fill', '#e74c3c'); 
+                });
 
             fetch('https://jotihunt.nl/api/2.0/areas')
                 .then(r => r.json())
@@ -1133,6 +1351,46 @@
 
         fetchJotihuntData();
         setInterval(fetchJotihuntData, 20000);
+
+        map.on(L.Draw.Event.CREATED, function (e) {
+            if (!isAdmin) return;
+            var layer = e.layer;
+            if (e.layerType === 'marker') {
+                var markerName = prompt("Voer een naam in voor deze plek:", "Nieuwe locatie");
+                if (!markerName) markerName = "Locatie";
+                var markerColor = prompt("Kies een kleur (bijv. red, blue, green of hex #ff0000):", "#e74c3c");
+                if (!markerColor) markerColor = "#e74c3c";
+
+                var latlng = layer.getLatLng();
+                db.ref('drawnItems').push({
+                    type: 'marker',
+                    latlng: [latlng.lat, latlng.lng],
+                    name: markerName,
+                    color: markerColor
+                });
+            } else if (e.layerType === 'polyline') {
+                var lineName = prompt("Voer een naam in voor deze route:", "Route");
+                if (!lineName) lineName = "Route";
+
+                var rawAreaInput = prompt("Koppel aan deelgebied (kies uit: Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor standaard zwart:", "");
+                var chosenArea = parseTargetArea(rawAreaInput);
+                
+                var lineColor = "#000000";
+                if (chosenArea && areaColors[chosenArea]) {
+                    lineColor = (chosenArea === "Oscar") ? "#003399" : areaColors[chosenArea];
+                    lineName = lineName + " (" + chosenArea + ")";
+                }
+
+                var latlngs = layer.getLatLngs().map(function(pt) { return [pt.lat, pt.lng]; });
+
+                db.ref('drawnItems').push({
+                    type: 'polyline',
+                    latlngs: latlngs,
+                    name: lineName,
+                    color: lineColor
+                });
+            }
+        });
     </script>
 </body>
 </html>
