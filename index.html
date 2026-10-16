@@ -283,7 +283,7 @@
     <div id="auth-overlay">
         <div id="auth-box">
             <h2>Inloggen</h2>
-            <input type="password" id="pin-input" placeholder="Pincode (1111 of 6546)" maxlength="4" autofocus>
+            <input type="password" id="pin-input" placeholder="Pincode" maxlength="4" autofocus>
             <input type="text" id="username-input" placeholder="Naam / Team (bijv. Auto 1)" style="display:none;" maxlength="24">
             <button onclick="checkPin()">Inloggen</button>
             <div id="auth-error">Onjuiste pincode of naam ontbreekt</div>
@@ -407,7 +407,6 @@
             localStorage.removeItem('jh_auth_role');
             localStorage.removeItem('jh_auth_name');
             if (currentUserId) {
-                // Verwijder live locatie direct uit Firebase
                 db.ref('liveUsers/' + currentUserId).remove();
             }
             stopLiveTracking();
@@ -464,7 +463,6 @@
         var wakeLock = null;
         var workerTimer = null;
 
-        // Vraag schermvergrendeling aan (WakeLock API)
         async function requestWakeLock() {
             try {
                 if ('wakeLock' in navigator) {
@@ -527,7 +525,6 @@
                 });
             }
 
-            // Web Worker Heartbeat: houdt het script levend als tabblad geminimaliseerd is
             try {
                 var blob = new Blob([
                     "setInterval(function() { postMessage('tick'); }, 10000);"
@@ -541,7 +538,6 @@
                 setInterval(sendCurrentLocation, 10000);
             }
 
-            // Bij minimaliseren of weer tonen van pagina
             document.addEventListener("visibilitychange", function() {
                 if (document.visibilityState === 'visible') {
                     requestWakeLock();
@@ -702,12 +698,10 @@
                 return;
             }
 
-            // Bijwerken en toevoegen
             Object.keys(users).forEach(function(userId) {
                 var u = users[userId];
                 if (!u || !u.lat || !u.lng) return;
 
-                // Verberg als gebruiker langer dan 15 min offline is
                 if (now - (u.lastSeen || 0) > 15 * 60 * 1000) {
                     if (liveUserMarkers[userId]) {
                         usersLiveLayer.removeLayer(liveUserMarkers[userId]);
@@ -744,7 +738,6 @@
                 }
             });
 
-            // Opruimen van markers die niet meer in database staan
             Object.keys(liveUserMarkers).forEach(function(userId) {
                 if (!users[userId]) {
                     usersLiveLayer.removeLayer(liveUserMarkers[userId]);
