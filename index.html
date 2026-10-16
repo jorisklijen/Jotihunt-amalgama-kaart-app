@@ -321,16 +321,16 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
     <script>
-        // Jouw Firebase configuratie is hier direct ingevuld!
+        // Jouw bijgewerkte Firebase configuratie gekoppeld aan de juiste database
         var firebaseConfig = {
-            apiKey: "AIzaSyDNHhLTR80yz-6d_wOkmid1cINPIlsVM2o",
+            apiKey: "AIzaSyDHNhlTRR0yr-6d_wOkmld1cInPLlxVM2o",
             authDomain: "jotihunt-amalgama.firebaseapp.com",
             databaseURL: "https://jotihunt-amalgama-default-rtdb.europe-west1.firebasedatabase.app",
             projectId: "jotihunt-amalgama",
             storageBucket: "jotihunt-amalgama.firebasestorage.app",
-            messagingSenderId: "18674893357",
-            appId: "1:78674893357:web:83b77c3334bfea81deeb74",
-            measurementId: "G-Y8XKZXK38J"
+            messagingSenderId: "718674003357",
+            appId: "1:718674003357:web:83b77c3334b9ea010e5b74",
+            measurementId: "G-YBXKZPR30J"
         };
 
         firebase.initializeApp(firebaseConfig);
@@ -635,18 +635,20 @@
 
             Object.keys(data).forEach(function(key) {
                 var p = data[key];
-                var isOscar = (p.area === "Oscar");
-                var walkerMarker = createWalkerMarker(p.latlng, p.fullName, p.color, p.time, isOscar);
-                rdPointsLayer.addLayer(walkerMarker);
+                if (p && p.latlng && Array.isArray(p.latlng) && p.latlng.length === 2) {
+                    var isOscar = (p.area === "Oscar");
+                    var walkerMarker = createWalkerMarker(p.latlng, p.fullName || p.baseName || 'Punt', p.color || '#000000', p.time || '12:00', isOscar);
+                    rdPointsLayer.addLayer(walkerMarker);
 
-                if (p.area && rdPointsByArea[p.area]) {
-                    rdPointsByArea[p.area].push({
-                        latlng: p.latlng,
-                        time: p.time,
-                        baseName: p.baseName,
-                        firebaseKey: key,
-                        marker: walkerMarker
-                    });
+                    if (p.area && rdPointsByArea[p.area]) {
+                        rdPointsByArea[p.area].push({
+                            latlng: p.latlng,
+                            time: p.time,
+                            baseName: p.baseName,
+                            firebaseKey: key,
+                            marker: walkerMarker
+                        });
+                    }
                 }
             });
             updateRdRoutes();
@@ -709,7 +711,7 @@
                     
                     var newArea = parseTargetArea(rawAreaInput);
 
-                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 18000, 45000 OF 51.9851, 5.8987", "");
+                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 180000, 450000 OF 51.9851, 5.8987", "");
                     
                     var targetLatlng = [currentLatlng.lat, currentLatlng.lng];
 
@@ -725,19 +727,12 @@
                                 if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
                                     targetLatlng = [val1, val2];
                                 } else {
-                                    var xStr = val1Str.split('.')[0];
-                                    var yStr = val2Str.split('.')[0];
-                                    while (xStr.length < 6) { xStr += "0"; }
-                                    while (yStr.length < 6) { yStr += "0"; }
-                                    var x = parseFloat(xStr);
-                                    var y = parseFloat(yStr);
-
                                     try {
-                                        var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
+                                        var latLngArray = proj4("EPSG:28992", "EPSG:4326", [val1, val2]);
                                         targetLatlng = [latLngArray[1], latLngArray[0]];
                                     } catch (e) {
                                         console.error("Fout bij RD conversie:", e);
-                                        alert("Ongeldige RD coördinaten. Locatie blijft ongewijzigd.");
+                                        alert("Ongeldige coördinaten. Locatie blijft ongewijzigd.");
                                     }
                                 }
                             }
@@ -778,7 +773,7 @@
                 if (points.length < 2) continue;
 
                 points.sort(function(a, b) {
-                    return a.time.localeCompare(b.time);
+                    return (a.time || "").localeCompare(b.time || "");
                 });
 
                 var latLngs = points.map(function(p) { return p.latlng; });
@@ -814,7 +809,7 @@
             var name = prompt("Voer een naam in voor dit punt (bijv. Hint / Sighting):", "Punt");
             if (!name) return;
 
-            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 18000, 45000  OF  51.9851, 5.8987", "18000, 45000");
+            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 180000, 450000  OF  51.9851, 5.8987", "180000, 450000");
             if (!coordInput) return;
 
             var parts = coordInput.split(/[\s,;]+/);
@@ -839,17 +834,8 @@
             if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
                 latlng = [val1, val2];
             } else {
-                var xStr = val1Str.split('.')[0];
-                var yStr = val2Str.split('.')[0];
-
-                while (xStr.length < 6) { xStr += "0"; }
-                while (yStr.length < 6) { yStr += "0"; }
-
-                var x = parseFloat(xStr);
-                var y = parseFloat(yStr);
-
                 try {
-                    var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
+                    var latLngArray = proj4("EPSG:28992", "EPSG:4326", [val1, val2]);
                     latlng = [latLngArray[1], latLngArray[0]];
                 } catch (e) {
                     console.error("Fout bij RD conversie:", e);
@@ -888,9 +874,13 @@
                 area: areaKey,
                 fullName: fullName,
                 color: markerColor
+            }).then(function() {
+                console.log("Punt succesvol opgeslagen in Firebase!");
+                map.setView(latlng, 14);
+            }).catch(function(error) {
+                console.error("Fout bij opslaan in Firebase:", error);
+                alert("Kon het punt niet opslaan in de database.");
             });
-
-            map.setView(latlng, 14);
         }
 
         window.updateMarker = function(btn) {
