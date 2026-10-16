@@ -321,7 +321,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
     <script>
-        // Jouw bijgewerkte Firebase configuratie gekoppeld aan de juiste database
+        // Jouw Firebase configuratie
         var firebaseConfig = {
             apiKey: "AIzaSyDHNhlTRR0yr-6d_wOkmld1cInPLlxVM2o",
             authDomain: "jotihunt-amalgama.firebaseapp.com",
@@ -397,6 +397,43 @@
                 return area.toLowerCase() === cleanInput;
             });
             return matched || "";
+        }
+
+        // Hulpfunctie om zowel 4-cijferige als volledige RD coördinaten correct om te zetten naar 6 cijfers
+        function parseCoordInput(coordInput) {
+            var parts = coordInput.split(/[\s,;]+/);
+            if (parts.length < 2) return null;
+
+            var val1Str = parts[0].replace(',', '.');
+            var val2Str = parts[1].replace(',', '.');
+
+            var val1 = parseFloat(val1Str);
+            var val2 = parseFloat(val2Str);
+
+            if (isNaN(val1) || isNaN(val2)) return null;
+
+            // Als het GPS coördinaten zijn (Latitude/Longitude)
+            if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
+                return [val1, val2];
+            } else {
+                // RD coördinaten: vul aan met nullen tot 6 cijfers indien nodig (bijv. "1800" -> "180000")
+                var xStr = val1Str.split('.')[0];
+                var yStr = val2Str.split('.')[0];
+
+                while (xStr.length < 6) { xStr += "0"; }
+                while (yStr.length < 6) { yStr += "0"; }
+
+                var x = parseFloat(xStr);
+                var y = parseFloat(yStr);
+
+                try {
+                    var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
+                    return [latLngArray[1], latLngArray[0]];
+                } catch (e) {
+                    console.error("Fout bij RD conversie:", e);
+                    return null;
+                }
+            }
         }
 
         var rdPointsByArea = {
@@ -711,31 +748,16 @@
                     
                     var newArea = parseTargetArea(rawAreaInput);
 
-                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 180000, 450000 OF 51.9851, 5.8987", "");
+                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 1800, 4500 OF 51.9851, 5.8987", "");
                     
                     var targetLatlng = [currentLatlng.lat, currentLatlng.lng];
 
                     if (coordInput && coordInput.trim() !== "") {
-                        var parts = coordInput.split(/[\s,;]+/);
-                        if (parts.length >= 2) {
-                            var val1Str = parts[0].replace(',', '.');
-                            var val2Str = parts[1].replace(',', '.');
-                            var val1 = parseFloat(val1Str);
-                            var val2 = parseFloat(val2Str);
-
-                            if (!isNaN(val1) && !isNaN(val2)) {
-                                if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
-                                    targetLatlng = [val1, val2];
-                                } else {
-                                    try {
-                                        var latLngArray = proj4("EPSG:28992", "EPSG:4326", [val1, val2]);
-                                        targetLatlng = [latLngArray[1], latLngArray[0]];
-                                    } catch (e) {
-                                        console.error("Fout bij RD conversie:", e);
-                                        alert("Ongeldige coördinaten. Locatie blijft ongewijzigd.");
-                                    }
-                                }
-                            }
+                        var converted = parseCoordInput(coordInput);
+                        if (converted) {
+                            targetLatlng = converted;
+                        } else {
+                            alert("Ongeldige coördinaten. Locatie blijft ongewijzigd.");
                         }
                     }
 
@@ -809,39 +831,13 @@
             var name = prompt("Voer een naam in voor dit punt (bijv. Hint / Sighting):", "Punt");
             if (!name) return;
 
-            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 180000, 450000  OF  51.9851, 5.8987", "180000, 450000");
+            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
             if (!coordInput) return;
 
-            var parts = coordInput.split(/[\s,;]+/);
-            if (parts.length < 2) {
-                alert("Voer zowel de X/Lat als Y/Lng coördinaat in, gescheiden door een komma.");
-                return;
-            }
-
-            var val1Str = parts[0].replace(',', '.');
-            var val2Str = parts[1].replace(',', '.');
-
-            var val1 = parseFloat(val1Str);
-            var val2 = parseFloat(val2Str);
-
-            if (isNaN(val1) || isNaN(val2)) {
+            var latlng = parseCoordInput(coordInput);
+            if (!latlng) {
                 alert("Ongeldige coördinaten ingevoerd. Zorg dat je getallen gebruikt.");
                 return;
-            }
-
-            var latlng;
-
-            if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
-                latlng = [val1, val2];
-            } else {
-                try {
-                    var latLngArray = proj4("EPSG:28992", "EPSG:4326", [val1, val2]);
-                    latlng = [latLngArray[1], latLngArray[0]];
-                } catch (e) {
-                    console.error("Fout bij RD conversie:", e);
-                    alert("Er is een fout opgetreden bij het omrekenen van de RD coördinaten.");
-                    return;
-                }
             }
 
             var rawAreaInput = prompt("Koppel aan deelgebied (kies uit: Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor geen koppeling:", "");
