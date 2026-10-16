@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gelderland Scouting Kaart & Jotihunt Live</title>
+    <title>Scouting Amalgama Jotihunt app</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Leaflet Draw CSS -->
@@ -284,12 +284,17 @@
     <!-- Hoofdapplicatie -->
     <div id="app-container" style="display:none;">
         <div id="header">
-            <h1>Gelderland Kaart & Jotihunt</h1>
+            <h1>Scouting Amalgama Jotihunt app</h1>
             <div class="header-right">
                 <button class="header-btn" id="btn-fetch-latest" onclick="fetchLatestArticleManual()" style="display:none;" title="Laatste melding ophalen">🔔 Laatste</button>
                 <button class="header-btn" id="btn-add-rd" onclick="addMarkerByRD()" style="display:none;">+ RD</button>
                 <button class="header-btn" id="clear-rd-btn" onclick="clearRdPoints()" style="display:none;">Wis</button>
-                <div><span id="api-status" style="color: #2ecc71;">●</span></div>
+                <!-- Franse lelie icoon i.p.v. het stipje -->
+                <div title="API Verbonden" style="display: flex; align-items: center;">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="#2ecc71">
+                        <path d="M12 2C10.5 4.5 8 6 8 8.5c0 1.9 1.6 3.5 3.5 3.5h.5V15c-2 0-4 1.5-4 3.5 0 1.4 1.1 2.5 2.5 2.5h7c1.4 0 2.5-1.1 2.5-2.5 0-2-2-3.5-4-3.5v-3h.5c1.9 0 3.5-1.6 3.5-3.5C19 6 16.5 4.5 15 2c-1.5 2.5-3 3.5-3 6.5s-1.5-4-3-6.5zM11 17h2v3h-2v-3z"/>
+                    </svg>
+                </div>
             </div>
         </div>
 
@@ -398,7 +403,6 @@
             return matched || "";
         }
 
-        // Slimme coördinaten-parser die zowel GPS, 6-cijferig RD als verkorte RD (bijv. 4-cijferig zoals 1800, 4500) correct afhandelt
         function parseCoordInput(coordInput) {
             var parts = coordInput.split(/[\s,;]+/);
             if (parts.length < 2) return null;
@@ -411,33 +415,26 @@
 
             if (isNaN(val1) || isNaN(val2)) return null;
 
-            // Als het GPS coördinaten zijn (Latitude / Longitude)
             if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
                 return [val1, val2];
             } else {
-                // Het zijn RD coördinaten. Normaal zijn deze 6 cijfers (bijv. 180000, 450000).
-                // Als iemand kortere getallen invoert (bijv. 4 of 5 cijfers zoals 1800 of 18000), 
-                // schalen we ze correct op naar de echte RD-meters in Gelderland.
                 var xPart = val1Str.split('.')[0];
                 var yPart = val2Str.split('.')[0];
 
                 var x = parseFloat(xPart);
                 var y = parseFloat(yPart);
 
-                // Als het 4-cijferige getallen zijn (bijv. 1800, 4500), vermenigvuldigen met 100 om op meters uit te komen
                 if (xPart.length === 4) x = x * 100;
                 else if (xPart.length === 5) x = x * 10;
 
                 if (yPart.length === 4) y = y * 100;
                 else if (yPart.length === 5) y = y * 10;
 
-                // Als er na de correctie nog nullen ontbreken tot 6 cijfers, vullen we aan
                 while (x.toString().length < 6) { x = x * 10; }
                 while (y.toString().length < 6) { y = y * 10; }
 
                 try {
                     var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
-                    // Controleer of de resulterende lat/lng binnen of rondom Nederland valt
                     if (latLngArray[1] >= 50 && latLngArray[1] <= 54 && latLngArray[0] >= 3 && latLngArray[0] <= 8) {
                         return [latLngArray[1], latLngArray[0]];
                     }
@@ -761,7 +758,7 @@
                     
                     var newArea = parseTargetArea(rawAreaInput);
 
-                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 180000, 450000 OF 51.9851, 5.8987", "");
+                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 1800, 4500 OF 51.9851, 5.8987", "");
                     
                     var targetLatlng = [currentLatlng.lat, currentLatlng.lng];
 
@@ -844,7 +841,7 @@
             var name = prompt("Voer een naam in voor dit punt (bijv. Hint / Sighting):", "Punt");
             if (!name) return;
 
-            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 180000, 450000  OF  51.9851, 5.8987", "180000, 450000");
+            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
             if (!coordInput) return;
 
             var latlng = parseCoordInput(coordInput);
@@ -1020,13 +1017,10 @@
                                 }
                             });
                         }
-
-                        document.getElementById('api-status').style.color = "#2ecc71";
                     }
                 })
                 .catch(error => {
                     console.error("Fout bij ophalen artikelen:", error);
-                    document.getElementById('api-status').style.color = "#e74c3c";
                 });
 
             fetch('https://jotihunt.nl/api/2.0/areas')
