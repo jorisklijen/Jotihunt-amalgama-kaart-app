@@ -515,6 +515,9 @@
                 startBackgroundLiveTracking();
             }
 
+            // Start de centrale sync engine
+            initSyncEngine();
+
             setTimeout(function() {
                 map.invalidateSize();
                 checkZoomLevel();
@@ -1248,7 +1251,7 @@
         var disabledBlinks = {};
         function toggleBlink(teamName) {
             disabledBlinks[teamName] = !disabledBlinks[teamName];
-            fetchAreasData();
+            renderVossenFromCache(lastCachedAreas);
         }
 
         function getSafeProxyUrl(apiUrl) {
@@ -1256,103 +1259,119 @@
         }
 
         function fetchLatestArticleManual() {
-            fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/articles'))
-                .then(r => r.json())
-                .then(data => {
-                    if (data && data.data && data.data.length > 0) {
-                        var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
-                        var title = sorted[0].title || sorted[0].message || sorted[0].msg || 'Nieuw bericht';
-                        document.getElementById('notification-text').innerText = "🔔 Laatste: " + title;
-                        document.getElementById('notification-banner').style.display = 'flex';
-                    }
-                })
-                .catch(() => alert("Kon artikelen niet ophalen."));
+            db.ref('jotihuntSync/latestArticle').once('value', snapshot => {
+                var article = snapshot.val();
+                if (article) {
+                    var title = article.title || article.message || article.msg || 'Nieuw bericht';
+                    document.getElementById('notification-text').innerText = "🔔 Laatste: " + title;
+                    document.getElementById('notification-banner').style.display = 'flex';
+                } else {
+                    alert("Er is nog geen recent artikel gesynchroniseerd.");
+                }
+            });
         }
 
-        /* Gespreide calls via proxy om CORS en rate limits te waarborgen */
-        function fetchArticlesData() {
-            return fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/articles'))
-                .then(r => {
-                    if (r.status === 429) {
-                        document.getElementById('api-fleur-icon').setAttribute('fill', '#e67e22');
-                        return null;
-                    }
-                    return r.json();
-                })
-                .then(data => {
-                    if (data && data.data && data.data.length > 0) {
-                        var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
-                        var latestArticle = sorted[0];
-                        var lastSeenId = localStorage.getItem('jh_last_article_id');
+        /* ================= CENTRALE CACHE-SYNC (VIA FIREBASE) ================= */
+        var lastCachedAreas = null;
 
-                        if (!lastSeenId) {
-                            // Eerste keer: sla op en toon direct de meest actuele
-                            localStorage.setItem('jh_last_article_id', latestArticle.id);
-                            var title = latestArticle.title || latestArticle.message || 'Nieuw bericht';
-                            document.getElementById('notification-text').innerText = "🔔 Meest recent: " + title;
-                            document.getElementById('notification-banner').style.display = 'flex';
-                        } else if (parseInt(lastSeenId, 10) < latestArticle.id) {
-                            // Er is een nieuwer bericht gepubliceerd!
-                            localStorage.setItem('jh_last_article_id', latestArticle.id);
-                            var newTitle = latestArticle.title || latestArticle.message || 'Nieuw bericht';
-                            document.getElementById('notification-text').innerText = "🔔 Nieuw bericht: " + newTitle;
-                            document.getElementById('notification-banner').style.display = 'flex';
+        function renderVossenFromCache(areasData) {
+            if (!areasData) return;
+            lastCachedAreas = areasData;
+
+            var html = '';
+            targetAreas.forEach(targetName => {
+                var area = areasData.find(a => (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase()));
+                var rawStatus = area ? (area.status || '').toLowerCase().trim() : 'vervangen';
+                
+                var cls = 'status-vervangen';
+
+                if (rawStatus === 'inactief' || rawStatus.includes('red') || rawStatus.includes('gevangen') || rawStatus === 'caught' || rawStatus === 'jail') {
+                    cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
+                } else if (rawStatus.includes('rust') || rawStatus === 'pause' || rawStatus === 'resting' || rawStatus.includes('orange') || rawStatus.includes('yellow')) {
+                    cls = 'status-rust';
+                } else if (rawStatus.includes('actief') || rawStatus === 'active' || rawStatus === 'green' || rawStatus === 'field') {
+                    cls = 'status-actief';
+                }
+
+                html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')">${targetName}</div>`;
+            });
+            document.getElementById('vossen-list').innerHTML = html;
+        }
+
+        function initSyncEngine() {
+            // 1. IEDEREEN luistert via Firebase Realtime Database (0 calls naar Jotihunt API)
+            db.ref('jotihuntSync/areas').on('value', snapshot => {
+                var data = snapshot.val();
+                if (data) renderVossenFromCache(data);
+                document.getElementById('api-fleur-icon').setAttribute('fill', '#2ecc71');
+            });
+
+            db.ref('jotihuntSync/latestArticle').on('value', snapshot => {
+                var article = snapshot.val();
+                if (!article) return;
+
+                var lastSeenId = localStorage.getItem('jh_last_seen_article_id');
+                if (!lastSeenId) {
+                    localStorage.setItem('jh_last_seen_article_id', article.id);
+                    var title = article.title || article.message || 'Nieuw bericht';
+                    document.getElementById('notification-text').innerText = "🔔 Meest recent: " + title;
+                    document.getElementById('notification-banner').style.display = 'flex';
+                } else if (parseInt(lastSeenId, 10) < article.id) {
+                    localStorage.setItem('jh_last_seen_article_id', article.id);
+                    var newTitle = article.title || article.message || 'Nieuw bericht';
+                    document.getElementById('notification-text').innerText = "🔔 Nieuw bericht: " + newTitle;
+                    document.getElementById('notification-banner').style.display = 'flex';
+                }
+            });
+
+            // 2. Alleen de Admin (of fail-over) pollt Jotihunt en slaat het centraal op
+            setInterval(checkAndPerformApiSync, 25000);
+            checkAndPerformApiSync();
+        }
+
+        async function checkAndPerformApiSync() {
+            db.ref('jotihuntSync/lastSyncTimestamp').once('value', async snapshot => {
+                var lastSync = snapshot.val() || 0;
+                var now = Date.now();
+
+                // Admin sync altijd als er 20s voorbij zijn; gewone users alleen als fail-over na 90s inactiviteit
+                var shouldSync = isAdmin ? (now - lastSync > 20000) : (now - lastSync > 90000);
+
+                if (shouldSync) {
+                    try {
+                        // Markeer sync direct om gelijktijdige verzoeken te voorkomen
+                        db.ref('jotihuntSync/lastSyncTimestamp').set(now);
+
+                        // 1. Haal artikelen op
+                        var resArt = await fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/articles'));
+                        if (resArt.status === 429) {
+                            document.getElementById('api-fleur-icon').setAttribute('fill', '#e67e22');
+                            return;
+                        }
+                        var dataArt = await resArt.json();
+                        if (dataArt && dataArt.data && dataArt.data.length > 0) {
+                            var sorted = dataArt.data.sort((a,b) => (b.id||0) - (a.id||0));
+                            db.ref('jotihuntSync/latestArticle').set(sorted[0]);
                         }
 
-                        document.getElementById('api-fleur-icon').setAttribute('fill', '#2ecc71');
-                    }
-                }).catch(err => {
-                    console.warn("Artikelen ophaalfout:", err);
-                    document.getElementById('api-fleur-icon').setAttribute('fill', '#e74c3c');
-                });
-        }
-
-        function fetchAreasData() {
-            return fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/areas'))
-                .then(r => {
-                    if (r.status === 429) {
-                        document.getElementById('api-fleur-icon').setAttribute('fill', '#e67e22');
-                        return null;
-                    }
-                    return r.json();
-                })
-                .then(data => {
-                    if (data && data.data) {
-                        var html = '';
-                        targetAreas.forEach(targetName => {
-                            var area = data.data.find(a => (a.name||a.title||'').toLowerCase().includes(targetName.toLowerCase()));
-                            var rawStatus = area ? (area.status||'').toLowerCase().trim() : 'vervangen';
-                            
-                            var cls = 'status-vervangen';
-
-                            // 'inactief' / 'red' wordt nu EERST gecontroleerd om overlap met 'actief' te voorkomen
-                            if (rawStatus === 'inactief' || rawStatus.includes('red') || rawStatus.includes('gevangen') || rawStatus === 'caught' || rawStatus === 'jail') {
-                                cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
-                            } else if (rawStatus.includes('rust') || rawStatus === 'pause' || rawStatus === 'resting' || rawStatus.includes('orange') || rawStatus.includes('yellow')) {
-                                cls = 'status-rust';
-                            } else if (rawStatus.includes('actief') || rawStatus === 'active' || rawStatus === 'green' || rawStatus === 'field') {
-                                cls = 'status-actief';
+                        // 2. Haal deelgebieden op (met 3 sec interval ter spreiding)
+                        setTimeout(async () => {
+                            var resArea = await fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/areas'));
+                            if (resArea.ok) {
+                                var dataArea = await resArea.json();
+                                if (dataArea && dataArea.data) {
+                                    db.ref('jotihuntSync/areas').set(dataArea.data);
+                                }
                             }
+                        }, 3000);
 
-                            html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')">${targetName}</div>`;
-                        });
-                        document.getElementById('vossen-list').innerHTML = html;
+                    } catch (err) {
+                        console.warn("Centrale sync fout:", err);
+                        document.getElementById('api-fleur-icon').setAttribute('fill', '#e74c3c');
                     }
-                }).catch(err => {
-                    console.warn("Areas ophaalfout:", err);
-                });
+                }
+            });
         }
-
-        // Exacte cyclus van 20 seconden, netjes 3 seconden gespreid
-        async function runJotihuntSync() {
-            await fetchArticlesData();
-            setTimeout(async () => {
-                await fetchAreasData();
-            }, 3000);
-        }
-
-        runJotihuntSync();
-        setInterval(runJotihuntSync, 20000);
     </script>
 </body>
 </html>
