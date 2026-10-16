@@ -158,7 +158,7 @@
             transition: fill 0.3s;
         }
 
-        /* Notificatiebanner */
+        /* Notificatiebanner (Aanklikbaar naar Jotihunt.nl) */
         #notification-banner {
             background-color: #e74c3c;
             color: white;
@@ -172,6 +172,21 @@
             font-size: 13px;
             width: 100%;
             box-sizing: border-box;
+        }
+        #notification-link {
+            color: white;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-grow: 1;
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #notification-link:hover {
+            text-decoration: underline;
         }
 
         #map-wrapper {
@@ -371,9 +386,13 @@
             </div>
         </div>
 
+        <!-- Notificatiebanner met directe link naar Jotihunt.nl -->
         <div id="notification-banner">
-            <span id="notification-text">🔔 Nieuw bericht!</span>
-            <button onclick="document.getElementById('notification-banner').style.display='none'" style="background: white; color: #e74c3c; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-weight: bold;">✕</button>
+            <a id="notification-link" href="https://jotihunt.nl/" target="_blank" rel="noopener noreferrer" title="Klik om naar Jotihunt.nl te gaan">
+                <span id="notification-text">🔔 Nieuw bericht!</span>
+                <span style="font-size: 11px; opacity: 0.85; text-decoration: underline;">(Bekijk op Jotihunt.nl ↗)</span>
+            </a>
+            <button onclick="document.getElementById('notification-banner').style.display='none'" style="background: white; color: #e74c3c; border: none; padding: 2px 7px; border-radius: 3px; cursor: pointer; font-weight: bold; margin-left: 10px;">✕</button>
         </div>
         
         <div id="map-wrapper">
@@ -470,9 +489,6 @@
         function logout() {
             localStorage.removeItem('jh_auth_role');
             localStorage.removeItem('jh_auth_name');
-            if (currentUserId) {
-                db.ref('liveUsers/' + currentUserId).remove();
-            }
             stopLiveTracking();
             location.reload();
         }
@@ -515,7 +531,6 @@
                 startBackgroundLiveTracking();
             }
 
-            // Start de centrale sync engine
             initSyncEngine();
 
             setTimeout(function() {
@@ -524,8 +539,7 @@
             }, 100);
         }
 
-        /* ================= GPS BACKGROUND TRACKING (ELKE 20 SEC) ================= */
-        var watchId = null;
+        /* ================= GPS TRACKING (ELKE 20 SEC) ================= */
         var wakeLock = null;
         var workerTimer = null;
         var intervalTimer = null;
@@ -831,7 +845,7 @@
             return marker;
         }
 
-        /* ================= LIVE GEBRUIKERS WEERGAVE ================= */
+        /* ================= LIVE GEBRUIKERS (BLIJVEN ALTIJD ZICHTBAAR) ================= */
         function createUserIcon(isActive) {
             var fillColor = isActive ? "#2ecc71" : "#7f8c8d";
             var strokeColor = isActive ? "#ffffff" : "#e74c3c";
@@ -850,6 +864,15 @@
             });
         }
 
+        function formatTimeAgo(diffMs) {
+            var minutes = Math.floor(diffMs / 60000);
+            if (minutes <= 0) return "Zojuist";
+            if (minutes < 60) return minutes + "m geleden";
+            var hours = Math.floor(minutes / 60);
+            var remainingMin = minutes % 60;
+            return hours + "u " + (remainingMin > 0 ? remainingMin + "m " : "") + "geleden";
+        }
+
         db.ref('liveUsers').on('value', function(snapshot) {
             var users = snapshot.val();
             var now = Date.now();
@@ -864,21 +887,14 @@
                 var u = users[userId];
                 if (!u || !u.lat || !u.lng) return;
 
-                if (now - (u.lastSeen || 0) > 20 * 60 * 1000) {
-                    if (liveUserMarkers[userId]) {
-                        usersLiveLayer.removeLayer(liveUserMarkers[userId]);
-                        delete liveUserMarkers[userId];
-                    }
-                    return;
-                }
-
-                var isActive = (now - (u.lastSeen || 0)) <= (3 * 60 * 1000);
-                var minutesAgo = Math.floor((now - u.lastSeen) / 60000);
-                var timeAgoText = minutesAgo <= 0 ? "Zojuist" : minutesAgo + "m geleden";
+                // De marker verdwijnt nooit: actieve status binnen 3 min, anders inactief
+                var diff = now - (u.lastSeen || 0);
+                var isActive = diff <= (3 * 60 * 1000);
+                var timeAgoText = formatTimeAgo(diff);
 
                 var icon = createUserIcon(isActive);
                 var labelClass = isActive ? 'user-gps-label-active' : 'user-gps-label-inactive';
-                var statusText = isActive ? '<span style="color:#2ecc71; font-weight:bold;">● Actief</span>' : '<span style="color:#e74c3c; font-weight:bold;">● Inactief</span>';
+                var statusText = isActive ? '<span style="color:#2ecc71; font-weight:bold;">● Actief</span>' : '<span style="color:#e74c3c; font-weight:bold;">● Laatst bekende positie</span>';
 
                 var googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${u.lat},${u.lng}`;
 
@@ -1271,7 +1287,7 @@
             });
         }
 
-        /* ================= CENTRALE CACHE-SYNC (VIA FIREBASE) ================= */
+        /* ================= CENTRALE CACHE-SYNC (ADMIN MASTER -> FIREBASE) ================= */
         var lastCachedAreas = null;
 
         function renderVossenFromCache(areasData) {
@@ -1299,32 +1315,24 @@
         }
 
         function initSyncEngine() {
-            // 1. IEDEREEN luistert via Firebase Realtime Database (0 calls naar Jotihunt API)
+            // 1. Zowel Admin als alle Hunters luisteren naar Firebase (geen API calls voor hunters)
             db.ref('jotihuntSync/areas').on('value', snapshot => {
                 var data = snapshot.val();
                 if (data) renderVossenFromCache(data);
                 document.getElementById('api-fleur-icon').setAttribute('fill', '#2ecc71');
             });
 
+            // Toont het meest recente bericht direct voor IEDEREEN
             db.ref('jotihuntSync/latestArticle').on('value', snapshot => {
                 var article = snapshot.val();
                 if (!article) return;
 
-                var lastSeenId = localStorage.getItem('jh_last_seen_article_id');
-                if (!lastSeenId) {
-                    localStorage.setItem('jh_last_seen_article_id', article.id);
-                    var title = article.title || article.message || 'Nieuw bericht';
-                    document.getElementById('notification-text').innerText = "🔔 Meest recent: " + title;
-                    document.getElementById('notification-banner').style.display = 'flex';
-                } else if (parseInt(lastSeenId, 10) < article.id) {
-                    localStorage.setItem('jh_last_seen_article_id', article.id);
-                    var newTitle = article.title || article.message || 'Nieuw bericht';
-                    document.getElementById('notification-text').innerText = "🔔 Nieuw bericht: " + newTitle;
-                    document.getElementById('notification-banner').style.display = 'flex';
-                }
+                var title = article.title || article.message || article.msg || 'Nieuw bericht';
+                document.getElementById('notification-text').innerText = "🔔 Meest recent: " + title;
+                document.getElementById('notification-banner').style.display = 'flex';
             });
 
-            // 2. Alleen de Admin (of fail-over) pollt Jotihunt en slaat het centraal op
+            // 2. Alleen Admin pollt Jotihunt via proxy; hunters fungeren als fail-over na inactiviteit
             setInterval(checkAndPerformApiSync, 25000);
             checkAndPerformApiSync();
         }
@@ -1334,15 +1342,12 @@
                 var lastSync = snapshot.val() || 0;
                 var now = Date.now();
 
-                // Admin sync altijd als er 20s voorbij zijn; gewone users alleen als fail-over na 90s inactiviteit
                 var shouldSync = isAdmin ? (now - lastSync > 20000) : (now - lastSync > 90000);
 
                 if (shouldSync) {
                     try {
-                        // Markeer sync direct om gelijktijdige verzoeken te voorkomen
                         db.ref('jotihuntSync/lastSyncTimestamp').set(now);
 
-                        // 1. Haal artikelen op
                         var resArt = await fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/articles'));
                         if (resArt.status === 429) {
                             document.getElementById('api-fleur-icon').setAttribute('fill', '#e67e22');
@@ -1354,7 +1359,6 @@
                             db.ref('jotihuntSync/latestArticle').set(sorted[0]);
                         }
 
-                        // 2. Haal deelgebieden op (met 3 sec interval ter spreiding)
                         setTimeout(async () => {
                             var resArea = await fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/areas'));
                             if (resArea.ok) {
