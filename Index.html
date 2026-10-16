@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gelderland Scouting Kaart & Jotihunt Live</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet Draw CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <!-- Proj4js voor RD naar GPS coördinaten conversie -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            background-color: #1a252f;
+        }
+
+        /* Inlogscherm overlay */
+        #auth-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #1a252f;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 99999;
+            color: white;
+        }
+        #auth-box {
+            background: #2c3e50;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            text-align: center;
+            width: 300px;
+        }
+        #auth-box h2 {
+            margin-top: 0;
+            font-size: 20px;
+            margin-bottom: 15px;
+        }
+        #auth-box input {
+            width: 80%;
+            padding: 10px;
+            font-size: 16px;
+            text-align: center;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            outline: none;
+        }
+        #auth-box button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+        }
+        #auth-box button:hover {
+            background-color: #2980b9;
+        }
+        #auth-error {
+            color: #e74c3c;
+            font-size: 13px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        /* Hoofdinterface */
+        #app-container {
+            display: none;
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #header {
+            height: 60px;
+            min-height: 60px;
+            background-color: #2c3e50;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 2001;
+        }
+        #header h1 {
+            margin: 0;
+            font-size: 15px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+        }
+        .header-btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        .header-btn:hover {
+            background-color: #2980b9;
+        }
+        #btn-fetch-latest {
+            background-color: #e67e22;
+        }
+        #btn-fetch-latest:hover {
+            background-color: #d35400;
+        }
+        #clear-rd-btn {
+            background-color: #e74c3c;
+        }
+        #clear-rd-btn:hover {
+            background-color: #c0392b;
+        }
+
+        /* Notificatiebanner net onder de header */
+        #notification-banner {
+            background-color: #e74c3c;
+            color: white;
+            padding: 10px 15px;
+            font-weight: bold;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            z-index: 2000;
+            font-size: 13px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        #map-wrapper {
+            position: relative;
+            flex-grow: 1;
+            width: 100%;
+            height: 100%;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Vossen status paneel gepositioneerd onder de header/banner */
+        #vossen-status-panel {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            z-index: 2000;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            width: 150px;
+            max-width: 45vw;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            user-select: none;
+            touch-action: none;
+        }
+        #vossen-status-header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 8px 10px;
+            font-weight: bold;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: move;
+        }
+        #vossen-status-header button {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        #vossen-list {
+            padding: 4px;
+            max-height: 50vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .vogel-status-item {
+            padding: 6px 8px;
+            margin: 4px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        /* Status kleuren */
+        .status-actief { background-color: #d4efdf; color: #27ae60; border: 1px solid #2ecc71; }
+        .status-gevangen { background-color: #fadbd8; color: #c0392b; border: 1px solid #e74c3c; }
+        .status-rust { background-color: #fcf3cf; color: #b7950b; border: 1px solid #f1c40f; }
+        .status-vervangen { background-color: #ebedef; color: #7f8c8d; border: 1px solid #bdc3c7; }
+
+        @keyframes softBlink {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+        .knipperen {
+            animation: softBlink 1.5s infinite ease-in-out;
+        }
+
+        .route-line {
+            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
+        }
+
+        .marker-label {
+            background: white;
+            border: 1px solid #777;
+            padding: 2px 6px;
+            font-weight: bold;
+            font-size: 11px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            display: none;
+        }
+        .zoom-in-to-show .marker-label {
+            display: block;
+        }
+        .popup-content {
+            text-align: center;
+        }
+        .popup-content input[type="color"] {
+            border: none;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            vertical-align: middle;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Inlogscherm -->
+    <div id="auth-overlay">
+        <div id="auth-box">
+            <h2>Voer Pincode in</h2>
+            <input type="password" id="pin-input" placeholder="Pincode" maxlength="4" autofocus>
+            <button onclick="checkPin()">Inloggen</button>
+            <div id="auth-error">Onjuiste pincode</div>
+        </div>
+    </div>
+
+    <!-- Hoofdapplicatie -->
+    <div id="app-container" style="display:none;">
+        <div id="header">
+            <h1>Gelderland Kaart & Jotihunt</h1>
+            <div class="header-right">
+                <button class="header-btn" id="btn-fetch-latest" onclick="fetchLatestArticleManual()" style="display:none;" title="Laatste melding ophalen">🔔 Laatste</button>
+                <button class="header-btn" id="btn-add-rd" onclick="addMarkerByRD()" style="display:none;">+ RD</button>
+                <button class="header-btn" id="clear-rd-btn" onclick="clearRdPoints()" style="display:none;">Wis</button>
+                <div><span id="api-status" style="color: #2ecc71;">●</span></div>
+            </div>
+        </div>
+
+        <div id="notification-banner">
+            <span id="notification-text">🔔 Nieuw bericht!</span>
+            <button onclick="document.getElementById('notification-banner').style.display='none'" style="background: white; color: #e74c3c; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-weight: bold;">✕</button>
+        </div>
+        
+        <div id="map-wrapper">
+            <div id="vossen-status-panel">
+                <div id="vossen-status-header">
+                    <span id="vossen-title">Vossen</span>
+                    <button id="minimize-btn" onclick="toggleVossenPanel()" title="Minimaliseren">-</button>
+                </div>
+                <div id="vossen-list">
+                    <div class="vogel-status-item">Laden...</div>
+                </div>
+            </div>
+
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+
+    <!-- Firebase SDK (Compat v10) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
+    <script>
+        // Jouw Firebase configuratie is hier direct ingevuld!
+        var firebaseConfig = {
+            apiKey: "AIzaSyDNHhLTR80yz-6d_wOkmid1cINPIlsVM2o",
+            authDomain: "jotihunt-amalgama.firebaseapp.com",
+            databaseURL: "https://jotihunt-amalgama-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "jotihunt-amalgama",
+            storageBucket: "jotihunt-amalgama.firebasestorage.app",
+            messagingSenderId: "18674893357",
+            appId: "1:78674893357:web:83b77c3334bfea81deeb74",
+            measurementId: "G-Y8XKZXK38J"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        var db = firebase.database();
+
+        var isAdmin = false;
+
+        function checkPin() {
+            var pin = document.getElementById('pin-input').value.trim();
+            var errorDiv = document.getElementById('auth-error');
+
+            if (pin === "1111") {
+                isAdmin = false;
+                initApp();
+            } else if (pin === "6546") {
+                isAdmin = true;
+                initApp();
+            } else {
+                errorDiv.style.display = 'block';
+                document.getElementById('pin-input').value = '';
+            }
+        }
+
+        document.getElementById('pin-input').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                checkPin();
+            }
+        });
+
+        function initApp() {
+            document.getElementById('auth-overlay').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+
+            if (isAdmin) {
+                document.getElementById('btn-fetch-latest').style.display = 'inline-block';
+                document.getElementById('btn-add-rd').style.display = 'inline-block';
+                document.getElementById('clear-rd-btn').style.display = 'inline-block';
+            }
+
+            setTimeout(function() {
+                map.invalidateSize();
+            }, 100);
+        }
+
+        proj4.defs("EPSG:28992", "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.387638888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.417,50.3319,465.524,-0.398957,0.343988,-1.8774,4.0725 +units=m +no_defs");
+        proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+        var targetAreas = ["Alpha", "Bravo", "Delta", "Foxtrot", "Golf", "Hotel", "Oscar"];
+        
+        var areaColors = {
+            "Alpha": "#e74c3c",   // Rood
+            "Bravo": "#f1c40f",   // Geel
+            "Delta": "#2ecc71",   // Groen
+            "Foxtrot": "#3498db", // Blauw
+            "Golf": "#ff69b4",    // Roze
+            "Hotel": "#e67e22",   // Oranje
+            "Oscar": "#f1c40f"    // NS Geel
+        };
+
+        function parseTargetArea(input) {
+            if (!input) return "";
+            var cleanInput = input.trim().toLowerCase();
+            var matched = targetAreas.find(function(area) {
+                return area.toLowerCase() === cleanInput;
+            });
+            return matched || "";
+        }
+
+        var rdPointsByArea = {
+            "Alpha": [],
+            "Bravo": [],
+            "Delta": [],
+            "Foxtrot": [],
+            "Golf": [],
+            "Hotel": [],
+            "Oscar": []
+        };
+
+        var disabledBlinks = {};
+
+        function toggleBlink(teamName) {
+            disabledBlinks[teamName] = !disabledBlinks[teamName];
+            fetchJotihuntData();
+        }
+
+        function fetchLatestArticleManual() {
+            fetch('https://jotihunt.nl/api/2.0/articles')
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
+                        var sortedArticles = data.data.sort(function(a, b) {
+                            return (b.id || 0) - (a.id || 0);
+                        });
+                        var latest = sortedArticles[0];
+                        document.getElementById('notification-text').innerText = "🔔 Laatste bericht: " + (latest.title || 'Geen titel');
+                        document.getElementById('notification-banner').style.display = 'flex';
+                        setTimeout(function() { map.invalidateSize(); }, 50);
+                    } else {
+                        alert("Geen artikelen gevonden in de API.");
+                    }
+                })
+                .catch(error => {
+                    console.error("Fout bij handmatig ophalen laatste artikel:", error);
+                    alert("Kon geen verbinding maken met de Jotihunt API.");
+                });
+        }
+
+        var panel = document.getElementById('vossen-status-panel');
+        var header = document.getElementById('vossen-status-header');
+        var isDragging = false;
+        var startX, startY;
+
+        header.addEventListener('mousedown', function(e) {
+            if (e.target.tagName === 'BUTTON') return;
+            isDragging = true;
+            startX = e.clientX - panel.offsetLeft;
+            startY = e.clientY - panel.offsetTop;
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+
+        header.addEventListener('touchstart', function(e) {
+            if (e.target.tagName === 'BUTTON') return;
+            isDragging = true;
+            var touch = e.touches[0];
+            startX = touch.clientX - panel.offsetLeft;
+            startY = touch.clientY - panel.offsetTop;
+            document.addEventListener('touchmove', onTouchMove);
+            document.addEventListener('touchend', onTouchEnd);
+        });
+
+        function onMouseMove(e) {
+            if (!isDragging) return;
+            movePanel(e.clientX, e.clientY);
+        }
+
+        function onTouchMove(e) {
+            if (!isDragging) return;
+            var touch = e.touches[0];
+            movePanel(touch.clientX, touch.clientY);
+        }
+
+        function movePanel(clientX, clientY) {
+            var newX = clientX - startX;
+            var newY = clientY - startY;
+            var maxX = window.innerWidth - panel.offsetWidth;
+            var maxY = document.getElementById('map-wrapper').clientHeight - panel.offsetHeight;
+
+            newX = Math.max(0, Math.min(newX, maxX));
+            newY = Math.max(0, Math.min(newY, maxY));
+
+            panel.style.left = newX + 'px';
+            panel.style.top = newY + 'px';
+            panel.style.right = 'auto';
+        }
+
+        function onMouseUp() {
+            isDragging = false;
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+
+        function onTouchEnd() {
+            isDragging = false;
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', onTouchEnd);
+        }
+
+        function toggleVossenPanel() {
+            var list = document.getElementById('vossen-list');
+            var btn = document.getElementById('minimize-btn');
+            if (list.style.display === 'none') {
+                list.style.display = 'block';
+                btn.innerText = '-';
+            } else {
+                list.style.display = 'none';
+                btn.innerText = '+';
+            }
+        }
+
+        var map = L.map('map').setView([51.9851, 5.8987], 10);
+
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
+
+        function checkZoomLevel() {
+            var currentZoom = map.getZoom();
+            var mapContainer = document.getElementById('map');
+            if (currentZoom >= 12) {
+                mapContainer.classList.add('zoom-in-to-show');
+            } else {
+                mapContainer.classList.remove('zoom-in-to-show');
+            }
+        }
+        map.on('zoomend', checkZoomLevel);
+
+        var fixedHouseLayer = new L.FeatureGroup().addTo(map);
+        var drawnItems = new L.FeatureGroup().addTo(map);
+        var rdPointsLayer = new L.FeatureGroup().addTo(map);
+        var rdRouteLayer = new L.FeatureGroup().addTo(map);
+
+        function setupDrawTools() {
+            if (isAdmin) {
+                var drawControl = new L.Control.Draw({
+                    edit: {
+                        featureGroup: drawnItems,
+                        remove: true
+                    },
+                    draw: {
+                        polygon: false,
+                        rectangle: false,
+                        circle: false,
+                        circlemarker: false,
+                        marker: true,
+                        polyline: {
+                            shapeOptions: { 
+                                color: '#000000', 
+                                weight: 4,
+                                className: 'route-line'
+                            }
+                        }
+                    }
+                });
+                map.addControl(drawControl);
+            }
+        }
+
+        function createHouseMarker(latlng, name, color, isOscar = false) {
+            var strokeColor = isOscar ? "#003399" : "#000000";
+            var houseSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" fill="${color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1}" filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.4))">
+                <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
+            </svg>`;
+
+            var customIcon = L.divIcon({
+                className: 'custom-house-pin',
+                html: houseSvg,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14],
+                popupAnchor: [0, -14]
+            });
+
+            var marker = L.marker(latlng, { icon: customIcon });
+            marker.bindTooltip(name, { permanent: true, direction: 'right', className: 'marker-label' });
+
+            var popupContent = `
+                <div class="popup-content">
+                    <b>Naam:</b> ${isAdmin ? `<input type="text" id="popup-name" value="${name}" style="width: 140px; margin-bottom: 5px;"><br>` : name}<br>
+                    <b>Kleur:</b> ${isAdmin ? `<input type="color" id="popup-color" value="${color}"><br>` : ''}
+                    ${isAdmin ? `<button onclick="window.updateMarker(this)" style="background: #2ecc71; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; margin-top: 5px;">Opslaan</button>` : ''}
+                </div>
+            `;
+            marker.bindPopup(popupContent);
+            return marker;
+        }
+
+        function createWalkerMarker(latlng, name, color, timeStr, isOscar = false) {
+            var strokeColor = isOscar ? "#003399" : "#000000";
+            var walkerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30" fill="${color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1.5}" filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.4))">
+                <path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.2L6 8.3V13h2V9.6l1.8-.7z"/>
+            </svg>`;
+
+            var customIcon = L.divIcon({
+                className: 'custom-walker-pin',
+                html: walkerSvg,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15],
+                popupAnchor: [0, -15]
+            });
+
+            var marker = L.marker(latlng, { icon: customIcon });
+            marker.bindTooltip(name + " (" + timeStr + ")", { permanent: true, direction: 'right', className: 'marker-label' });
+
+            var popupContent = `
+                <div class="popup-content">
+                    <b>${name}</b><br>
+                    <span style="font-size: 12px; color: #2c3e50; font-weight: bold;">Tijd: ${timeStr}</span><br>
+                    ${isAdmin ? `
+                        <div style="margin-top: 8px; border-top: 1px solid #ddd; padding-top: 5px;">
+                            <button onclick="window.editRdPoint(this)" title="Bewerk punt" style="background: #f39c12; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">✏️ Bewerk</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            marker.bindPopup(popupContent);
+            return marker;
+        }
+
+        // Firebase Realtime Sync Luisteraars
+        db.ref('rdPoints').on('value', function(snapshot) {
+            rdPointsLayer.clearLayers();
+            for (var area in rdPointsByArea) {
+                rdPointsByArea[area] = [];
+            }
+
+            var data = snapshot.val();
+            if (!data) {
+                updateRdRoutes();
+                return;
+            }
+
+            Object.keys(data).forEach(function(key) {
+                var p = data[key];
+                var isOscar = (p.area === "Oscar");
+                var walkerMarker = createWalkerMarker(p.latlng, p.fullName, p.color, p.time, isOscar);
+                rdPointsLayer.addLayer(walkerMarker);
+
+                if (p.area && rdPointsByArea[p.area]) {
+                    rdPointsByArea[p.area].push({
+                        latlng: p.latlng,
+                        time: p.time,
+                        baseName: p.baseName,
+                        firebaseKey: key,
+                        marker: walkerMarker
+                    });
+                }
+            });
+            updateRdRoutes();
+        });
+
+        db.ref('drawnItems').on('value', function(snapshot) {
+            drawnItems.clearLayers();
+            var data = snapshot.val();
+            if (!data) return;
+
+            Object.keys(data).forEach(function(key) {
+                var item = data[key];
+                if (item.type === 'marker') {
+                    var isOscar = item.name.includes("[Oscar]");
+                    var m = createHouseMarker(item.latlng, item.name, item.color, isOscar);
+                    drawnItems.addLayer(m);
+                } else if (item.type === 'polyline') {
+                    var pl = L.polyline(item.latlngs, {
+                        color: item.color,
+                        weight: 4,
+                        className: 'route-line'
+                    });
+                    pl.bindTooltip(item.name, { permanent: true, direction: 'center', className: 'marker-label' });
+                    pl.bindPopup("<b>" + item.name + "</b>");
+                    drawnItems.addLayer(pl);
+                }
+            });
+        });
+
+        window.editRdPoint = function(btn) {
+            if (!isAdmin) return;
+            
+            rdPointsLayer.eachLayer(function(layer) {
+                if (layer.getPopup() && layer.getPopup().getElement() && layer.getPopup().getElement().contains(btn)) {
+                    var currentLatlng = layer.getLatLng();
+
+                    var foundArea = "";
+                    var foundObj = null;
+                    for (var area in rdPointsByArea) {
+                        var idx = rdPointsByArea[area].findIndex(p => p.marker === layer);
+                        if (idx !== -1) {
+                            foundArea = area;
+                            foundObj = rdPointsByArea[area][idx];
+                            break;
+                        }
+                    }
+
+                    var currentBaseName = foundObj ? foundObj.baseName : "Punt";
+                    var currentTime = foundObj ? foundObj.time : "12:00";
+                    var firebaseKey = foundObj ? foundObj.firebaseKey : null;
+
+                    var newName = prompt("Bewerk naam voor dit punt:", currentBaseName);
+                    if (newName === null) return;
+
+                    var newTime = prompt("Bewerk tijdstip (UU:MM):", currentTime);
+                    if (!newTime) newTime = currentTime;
+
+                    var rawAreaInput = prompt("Koppel aan deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar):\nLaat leeg voor geen koppeling", foundArea);
+                    if (rawAreaInput === null) rawAreaInput = foundArea;
+                    
+                    var newArea = parseTargetArea(rawAreaInput);
+
+                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 18000, 45000 OF 51.9851, 5.8987", "");
+                    
+                    var targetLatlng = [currentLatlng.lat, currentLatlng.lng];
+
+                    if (coordInput && coordInput.trim() !== "") {
+                        var parts = coordInput.split(/[\s,;]+/);
+                        if (parts.length >= 2) {
+                            var val1Str = parts[0].replace(',', '.');
+                            var val2Str = parts[1].replace(',', '.');
+                            var val1 = parseFloat(val1Str);
+                            var val2 = parseFloat(val2Str);
+
+                            if (!isNaN(val1) && !isNaN(val2)) {
+                                if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
+                                    targetLatlng = [val1, val2];
+                                } else {
+                                    var xStr = val1Str.split('.')[0];
+                                    var yStr = val2Str.split('.')[0];
+                                    while (xStr.length < 6) { xStr += "0"; }
+                                    while (yStr.length < 6) { yStr += "0"; }
+                                    var x = parseFloat(xStr);
+                                    var y = parseFloat(yStr);
+
+                                    try {
+                                        var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
+                                        targetLatlng = [latLngArray[1], latLngArray[0]];
+                                    } catch (e) {
+                                        console.error("Fout bij RD conversie:", e);
+                                        alert("Ongeldige RD coördinaten. Locatie blijft ongewijzigd.");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    var markerColor = "#000000";
+                    var areaSuffix = "";
+
+                    if (newArea && areaColors[newArea]) {
+                        markerColor = areaColors[newArea];
+                        areaSuffix = " [" + newArea + "]";
+                    } else {
+                        newArea = "";
+                    }
+
+                    var fullName = newName + areaSuffix;
+
+                    if (firebaseKey) {
+                        db.ref('rdPoints/' + firebaseKey).set({
+                            latlng: targetLatlng,
+                            time: newTime,
+                            baseName: newName,
+                            area: newArea,
+                            fullName: fullName,
+                            color: markerColor
+                        });
+                    }
+                }
+            });
+        };
+
+        function updateRdRoutes() {
+            rdRouteLayer.clearLayers();
+
+            for (var area in rdPointsByArea) {
+                var points = rdPointsByArea[area];
+                if (points.length < 2) continue;
+
+                points.sort(function(a, b) {
+                    return a.time.localeCompare(b.time);
+                });
+
+                var latLngs = points.map(function(p) { return p.latlng; });
+                var lineColor = (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000");
+
+                var polyline = L.polyline(latLngs, {
+                    color: lineColor,
+                    weight: 4,
+                    className: 'route-line'
+                });
+
+                polyline.bindPopup("<b>Chronologische route: " + area + "</b>");
+                rdRouteLayer.addLayer(polyline);
+            }
+        }
+
+        function clearRdPoints() {
+            if (!isAdmin) return;
+            var pinInput = prompt("Voer de pincode in om de RD-lijnen te wissen:", "");
+            if (pinInput === null) return;
+
+            if (pinInput.trim() === "6546") {
+                db.ref('rdPoints').remove().then(function() {
+                    alert("RD-punten en tijdlijnen zijn succesvol gewist voor iedereen.");
+                });
+            } else {
+                alert("Onjuiste pincode! Het wissen is geannuleerd.");
+            }
+        }
+
+        function addMarkerByRD() {
+            if (!isAdmin) return;
+            var name = prompt("Voer een naam in voor dit punt (bijv. Hint / Sighting):", "Punt");
+            if (!name) return;
+
+            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 18000, 45000  OF  51.9851, 5.8987", "18000, 45000");
+            if (!coordInput) return;
+
+            var parts = coordInput.split(/[\s,;]+/);
+            if (parts.length < 2) {
+                alert("Voer zowel de X/Lat als Y/Lng coördinaat in, gescheiden door een komma.");
+                return;
+            }
+
+            var val1Str = parts[0].replace(',', '.');
+            var val2Str = parts[1].replace(',', '.');
+
+            var val1 = parseFloat(val1Str);
+            var val2 = parseFloat(val2Str);
+
+            if (isNaN(val1) || isNaN(val2)) {
+                alert("Ongeldige coördinaten ingevoerd. Zorg dat je getallen gebruikt.");
+                return;
+            }
+
+            var latlng;
+
+            if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
+                latlng = [val1, val2];
+            } else {
+                var xStr = val1Str.split('.')[0];
+                var yStr = val2Str.split('.')[0];
+
+                while (xStr.length < 6) { xStr += "0"; }
+                while (yStr.length < 6) { yStr += "0"; }
+
+                var x = parseFloat(xStr);
+                var y = parseFloat(yStr);
+
+                try {
+                    var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
+                    latlng = [latLngArray[1], latLngArray[0]];
+                } catch (e) {
+                    console.error("Fout bij RD conversie:", e);
+                    alert("Er is een fout opgetreden bij het omrekenen van de RD coördinaten.");
+                    return;
+                }
+            }
+
+            var rawAreaInput = prompt("Koppel aan deelgebied (kies uit: Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor geen koppeling:", "");
+            var chosenArea = parseTargetArea(rawAreaInput);
+
+            var markerColor = "#000000";
+            var areaKey = "";
+            var areaSuffix = "";
+
+            if (chosenArea && areaColors[chosenArea]) {
+                areaKey = chosenArea;
+                markerColor = areaColors[areaKey];
+                areaSuffix = " [" + areaKey + "]";
+            }
+
+            var now = new Date();
+            var hours = String(now.getHours()).padStart(2, '0');
+            var minutes = String(now.getMinutes()).padStart(2, '0');
+            var defaultTime = hours + ":" + minutes;
+
+            var timeInput = prompt("Voer het tijdstip in (UU:MM):", defaultTime);
+            if (!timeInput) timeInput = defaultTime;
+
+            var fullName = name + areaSuffix;
+
+            db.ref('rdPoints').push({
+                latlng: latlng,
+                time: timeInput,
+                baseName: name,
+                area: areaKey,
+                fullName: fullName,
+                color: markerColor
+            });
+
+            map.setView(latlng, 14);
+        }
+
+        window.updateMarker = function(btn) {
+            if (!isAdmin) return;
+            var popupDiv = btn.closest('.leaflet-popup-content');
+            [fixedHouseLayer, drawnItems, rdPointsLayer].forEach(function(group) {
+                group.eachLayer(function(layer) {
+                    if (layer.getPopup() && layer.getPopup().getElement() && layer.getPopup().getElement().contains(btn)) {
+                        var nameInput = popupDiv.querySelector('input[type="text"]');
+                        var colorInput = popupDiv.querySelector('input[type="color"]');
+                        if (nameInput && colorInput) {
+                            var latlng = layer.getLatLng();
+                            group.removeLayer(layer);
+                            var newMarker = createHouseMarker(latlng, nameInput.value, colorInput.value);
+                            group.addLayer(newMarker);
+                            newMarker.openPopup();
+                        }
+                    }
+                });
+            });
+        };
+
+        var allLocations = [
+            {name: "André de Thaye en Lido'76", area: "Golf", lat: 51.98140, lng: 5.93388},
+            {name: "Clan MacCastor", area: "Foxtrot", lat: 51.80907, lng: 5.78972},
+            {name: "De cløns van Gænderålde", area: "Hotel", lat: 51.93800, lng: 6.34731},
+            {name: "De Geuzen Arnhem", area: "Golf", lat: 51.98767, lng: 5.87628},
+            {name: "De Markesteen", area: "Foxtrot", lat: 52.01599, lng: 5.98433},
+            {name: "Dunbroch Phox Hunters", area: "Echo", lat: 52.18424, lng: 6.00510},
+            {name: "Graaf Jan uit Ulft", area: "Hotel", lat: 51.88203, lng: 6.38702},
+            {name: "Graaf Otto Groep Lochem", area: "Echo", lat: 52.14480, lng: 6.39406},
+            {name: "Graaf van Gelre", area: "Alpha", lat: 51.87767, lng: 5.27135},
+            {name: "Gustaaf Adolf Groep", area: "Charlie", lat: 52.40853, lng: 5.86434},
+            {name: "Hélène H. Wilkensgroep", area: "Echo", lat: 52.18216, lng: 6.13891},
+            {name: "IJsselgroep", area: "Echo", lat: 52.19979, lng: 6.21497},
+            {name: "Irmin-Taweb", area: "Charlie", lat: 52.31551, lng: 5.62016},
+            {name: "Isala scouting Doesburg", area: "Golf", lat: 52.01701, lng: 6.14665},
+            {name: "Jonkheer Schimmel", area: "Alpha", lat: 51.96863, lng: 5.56088},
+            {name: "KaLiG", area: "Foxtrot", lat: 51.99591, lng: 5.90046},
+            {name: "Karmijngroep Winssen", area: "Delta", lat: 51.88144, lng: 5.70039},
+            {name: "Klaas Kittengroep", area: "Alpha", lat: 51.95646, lng: 5.43775},
+            {name: "Langenberg", area: "Alpha", lat: 52.04014, lng: 5.69080},
+            {name: "OPV-Schoonoord", area: "Golf", lat: 51.99301, lng: 5.82053},
+            {name: "Oscar Team", area: "Oscar", lat: 51.98000, lng: 5.91000},
+            {name: "Pieter Maritz Ede", area: "Bravo", lat: 52.05388, lng: 5.66194},
+            {name: "Ragay Redoz", area: "Charlie", lat: 52.32655, lng: 5.63416},
+            {name: "Rhedense Pioniers", area: "Golf", lat: 52.00073, lng: 6.02037},
+            {name: "Roothaangroep", area: "Golf", lat: 51.94942, lng: 6.32098},
+            {name: "Schutgraaf", area: "Foxtrot", lat: 51.96619, lng: 5.86970},
+            {name: "Scouting Aerendheem", area: "Hotel", lat: 52.00436, lng: 5.94782},
+            {name: "Scouting Alexandergroep", area: "Charlie", lat: 52.28674, lng: 5.59458},
+            {name: "Scouting Amalgama", area: "Delta", lat: 51.83915, lng: 5.78562},
+            {name: "Scouting Bemmel", area: "Bravo", lat: 51.88725, lng: 5.90545},
+            {name: "Scouting Bennekom", area: "Alpha", lat: 52.01002, lng: 5.68705},
+            {name: "Scouting Beuningen '76", area: "Foxtrot", lat: 51.85364, lng: 5.78151},
+            {name: "Scouting Dannenburcht", area: "Foxtrot", lat: 51.93568, lng: 5.94224},
+            {name: "Scouting de Paulus Dreumel", area: "Delta", lat: 51.84863, lng: 5.43237},
+            {name: "Scouting de Trijsberg", area: "Charlie", lat: 52.45693, lng: 6.04763},
+            {name: "Scouting Didam", area: "Hotel", lat: 51.93851, lng: 6.13217},
+            {name: "Scouting Dieren", area: "Golf", lat: 52.05408, lng: 6.07722},
+            {name: "Scouting Duiven", area: "Hotel", lat: 51.94418, lng: 6.03232},
+            {name: "Scouting Elburg", area: "Charlie", lat: 52.45980, lng: 5.82108},
+            {name: "Scouting Elst", area: "Bravo", lat: 51.90596, lng: 5.84306},
+            {name: "Scouting Grave & Boxmeer", area: "Delta", lat: 51.7553426, lng: 5.7327390},
+            {name: "Scouting Groessen en Vrienden", area: "Hotel", lat: 51.93190, lng: 6.03235},
+            {name: "Scouting Hamaland", area: "Golf", lat: 51.97656, lng: 6.26739},
+            {name: "Scouting Jan Hilgers", area: "Bravo", lat: 52.04174, lng: 5.61968},
+            {name: "Scouting JJB", area: "Echo", lat: 52.19653, lng: 5.92280},
+            {name: "Scouting Karel de Stoute", area: "Foxtrot", lat: 51.80182, lng: 5.81792},
+            {name: "Scouting Keizer Karel Groep 1 Nijmegen", area: "Foxtrot", lat: 51.82515, lng: 5.89007},
+            {name: "Scouting Kon-Tiki Putten", area: "Charlie", lat: 52.24450, lng: 5.63984},
+            {name: "Scouting Lunteren", area: "Bravo", lat: 52.09151, lng: 5.65095},
+            {name: "Scouting Maas en Waal", area: "Delta", lat: 51.88209, lng: 5.61597},
+            {name: "Scouting Nunspeet", area: "Charlie", lat: 52.37624, lng: 5.80665},
+            {name: "Scouting Paul Kruger", area: "Foxtrot", lat: 51.82580, lng: 5.89091},
+            {name: "Scouting Phoenix Tiel", area: "Alpha", lat: 51.89986, lng: 5.42646},
+            {name: "Scouting Saksenheerd", area: "Hotel", lat: 51.87433, lng: 6.46377},
+            {name: "Scouting Scherpenzeel e.o.", area: "Bravo", lat: 52.08604, lng: 5.48727},
+            {name: "Scouting St. Franciscus", area: "Delta", lat: 51.80570, lng: 5.74512},
+            {name: "Scouting Titus Brandsma", area: "Echo", lat: 52.25059, lng: 6.21258},
+            {name: "Scouting woezik", area: "Delta", lat: 51.82514, lng: 5.71740},
+            {name: "Scouting Zetten", area: "Bravo", lat: 51.93252, lng: 5.70937},
+            {name: "Sint Stanislaus", area: "Alpha", lat: 51.95987, lng: 5.21670},
+            {name: "St. Christoforus-Lichtdraagsters", area: "Hotel", lat: 51.99607, lng: 5.93160},
+            {name: "Subliem Hunting Team", area: "Hotel", lat: 51.91568, lng: 6.06611},
+            {name: "Sw3lbp", area: "Echo", lat: 52.22603, lng: 5.94263},
+            {name: "Tarcisius en Nijkerk", area: "Bravo", lat: 52.05133, lng: 5.67847},
+            {name: "The Bravest", area: "Delta", lat: 51.85915, lng: 5.81721},
+            {name: "Ugchelse Woudlopers gr2", area: "Echo", lat: 52.18143, lng: 5.94203},
+            {name: "Velpse Woudlopers en de Olmen", area: "Foxtrot", lat: 52.00825, lng: 5.97931},
+            {name: "Verbraak Margriet Groep", area: "Charlie", lat: 52.32477, lng: 5.63560}
+        ];
+
+        allLocations.forEach(function(loc) {
+            if (targetAreas.includes(loc.area)) {
+                var areaColor = areaColors[loc.area] || "#3498db";
+                var isOscar = (loc.area === "Oscar");
+                var marker = createHouseMarker([loc.lat, loc.lng], loc.name + " (" + loc.area + ")", areaColor, isOscar);
+                fixedHouseLayer.addLayer(marker);
+            }
+        });
+
+        checkZoomLevel();
+        setupDrawTools();
+
+        var knownArticleIds = new Set();
+        var isInitialArticleLoad = true;
+
+        function fetchJotihuntData() {
+            fetch('https://jotihunt.nl/api/2.0/articles')
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.data && Array.isArray(data.data)) {
+                        var sortedArticles = data.data.sort(function(a, b) {
+                            return (b.id || 0) - (a.id || 0);
+                        });
+
+                        if (isInitialArticleLoad) {
+                            sortedArticles.forEach(article => knownArticleIds.add(article.id));
+                            isInitialArticleLoad = false;
+                        } else {
+                            sortedArticles.forEach(article => {
+                                if (!knownArticleIds.has(article.id)) {
+                                    knownArticleIds.add(article.id);
+                                    document.getElementById('notification-text').innerText = "🔔 Nieuw bericht: " + (article.title || 'Geen titel');
+                                    document.getElementById('notification-banner').style.display = 'flex';
+                                    setTimeout(function() { map.invalidateSize(); }, 50);
+                                }
+                            });
+                        }
+
+                        document.getElementById('api-status').style.color = "#2ecc71";
+                    }
+                })
+                .catch(error => {
+                    console.error("Fout bij ophalen artikelen:", error);
+                    document.getElementById('api-status').style.color = "#e74c3c";
+                });
+
+            fetch('https://jotihunt.nl/api/2.0/areas')
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.data) {
+                        var vossenListHtml = '';
+                        
+                        var filteredAreas = data.data.filter(area => {
+                            var name = area.name || area.title || '';
+                            return targetAreas.some(target => name.toLowerCase().includes(target.toLowerCase()));
+                        });
+
+                        targetAreas.forEach(targetName => {
+                            var foundArea = filteredAreas.find(a => (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase()));
+                            
+                            var teamName = targetName;
+                            var rawStatus = foundArea ? (foundArea.status || '').toLowerCase() : 'vervangen';
+                            
+                            var statusClass = 'status-vervangen';
+                            
+                            if (rawStatus.includes('actief') || rawStatus === 'active' || rawStatus === 'field') {
+                                statusClass = 'status-actief';
+                            } else if (rawStatus.includes('gevangen') || rawStatus === 'caught' || rawStatus === 'jail') {
+                                statusClass = 'status-gevangen';
+                                if (!disabledBlinks[teamName]) {
+                                    statusClass += ' knipperen';
+                                }
+                            } else if (rawStatus.includes('rust') || rawStatus === 'pause' || rawStatus === 'resting') {
+                                statusClass = 'status-rust';
+                            }
+
+                            vossenListHtml += `<div class="vogel-status-item ${statusClass}" onclick="toggleBlink('${teamName}')" title="Klik om knipperen aan/uit te zetten">${teamName}</div>`;
+                        });
+
+                        document.getElementById('vossen-list').innerHTML = vossenListHtml;
+                    }
+                })
+                .catch(error => {
+                    console.error("Fout bij ophalen vossen status:", error);
+                });
+        }
+
+        fetchJotihuntData();
+        setInterval(fetchJotihuntData, 20000);
+
+        map.on(L.Draw.Event.CREATED, function (e) {
+            if (!isAdmin) return;
+            var layer = e.layer;
+            if (e.layerType === 'marker') {
+                var markerName = prompt("Voer een naam in voor deze plek:", "Nieuwe locatie");
+                if (!markerName) markerName = "Locatie";
+                var markerColor = prompt("Kies een kleur (bijv. red, blue, green of hex #ff0000):", "#e74c3c");
+                if (!markerColor) markerColor = "#e74c3c";
+
+                var latlng = layer.getLatLng();
+                db.ref('drawnItems').push({
+                    type: 'marker',
+                    latlng: [latlng.lat, latlng.lng],
+                    name: markerName,
+                    color: markerColor
+                });
+            } else if (e.layerType === 'polyline') {
+                var lineName = prompt("Voer een naam in voor deze route:", "Route");
+                if (!lineName) lineName = "Route";
+
+                var rawAreaInput = prompt("Koppel aan deelgebied (kies uit: Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor standaard zwart:", "");
+                var chosenArea = parseTargetArea(rawAreaInput);
+                
+                var lineColor = "#000000";
+                if (chosenArea && areaColors[chosenArea]) {
+                    lineColor = (chosenArea === "Oscar") ? "#003399" : areaColors[chosenArea];
+                    lineName = lineName + " (" + chosenArea + ")";
+                }
+
+                var latlngs = layer.getLatLngs().map(function(pt) { return [pt.lat, pt.lng]; });
+
+                db.ref('drawnItems').push({
+                    type: 'polyline',
+                    latlngs: latlngs,
+                    name: lineName,
+                    color: lineColor
+                });
+            }
+        });
+    </script>
+</body>
+</html>
