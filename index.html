@@ -321,7 +321,6 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
     <script>
-        // Jouw Firebase configuratie
         var firebaseConfig = {
             apiKey: "AIzaSyDHNhlTRR0yr-6d_wOkmld1cInPLlxVM2o",
             authDomain: "jotihunt-amalgama.firebaseapp.com",
@@ -399,7 +398,7 @@
             return matched || "";
         }
 
-        // Hulpfunctie om zowel 4-cijferige als volledige RD coördinaten correct om te zetten naar 6 cijfers
+        // Slimme coördinaten-parser die zowel GPS, 6-cijferig RD als verkorte RD (bijv. 4-cijferig zoals 1800, 4500) correct afhandelt
         function parseCoordInput(coordInput) {
             var parts = coordInput.split(/[\s,;]+/);
             if (parts.length < 2) return null;
@@ -412,23 +411,37 @@
 
             if (isNaN(val1) || isNaN(val2)) return null;
 
-            // Als het GPS coördinaten zijn (Latitude/Longitude)
+            // Als het GPS coördinaten zijn (Latitude / Longitude)
             if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
                 return [val1, val2];
             } else {
-                // RD coördinaten: vul aan met nullen tot 6 cijfers indien nodig (bijv. "1800" -> "180000")
-                var xStr = val1Str.split('.')[0];
-                var yStr = val2Str.split('.')[0];
+                // Het zijn RD coördinaten. Normaal zijn deze 6 cijfers (bijv. 180000, 450000).
+                // Als iemand kortere getallen invoert (bijv. 4 of 5 cijfers zoals 1800 of 18000), 
+                // schalen we ze correct op naar de echte RD-meters in Gelderland.
+                var xPart = val1Str.split('.')[0];
+                var yPart = val2Str.split('.')[0];
 
-                while (xStr.length < 6) { xStr += "0"; }
-                while (yStr.length < 6) { yStr += "0"; }
+                var x = parseFloat(xPart);
+                var y = parseFloat(yPart);
 
-                var x = parseFloat(xStr);
-                var y = parseFloat(yStr);
+                // Als het 4-cijferige getallen zijn (bijv. 1800, 4500), vermenigvuldigen met 100 om op meters uit te komen
+                if (xPart.length === 4) x = x * 100;
+                else if (xPart.length === 5) x = x * 10;
+
+                if (yPart.length === 4) y = y * 100;
+                else if (yPart.length === 5) y = y * 10;
+
+                // Als er na de correctie nog nullen ontbreken tot 6 cijfers, vullen we aan
+                while (x.toString().length < 6) { x = x * 10; }
+                while (y.toString().length < 6) { y = y * 10; }
 
                 try {
                     var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
-                    return [latLngArray[1], latLngArray[0]];
+                    // Controleer of de resulterende lat/lng binnen of rondom Nederland valt
+                    if (latLngArray[1] >= 50 && latLngArray[1] <= 54 && latLngArray[0] >= 3 && latLngArray[0] <= 8) {
+                        return [latLngArray[1], latLngArray[0]];
+                    }
+                    return null;
                 } catch (e) {
                     console.error("Fout bij RD conversie:", e);
                     return null;
@@ -748,7 +761,7 @@
                     
                     var newArea = parseTargetArea(rawAreaInput);
 
-                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 1800, 4500 OF 51.9851, 5.8987", "");
+                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 180000, 450000 OF 51.9851, 5.8987", "");
                     
                     var targetLatlng = [currentLatlng.lat, currentLatlng.lng];
 
@@ -831,7 +844,7 @@
             var name = prompt("Voer een naam in voor dit punt (bijv. Hint / Sighting):", "Punt");
             if (!name) return;
 
-            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
+            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 180000, 450000  OF  51.9851, 5.8987", "180000, 450000");
             if (!coordInput) return;
 
             var latlng = parseCoordInput(coordInput);
