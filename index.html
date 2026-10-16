@@ -265,12 +265,36 @@
         .zoom-in-to-show .marker-label {
             display: block;
         }
-        .user-gps-label {
-            background: #2980b9 !important;
-            color: white !important;
-            border: 1px solid #1f618d !important;
+        
+        /* Labels voor gebruikers */
+        .user-gps-label-active {
+            background: #27ae60 !important;
+            color: #ffffff !important;
+            border: 1px solid #ffffff !important;
             font-weight: bold;
             display: block !important;
+        }
+        .user-gps-label-inactive {
+            background: #7f8c8d !important;
+            color: #ffffff !important;
+            border: 1px solid #e74c3c !important;
+            font-weight: bold;
+            display: block !important;
+        }
+
+        /* Windrichting labels op de cirkel */
+        .compass-label {
+            background: #2c3e50;
+            color: #ffffff;
+            border: 1px solid #e67e22;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            line-height: 22px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 12px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.4);
         }
         .popup-content {
             text-align: center;
@@ -284,7 +308,7 @@
         <div id="auth-box">
             <h2>Inloggen</h2>
             <input type="password" id="pin-input" placeholder="Pincode" maxlength="4" autofocus>
-            <input type="text" id="username-input" placeholder="Naam / Team (bijv. Auto 1)" style="display:none;" maxlength="24">
+            <input type="text" id="username-input" placeholder="Naam" style="display:none;" maxlength="24">
             <button onclick="checkPin()">Inloggen</button>
             <div id="auth-error">Onjuiste pincode of naam ontbreekt</div>
         </div>
@@ -352,12 +376,13 @@
         var currentUserName = "";
         var currentUserId = "";
 
-        // Toon automatisch het naamveld zodra pincode 1111 wordt ingevuld
+        // Toon automatisch alleen het Naam veld bij pincode 1111
         document.getElementById('pin-input').addEventListener('input', function() {
             var val = this.value.trim();
             var nameField = document.getElementById('username-input');
             if (val === "1111") {
                 nameField.style.display = 'inline-block';
+                nameField.placeholder = 'Naam';
                 nameField.focus();
             } else if (val === "6546") {
                 nameField.style.display = 'none';
@@ -371,7 +396,7 @@
 
             if (pin === "1111") {
                 if (!name) {
-                    errorDiv.innerText = "Voer a.u.b. ook een team- of persoonsnaam in.";
+                    errorDiv.innerText = "Voer a.u.b. je naam in.";
                     errorDiv.style.display = 'block';
                     document.getElementById('username-input').focus();
                     return;
@@ -413,7 +438,6 @@
             location.reload();
         }
 
-        // Automatisch inloggen controleren
         window.addEventListener('load', function() {
             var savedRole = localStorage.getItem('jh_auth_role');
             var savedName = localStorage.getItem('jh_auth_name');
@@ -458,22 +482,18 @@
             }, 100);
         }
 
-        /* ================= GPS BACKGROUND TRACKING ================= */
+        /* ================= GPS BACKGROUND TRACKING (ELKE 20 SEC) ================= */
         var watchId = null;
         var wakeLock = null;
         var workerTimer = null;
+        var intervalTimer = null;
 
         async function requestWakeLock() {
             try {
                 if ('wakeLock' in navigator) {
                     wakeLock = await navigator.wakeLock.request('screen');
-                    wakeLock.addEventListener('release', () => {
-                        console.log('Wake Lock vrijgegeven');
-                    });
                 }
-            } catch (err) {
-                console.log('WakeLock niet ondersteund of geweigerd:', err);
-            }
+            } catch (err) {}
         }
 
         function sendCurrentLocation() {
@@ -491,11 +511,11 @@
                     lastSeen: Date.now()
                 });
             }, function(err) {
-                console.warn("Fout bij GPS update:", err.message);
+                console.warn("GPS update fout:", err.message);
             }, {
                 enableHighAccuracy: true,
-                maximumAge: 3000,
-                timeout: 8000
+                maximumAge: 5000,
+                timeout: 10000
             });
         }
 
@@ -503,39 +523,21 @@
             requestWakeLock();
             sendCurrentLocation();
 
-            if (navigator.geolocation) {
-                watchId = navigator.geolocation.watchPosition(function(pos) {
-                    var lat = pos.coords.latitude;
-                    var lng = pos.coords.longitude;
-                    var accuracy = pos.coords.accuracy || 0;
+            // Interval ingesteld op exact elke 20 seconden
+            if (intervalTimer) clearInterval(intervalTimer);
+            intervalTimer = setInterval(sendCurrentLocation, 20000);
 
-                    db.ref('liveUsers/' + currentUserId).set({
-                        name: currentUserName,
-                        lat: lat,
-                        lng: lng,
-                        accuracy: Math.round(accuracy),
-                        lastSeen: Date.now()
-                    });
-                }, function(err) {
-                    console.warn("WatchPosition melding:", err.message);
-                }, {
-                    enableHighAccuracy: true,
-                    maximumAge: 3000,
-                    timeout: 10000
-                });
-            }
-
+            // Web Worker Heartbeat voor achtergrondactiviteit elke 20 sec
             try {
                 var blob = new Blob([
-                    "setInterval(function() { postMessage('tick'); }, 10000);"
+                    "setInterval(function() { postMessage('tick'); }, 20000);"
                 ], { type: "text/javascript" });
                 workerTimer = new Worker(URL.createObjectURL(blob));
                 workerTimer.onmessage = function() {
                     sendCurrentLocation();
                 };
             } catch (e) {
-                console.warn("Web worker niet beschikbaar:", e);
-                setInterval(sendCurrentLocation, 10000);
+                console.warn("Worker niet beschikbaar, gebruikt setInterval:", e);
             }
 
             document.addEventListener("visibilitychange", function() {
@@ -547,9 +549,9 @@
         }
 
         function stopLiveTracking() {
-            if (watchId !== null && navigator.geolocation) {
-                navigator.geolocation.clearWatch(watchId);
-                watchId = null;
+            if (intervalTimer) {
+                clearInterval(intervalTimer);
+                intervalTimer = null;
             }
             if (workerTimer) {
                 workerTimer.terminate();
@@ -638,6 +640,43 @@
         var usersLiveLayer = new L.FeatureGroup().addTo(map);
         var liveUserMarkers = {};
 
+        /* ================= 450M CIRKEL & WINDRICHTINGEN ROND CLUBGEBOUW ================= */
+        // Locatie Scouting Amalgama: 51.83915, 5.78562
+        var amalgamaLat = 51.83915;
+        var amalgamaLng = 5.78562;
+        var radiusMeters = 450;
+
+        // 450m cirkel met subtiele tint
+        L.circle([amalgamaLat, amalgamaLng], {
+            radius: radiusMeters,
+            color: '#e67e22',
+            weight: 2,
+            dashArray: '5, 5',
+            fillColor: '#e67e22',
+            fillOpacity: 0.12
+        }).addTo(map).bindTooltip("450m Straal Amalgama", { direction: 'top' });
+
+        // Coördinaten berekenen op de 450m rand voor windrichtingen
+        var latOffset = radiusMeters / 111320; 
+        var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180)));
+
+        var directions = [
+            { label: 'N', lat: amalgamaLat + latOffset, lng: amalgamaLng },
+            { label: 'Z', lat: amalgamaLat - latOffset, lng: amalgamaLng },
+            { label: 'O', lat: amalgamaLat, lng: amalgamaLng + lngOffset },
+            { label: 'W', lat: amalgamaLat, lng: amalgamaLng - lngOffset }
+        ];
+
+        directions.forEach(function(dir) {
+            var icon = L.divIcon({
+                className: 'compass-icon-wrapper',
+                html: `<div class="compass-label">${dir.label}</div>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
+            });
+            L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(map);
+        });
+
         function setupDrawTools() {
             var drawControl = new L.Control.Draw({
                 edit: { featureGroup: drawnItems, remove: true },
@@ -687,7 +726,25 @@
             return marker;
         }
 
-        /* ================= LIVE GEBRUIKERS WEERGAVE ================= */
+        /* ================= LIVE GEBRUIKERS (GROEN/WIT vs GRIJS/ROOD) ================= */
+        function createUserIcon(isActive) {
+            var fillColor = isActive ? "#2ecc71" : "#7f8c8d";
+            var strokeColor = isActive ? "#ffffff" : "#e74c3c";
+            var strokeWidth = isActive ? 1.5 : 2;
+
+            var userSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}" filter="drop-shadow(0px 2px 4px rgba(0,0,0,0.6))">
+                <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
+            </svg>`;
+
+            return L.divIcon({
+                className: 'custom-car-pin',
+                html: userSvg,
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+                popupAnchor: [0, -16]
+            });
+        }
+
         db.ref('liveUsers').on('value', function(snapshot) {
             var users = snapshot.val();
             var now = Date.now();
@@ -702,7 +759,8 @@
                 var u = users[userId];
                 if (!u || !u.lat || !u.lng) return;
 
-                if (now - (u.lastSeen || 0) > 15 * 60 * 1000) {
+                // Verberg markers die langer dan 20 minuten helemaal geen update hebben gegeven
+                if (now - (u.lastSeen || 0) > 20 * 60 * 1000) {
                     if (liveUserMarkers[userId]) {
                         usersLiveLayer.removeLayer(liveUserMarkers[userId]);
                         delete liveUserMarkers[userId];
@@ -710,29 +768,24 @@
                     return;
                 }
 
+                // Actief = laatste update binnen 3 minuten (180 sec)
+                var isActive = (now - (u.lastSeen || 0)) <= (3 * 60 * 1000);
                 var minutesAgo = Math.floor((now - u.lastSeen) / 60000);
                 var timeAgoText = minutesAgo <= 0 ? "Zojuist" : minutesAgo + "m geleden";
 
-                var userSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="#2980b9" stroke="#ffffff" stroke-width="2" filter="drop-shadow(0px 2px 4px rgba(0,0,0,0.6))">
-                    <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
-                </svg>`;
-
-                var carIcon = L.divIcon({
-                    className: 'custom-car-pin',
-                    html: userSvg,
-                    iconSize: [32, 32],
-                    iconAnchor: [16, 16],
-                    popupAnchor: [0, -16]
-                });
+                var icon = createUserIcon(isActive);
+                var labelClass = isActive ? 'marker-label user-gps-label-active' : 'marker-label user-gps-label-inactive';
+                var statusText = isActive ? '<span style="color:#2ecc71; font-weight:bold;">● Actief</span>' : '<span style="color:#e74c3c; font-weight:bold;">● Inactief</span>';
 
                 if (liveUserMarkers[userId]) {
                     liveUserMarkers[userId].setLatLng([u.lat, u.lng]);
+                    liveUserMarkers[userId].setIcon(icon);
                     liveUserMarkers[userId].setTooltipContent("🚗 " + u.name);
-                    liveUserMarkers[userId].getPopup().setContent(`<b>🚗 ${u.name}</b><br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
+                    liveUserMarkers[userId].getPopup().setContent(`<b>🚗 ${u.name}</b><br>Status: ${statusText}<br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
                 } else {
-                    var m = L.marker([u.lat, u.lng], { icon: carIcon });
-                    m.bindTooltip("🚗 " + u.name, { permanent: true, direction: 'top', className: 'marker-label user-gps-label' });
-                    m.bindPopup(`<b>🚗 ${u.name}</b><br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
+                    var m = L.marker([u.lat, u.lng], { icon: icon });
+                    m.bindTooltip("🚗 " + u.name, { permanent: true, direction: 'top', className: labelClass });
+                    m.bindPopup(`<b>🚗 ${u.name}</b><br>Status: ${statusText}<br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
                     usersLiveLayer.addLayer(m);
                     liveUserMarkers[userId] = m;
                 }
