@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scouting Amalgama Jotihunt app</title>
+    <title>Gelderland Scouting Kaart & Jotihunt Live</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Leaflet Draw CSS -->
@@ -37,7 +37,7 @@
         }
         #auth-box {
             background: #2c3e50;
-            padding: 30px;
+            padding: 25px 30px;
             border-radius: 8px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             text-align: center;
@@ -49,14 +49,15 @@
             margin-bottom: 15px;
         }
         #auth-box input {
-            width: 80%;
+            width: 85%;
             padding: 10px;
-            font-size: 16px;
+            font-size: 15px;
             text-align: center;
             border: 1px solid #bdc3c7;
             border-radius: 4px;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
             outline: none;
+            box-sizing: border-box;
         }
         #auth-box button {
             background-color: #3498db;
@@ -67,8 +68,9 @@
             font-weight: bold;
             border-radius: 4px;
             cursor: pointer;
-            width: 100%;
+            width: 85%;
             transition: background 0.2s;
+            margin-top: 5px;
         }
         #auth-box button:hover {
             background-color: #2980b9;
@@ -86,7 +88,6 @@
             width: 100%;
             height: 100%;
             position: relative;
-            display: flex;
             flex-direction: column;
         }
 
@@ -98,13 +99,26 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 15px;
+            padding: 0 12px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
             z-index: 2001;
         }
+        #header-title-box {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            margin-right: 8px;
+        }
         #header h1 {
             margin: 0;
-            font-size: 15px;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #user-badge {
+            font-size: 11px;
+            color: #bdc3c7;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -112,37 +126,32 @@
         .header-right {
             display: flex;
             align-items: center;
-            gap: 6px;
-            font-size: 13px;
+            gap: 5px;
+            font-size: 12px;
+            flex-shrink: 0;
         }
         .header-btn {
             background-color: #3498db;
             color: white;
             border: none;
-            padding: 6px 10px;
+            padding: 6px 9px;
             border-radius: 4px;
             cursor: pointer;
             font-weight: bold;
-            font-size: 12px;
+            font-size: 11px;
             transition: background 0.2s;
+            white-space: nowrap;
         }
         .header-btn:hover {
             background-color: #2980b9;
         }
-        #btn-fetch-latest {
-            background-color: #e67e22;
-        }
-        #btn-fetch-latest:hover {
-            background-color: #d35400;
-        }
-        #clear-rd-btn {
-            background-color: #e74c3c;
-        }
-        #clear-rd-btn:hover {
-            background-color: #c0392b;
-        }
+        #btn-fetch-latest { background-color: #e67e22; }
+        #btn-fetch-latest:hover { background-color: #d35400; }
+        #clear-rd-btn { background-color: #c0392b; }
+        #btn-logout { background-color: #7f8c8d; }
+        #btn-logout:hover { background-color: #95a5a6; }
 
-        /* Notificatiebanner net onder de header */
+        /* Notificatiebanner */
         #notification-banner {
             background-color: #e74c3c;
             color: white;
@@ -170,7 +179,7 @@
             height: 100%;
         }
 
-        /* Vossen status paneel gepositioneerd onder de header/banner */
+        /* Vossen status paneel */
         #vossen-status-panel {
             position: absolute;
             top: 15px;
@@ -256,16 +265,15 @@
         .zoom-in-to-show .marker-label {
             display: block;
         }
+        .user-gps-label {
+            background: #2980b9 !important;
+            color: white !important;
+            border: 1px solid #1f618d !important;
+            font-weight: bold;
+            display: block !important;
+        }
         .popup-content {
             text-align: center;
-        }
-        .popup-content input[type="color"] {
-            border: none;
-            width: 30px;
-            height: 30px;
-            cursor: pointer;
-            vertical-align: middle;
-            margin: 5px;
         }
     </style>
 </head>
@@ -274,27 +282,27 @@
     <!-- Inlogscherm -->
     <div id="auth-overlay">
         <div id="auth-box">
-            <h2>Voer Pincode in</h2>
-            <input type="password" id="pin-input" placeholder="Pincode" maxlength="4" autofocus>
+            <h2>Inloggen</h2>
+            <input type="password" id="pin-input" placeholder="Pincode (1111 of 6546)" maxlength="4" autofocus>
+            <input type="text" id="username-input" placeholder="Naam / Team (bijv. Auto 1)" style="display:none;" maxlength="24">
             <button onclick="checkPin()">Inloggen</button>
-            <div id="auth-error">Onjuiste pincode</div>
+            <div id="auth-error">Onjuiste pincode of naam ontbreekt</div>
         </div>
     </div>
 
     <!-- Hoofdapplicatie -->
-    <div id="app-container" style="display:none;">
+    <div id="app-container">
         <div id="header">
-            <h1>Scouting Amalgama Jotihunt app</h1>
+            <div id="header-title-box">
+                <h1>Gelderland Kaart</h1>
+                <div id="user-badge">Niet ingelogd</div>
+            </div>
             <div class="header-right">
                 <button class="header-btn" id="btn-fetch-latest" onclick="fetchLatestArticleManual()" style="display:none;" title="Laatste melding ophalen">🔔 Laatste</button>
                 <button class="header-btn" id="btn-add-rd" onclick="addMarkerByRD()" style="display:none;">+ RD</button>
                 <button class="header-btn" id="clear-rd-btn" onclick="clearRdPoints()" style="display:none;">Wis</button>
-                <!-- Franse lelie icoon i.p.v. het stipje -->
-                <div title="API Verbonden" style="display: flex; align-items: center;">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="#2ecc71">
-                        <path d="M12 2C10.5 4.5 8 6 8 8.5c0 1.9 1.6 3.5 3.5 3.5h.5V15c-2 0-4 1.5-4 3.5 0 1.4 1.1 2.5 2.5 2.5h7c1.4 0 2.5-1.1 2.5-2.5 0-2-2-3.5-4-3.5v-3h.5c1.9 0 3.5-1.6 3.5-3.5C19 6 16.5 4.5 15 2c-1.5 2.5-3 3.5-3 6.5s-1.5-4-3-6.5zM11 17h2v3h-2v-3z"/>
-                    </svg>
-                </div>
+                <button class="header-btn" id="btn-logout" onclick="logout()" title="Uitloggen">Uitloggen</button>
+                <div><span id="api-status" style="color: #2ecc71;">●</span></div>
             </div>
         </div>
 
@@ -341,37 +349,109 @@
         var db = firebase.database();
 
         var isAdmin = false;
+        var currentUserName = "";
+        var currentUserId = "";
+
+        // Toon automatisch het naamveld zodra pincode 1111 wordt ingevuld
+        document.getElementById('pin-input').addEventListener('input', function() {
+            var val = this.value.trim();
+            var nameField = document.getElementById('username-input');
+            if (val === "1111") {
+                nameField.style.display = 'inline-block';
+                nameField.focus();
+            } else if (val === "6546") {
+                nameField.style.display = 'none';
+            }
+        });
 
         function checkPin() {
             var pin = document.getElementById('pin-input').value.trim();
+            var name = document.getElementById('username-input').value.trim();
             var errorDiv = document.getElementById('auth-error');
 
             if (pin === "1111") {
+                if (!name) {
+                    errorDiv.innerText = "Voer a.u.b. ook een team- of persoonsnaam in.";
+                    errorDiv.style.display = 'block';
+                    document.getElementById('username-input').focus();
+                    return;
+                }
                 isAdmin = false;
+                currentUserName = name;
+                setupUserIdentity();
+                localStorage.setItem('jh_auth_role', 'user');
+                localStorage.setItem('jh_auth_name', name);
                 initApp();
             } else if (pin === "6546") {
                 isAdmin = true;
+                currentUserName = "Admin";
+                localStorage.setItem('jh_auth_role', 'admin');
+                localStorage.setItem('jh_auth_name', 'Admin');
                 initApp();
             } else {
+                errorDiv.innerText = "Onjuiste pincode";
                 errorDiv.style.display = 'block';
                 document.getElementById('pin-input').value = '';
             }
         }
 
-        document.getElementById('pin-input').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') {
-                checkPin();
+        function setupUserIdentity() {
+            currentUserId = localStorage.getItem('jh_user_id');
+            if (!currentUserId) {
+                currentUserId = 'hunter_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('jh_user_id', currentUserId);
             }
+        }
+
+        function logout() {
+            localStorage.removeItem('jh_auth_role');
+            localStorage.removeItem('jh_auth_name');
+            if (currentUserId) {
+                // Verwijder live locatie direct uit Firebase
+                db.ref('liveUsers/' + currentUserId).remove();
+            }
+            stopLiveTracking();
+            location.reload();
+        }
+
+        // Automatisch inloggen controleren
+        window.addEventListener('load', function() {
+            var savedRole = localStorage.getItem('jh_auth_role');
+            var savedName = localStorage.getItem('jh_auth_name');
+
+            if (savedRole === 'admin') {
+                isAdmin = true;
+                currentUserName = "Admin";
+                initApp();
+            } else if (savedRole === 'user' && savedName) {
+                isAdmin = false;
+                currentUserName = savedName;
+                setupUserIdentity();
+                initApp();
+            }
+        });
+
+        document.getElementById('pin-input').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') checkPin();
+        });
+        document.getElementById('username-input').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') checkPin();
         });
 
         function initApp() {
             document.getElementById('auth-overlay').style.display = 'none';
             document.getElementById('app-container').style.display = 'flex';
 
+            var badge = document.getElementById('user-badge');
             if (isAdmin) {
+                badge.innerText = "Beheerder (Admin)";
                 document.getElementById('btn-fetch-latest').style.display = 'inline-block';
                 document.getElementById('btn-add-rd').style.display = 'inline-block';
                 document.getElementById('clear-rd-btn').style.display = 'inline-block';
+                setupDrawTools();
+            } else {
+                badge.innerText = "Hunter: " + currentUserName;
+                startBackgroundLiveTracking();
             }
 
             setTimeout(function() {
@@ -379,182 +459,162 @@
             }, 100);
         }
 
+        /* ================= GPS BACKGROUND TRACKING ================= */
+        var watchId = null;
+        var wakeLock = null;
+        var workerTimer = null;
+
+        // Vraag schermvergrendeling aan (WakeLock API)
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Wake Lock vrijgegeven');
+                    });
+                }
+            } catch (err) {
+                console.log('WakeLock niet ondersteund of geweigerd:', err);
+            }
+        }
+
+        function sendCurrentLocation() {
+            if (!navigator.geolocation || !currentUserId) return;
+            navigator.geolocation.getCurrentPosition(function(pos) {
+                var lat = pos.coords.latitude;
+                var lng = pos.coords.longitude;
+                var accuracy = pos.coords.accuracy || 0;
+
+                db.ref('liveUsers/' + currentUserId).set({
+                    name: currentUserName,
+                    lat: lat,
+                    lng: lng,
+                    accuracy: Math.round(accuracy),
+                    lastSeen: Date.now()
+                });
+            }, function(err) {
+                console.warn("Fout bij GPS update:", err.message);
+            }, {
+                enableHighAccuracy: true,
+                maximumAge: 3000,
+                timeout: 8000
+            });
+        }
+
+        function startBackgroundLiveTracking() {
+            requestWakeLock();
+            sendCurrentLocation();
+
+            if (navigator.geolocation) {
+                watchId = navigator.geolocation.watchPosition(function(pos) {
+                    var lat = pos.coords.latitude;
+                    var lng = pos.coords.longitude;
+                    var accuracy = pos.coords.accuracy || 0;
+
+                    db.ref('liveUsers/' + currentUserId).set({
+                        name: currentUserName,
+                        lat: lat,
+                        lng: lng,
+                        accuracy: Math.round(accuracy),
+                        lastSeen: Date.now()
+                    });
+                }, function(err) {
+                    console.warn("WatchPosition melding:", err.message);
+                }, {
+                    enableHighAccuracy: true,
+                    maximumAge: 3000,
+                    timeout: 10000
+                });
+            }
+
+            // Web Worker Heartbeat: houdt het script levend als tabblad geminimaliseerd is
+            try {
+                var blob = new Blob([
+                    "setInterval(function() { postMessage('tick'); }, 10000);"
+                ], { type: "text/javascript" });
+                workerTimer = new Worker(URL.createObjectURL(blob));
+                workerTimer.onmessage = function() {
+                    sendCurrentLocation();
+                };
+            } catch (e) {
+                console.warn("Web worker niet beschikbaar:", e);
+                setInterval(sendCurrentLocation, 10000);
+            }
+
+            // Bij minimaliseren of weer tonen van pagina
+            document.addEventListener("visibilitychange", function() {
+                if (document.visibilityState === 'visible') {
+                    requestWakeLock();
+                    sendCurrentLocation();
+                }
+            });
+        }
+
+        function stopLiveTracking() {
+            if (watchId !== null && navigator.geolocation) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            if (workerTimer) {
+                workerTimer.terminate();
+                workerTimer = null;
+            }
+            if (wakeLock !== null) {
+                wakeLock.release();
+                wakeLock = null;
+            }
+        }
+
+        /* ================= KAART & LEAFLET ================= */
         proj4.defs("EPSG:28992", "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.387638888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.417,50.3319,465.524,-0.398957,0.343988,-1.8774,4.0725 +units=m +no_defs");
         proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 
         var targetAreas = ["Alpha", "Bravo", "Delta", "Foxtrot", "Golf", "Hotel", "Oscar"];
-        
         var areaColors = {
-            "Alpha": "#e74c3c",   // Rood
-            "Bravo": "#f1c40f",   // Geel
-            "Delta": "#2ecc71",   // Groen
-            "Foxtrot": "#3498db", // Blauw
-            "Golf": "#ff69b4",    // Roze
-            "Hotel": "#e67e22",   // Oranje
-            "Oscar": "#f1c40f"    // NS Geel
+            "Alpha": "#e74c3c",
+            "Bravo": "#f1c40f",
+            "Delta": "#2ecc71",
+            "Foxtrot": "#3498db",
+            "Golf": "#ff69b4",
+            "Hotel": "#e67e22",
+            "Oscar": "#f1c40f"
         };
 
         function parseTargetArea(input) {
             if (!input) return "";
             var cleanInput = input.trim().toLowerCase();
-            var matched = targetAreas.find(function(area) {
+            return targetAreas.find(function(area) {
                 return area.toLowerCase() === cleanInput;
-            });
-            return matched || "";
+            }) || "";
         }
 
         function parseCoordInput(coordInput) {
             var parts = coordInput.split(/[\s,;]+/);
             if (parts.length < 2) return null;
 
-            var val1Str = parts[0].replace(',', '.');
-            var val2Str = parts[1].replace(',', '.');
-
-            var val1 = parseFloat(val1Str);
-            var val2 = parseFloat(val2Str);
-
+            var val1 = parseFloat(parts[0].replace(',', '.'));
+            var val2 = parseFloat(parts[1].replace(',', '.'));
             if (isNaN(val1) || isNaN(val2)) return null;
 
             if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
                 return [val1, val2];
             } else {
-                var xPart = val1Str.split('.')[0];
-                var yPart = val2Str.split('.')[0];
+                var xStr = parts[0].replace(',', '.').split('.')[0];
+                var yStr = parts[1].replace(',', '.').split('.')[0];
 
-                var x = parseFloat(xPart);
-                var y = parseFloat(yPart);
+                while (xStr.length < 6) { xStr += "0"; }
+                while (yStr.length < 6) { yStr += "0"; }
 
-                if (xPart.length === 4) x = x * 100;
-                else if (xPart.length === 5) x = x * 10;
-
-                if (yPart.length === 4) y = y * 100;
-                else if (yPart.length === 5) y = y * 10;
-
-                while (x.toString().length < 6) { x = x * 10; }
-                while (y.toString().length < 6) { y = y * 10; }
+                var x = parseFloat(xStr);
+                var y = parseFloat(yStr);
 
                 try {
                     var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
-                    if (latLngArray[1] >= 50 && latLngArray[1] <= 54 && latLngArray[0] >= 3 && latLngArray[0] <= 8) {
-                        return [latLngArray[1], latLngArray[0]];
-                    }
-                    return null;
+                    return [latLngArray[1], latLngArray[0]];
                 } catch (e) {
                     console.error("Fout bij RD conversie:", e);
                     return null;
                 }
-            }
-        }
-
-        var rdPointsByArea = {
-            "Alpha": [],
-            "Bravo": [],
-            "Delta": [],
-            "Foxtrot": [],
-            "Golf": [],
-            "Hotel": [],
-            "Oscar": []
-        };
-
-        var disabledBlinks = {};
-
-        function toggleBlink(teamName) {
-            disabledBlinks[teamName] = !disabledBlinks[teamName];
-            fetchJotihuntData();
-        }
-
-        function fetchLatestArticleManual() {
-            fetch('https://jotihunt.nl/api/2.0/articles')
-                .then(response => response.json())
-                .then(data => {
-                    if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
-                        var sortedArticles = data.data.sort(function(a, b) {
-                            return (b.id || 0) - (a.id || 0);
-                        });
-                        var latest = sortedArticles[0];
-                        document.getElementById('notification-text').innerText = "🔔 Laatste bericht: " + (latest.title || 'Geen titel');
-                        document.getElementById('notification-banner').style.display = 'flex';
-                        setTimeout(function() { map.invalidateSize(); }, 50);
-                    } else {
-                        alert("Geen artikelen gevonden in de API.");
-                    }
-                })
-                .catch(error => {
-                    console.error("Fout bij handmatig ophalen laatste artikel:", error);
-                    alert("Kon geen verbinding maken met de Jotihunt API.");
-                });
-        }
-
-        var panel = document.getElementById('vossen-status-panel');
-        var header = document.getElementById('vossen-status-header');
-        var isDragging = false;
-        var startX, startY;
-
-        header.addEventListener('mousedown', function(e) {
-            if (e.target.tagName === 'BUTTON') return;
-            isDragging = true;
-            startX = e.clientX - panel.offsetLeft;
-            startY = e.clientY - panel.offsetTop;
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-        });
-
-        header.addEventListener('touchstart', function(e) {
-            if (e.target.tagName === 'BUTTON') return;
-            isDragging = true;
-            var touch = e.touches[0];
-            startX = touch.clientX - panel.offsetLeft;
-            startY = touch.clientY - panel.offsetTop;
-            document.addEventListener('touchmove', onTouchMove);
-            document.addEventListener('touchend', onTouchEnd);
-        });
-
-        function onMouseMove(e) {
-            if (!isDragging) return;
-            movePanel(e.clientX, e.clientY);
-        }
-
-        function onTouchMove(e) {
-            if (!isDragging) return;
-            var touch = e.touches[0];
-            movePanel(touch.clientX, touch.clientY);
-        }
-
-        function movePanel(clientX, clientY) {
-            var newX = clientX - startX;
-            var newY = clientY - startY;
-            var maxX = window.innerWidth - panel.offsetWidth;
-            var maxY = document.getElementById('map-wrapper').clientHeight - panel.offsetHeight;
-
-            newX = Math.max(0, Math.min(newX, maxX));
-            newY = Math.max(0, Math.min(newY, maxY));
-
-            panel.style.left = newX + 'px';
-            panel.style.top = newY + 'px';
-            panel.style.right = 'auto';
-        }
-
-        function onMouseUp() {
-            isDragging = false;
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-        }
-
-        function onTouchEnd() {
-            isDragging = false;
-            document.removeEventListener('touchmove', onTouchMove);
-            document.removeEventListener('touchend', onTouchEnd);
-        }
-
-        function toggleVossenPanel() {
-            var list = document.getElementById('vossen-list');
-            var btn = document.getElementById('minimize-btn');
-            if (list.style.display === 'none') {
-                list.style.display = 'block';
-                btn.innerText = '-';
-            } else {
-                list.style.display = 'none';
-                btn.innerText = '+';
             }
         }
 
@@ -566,9 +626,8 @@
         }).addTo(map);
 
         function checkZoomLevel() {
-            var currentZoom = map.getZoom();
             var mapContainer = document.getElementById('map');
-            if (currentZoom >= 12) {
+            if (map.getZoom() >= 12) {
                 mapContainer.classList.add('zoom-in-to-show');
             } else {
                 mapContainer.classList.remove('zoom-in-to-show');
@@ -580,31 +639,18 @@
         var drawnItems = new L.FeatureGroup().addTo(map);
         var rdPointsLayer = new L.FeatureGroup().addTo(map);
         var rdRouteLayer = new L.FeatureGroup().addTo(map);
+        var usersLiveLayer = new L.FeatureGroup().addTo(map);
+        var liveUserMarkers = {};
 
         function setupDrawTools() {
-            if (isAdmin) {
-                var drawControl = new L.Control.Draw({
-                    edit: {
-                        featureGroup: drawnItems,
-                        remove: true
-                    },
-                    draw: {
-                        polygon: false,
-                        rectangle: false,
-                        circle: false,
-                        circlemarker: false,
-                        marker: true,
-                        polyline: {
-                            shapeOptions: { 
-                                color: '#000000', 
-                                weight: 4,
-                                className: 'route-line'
-                            }
-                        }
-                    }
-                });
-                map.addControl(drawControl);
-            }
+            var drawControl = new L.Control.Draw({
+                edit: { featureGroup: drawnItems, remove: true },
+                draw: {
+                    polygon: false, rectangle: false, circle: false, circlemarker: false, marker: true,
+                    polyline: { shapeOptions: { color: '#000000', weight: 4, className: 'route-line' } }
+                }
+            });
+            map.addControl(drawControl);
         }
 
         function createHouseMarker(latlng, name, color, isOscar = false) {
@@ -623,15 +669,6 @@
 
             var marker = L.marker(latlng, { icon: customIcon });
             marker.bindTooltip(name, { permanent: true, direction: 'right', className: 'marker-label' });
-
-            var popupContent = `
-                <div class="popup-content">
-                    <b>Naam:</b> ${isAdmin ? `<input type="text" id="popup-name" value="${name}" style="width: 140px; margin-bottom: 5px;"><br>` : name}<br>
-                    <b>Kleur:</b> ${isAdmin ? `<input type="color" id="popup-color" value="${color}"><br>` : ''}
-                    ${isAdmin ? `<button onclick="window.updateMarker(this)" style="background: #2ecc71; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; margin-top: 5px;">Opslaan</button>` : ''}
-                </div>
-            `;
-            marker.bindPopup(popupContent);
             return marker;
         }
 
@@ -651,28 +688,77 @@
 
             var marker = L.marker(latlng, { icon: customIcon });
             marker.bindTooltip(name + " (" + timeStr + ")", { permanent: true, direction: 'right', className: 'marker-label' });
-
-            var popupContent = `
-                <div class="popup-content">
-                    <b>${name}</b><br>
-                    <span style="font-size: 12px; color: #2c3e50; font-weight: bold;">Tijd: ${timeStr}</span><br>
-                    ${isAdmin ? `
-                        <div style="margin-top: 8px; border-top: 1px solid #ddd; padding-top: 5px;">
-                            <button onclick="window.editRdPoint(this)" title="Bewerk punt" style="background: #f39c12; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">✏️ Bewerk</button>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
-            marker.bindPopup(popupContent);
             return marker;
         }
 
-        // Firebase Realtime Sync Luisteraars
+        /* ================= LIVE GEBRUIKERS WEERGAVE ================= */
+        db.ref('liveUsers').on('value', function(snapshot) {
+            var users = snapshot.val();
+            var now = Date.now();
+
+            if (!users) {
+                usersLiveLayer.clearLayers();
+                liveUserMarkers = {};
+                return;
+            }
+
+            // Bijwerken en toevoegen
+            Object.keys(users).forEach(function(userId) {
+                var u = users[userId];
+                if (!u || !u.lat || !u.lng) return;
+
+                // Verberg als gebruiker langer dan 15 min offline is
+                if (now - (u.lastSeen || 0) > 15 * 60 * 1000) {
+                    if (liveUserMarkers[userId]) {
+                        usersLiveLayer.removeLayer(liveUserMarkers[userId]);
+                        delete liveUserMarkers[userId];
+                    }
+                    return;
+                }
+
+                var minutesAgo = Math.floor((now - u.lastSeen) / 60000);
+                var timeAgoText = minutesAgo <= 0 ? "Zojuist" : minutesAgo + "m geleden";
+
+                var userSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="#2980b9" stroke="#ffffff" stroke-width="2" filter="drop-shadow(0px 2px 4px rgba(0,0,0,0.6))">
+                    <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
+                </svg>`;
+
+                var carIcon = L.divIcon({
+                    className: 'custom-car-pin',
+                    html: userSvg,
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16],
+                    popupAnchor: [0, -16]
+                });
+
+                if (liveUserMarkers[userId]) {
+                    liveUserMarkers[userId].setLatLng([u.lat, u.lng]);
+                    liveUserMarkers[userId].setTooltipContent("🚗 " + u.name);
+                    liveUserMarkers[userId].getPopup().setContent(`<b>🚗 ${u.name}</b><br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
+                } else {
+                    var m = L.marker([u.lat, u.lng], { icon: carIcon });
+                    m.bindTooltip("🚗 " + u.name, { permanent: true, direction: 'top', className: 'marker-label user-gps-label' });
+                    m.bindPopup(`<b>🚗 ${u.name}</b><br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
+                    usersLiveLayer.addLayer(m);
+                    liveUserMarkers[userId] = m;
+                }
+            });
+
+            // Opruimen van markers die niet meer in database staan
+            Object.keys(liveUserMarkers).forEach(function(userId) {
+                if (!users[userId]) {
+                    usersLiveLayer.removeLayer(liveUserMarkers[userId]);
+                    delete liveUserMarkers[userId];
+                }
+            });
+        });
+
+        /* ================= VASTE GROEPEN & RD SYNC ================= */
+        var rdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
+
         db.ref('rdPoints').on('value', function(snapshot) {
             rdPointsLayer.clearLayers();
-            for (var area in rdPointsByArea) {
-                rdPointsByArea[area] = [];
-            }
+            for (var a in rdPointsByArea) rdPointsByArea[a] = [];
 
             var data = snapshot.val();
             if (!data) {
@@ -713,11 +799,7 @@
                     var m = createHouseMarker(item.latlng, item.name, item.color, isOscar);
                     drawnItems.addLayer(m);
                 } else if (item.type === 'polyline') {
-                    var pl = L.polyline(item.latlngs, {
-                        color: item.color,
-                        weight: 4,
-                        className: 'route-line'
-                    });
+                    var pl = L.polyline(item.latlngs, { color: item.color, weight: 4, className: 'route-line' });
                     pl.bindTooltip(item.name, { permanent: true, direction: 'center', className: 'marker-label' });
                     pl.bindPopup("<b>" + item.name + "</b>");
                     drawnItems.addLayer(pl);
@@ -725,81 +807,8 @@
             });
         });
 
-        window.editRdPoint = function(btn) {
-            if (!isAdmin) return;
-            
-            rdPointsLayer.eachLayer(function(layer) {
-                if (layer.getPopup() && layer.getPopup().getElement() && layer.getPopup().getElement().contains(btn)) {
-                    var currentLatlng = layer.getLatLng();
-
-                    var foundArea = "";
-                    var foundObj = null;
-                    for (var area in rdPointsByArea) {
-                        var idx = rdPointsByArea[area].findIndex(p => p.marker === layer);
-                        if (idx !== -1) {
-                            foundArea = area;
-                            foundObj = rdPointsByArea[area][idx];
-                            break;
-                        }
-                    }
-
-                    var currentBaseName = foundObj ? foundObj.baseName : "Punt";
-                    var currentTime = foundObj ? foundObj.time : "12:00";
-                    var firebaseKey = foundObj ? foundObj.firebaseKey : null;
-
-                    var newName = prompt("Bewerk naam voor dit punt:", currentBaseName);
-                    if (newName === null) return;
-
-                    var newTime = prompt("Bewerk tijdstip (UU:MM):", currentTime);
-                    if (!newTime) newTime = currentTime;
-
-                    var rawAreaInput = prompt("Koppel aan deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar):\nLaat leeg voor geen koppeling", foundArea);
-                    if (rawAreaInput === null) rawAreaInput = foundArea;
-                    
-                    var newArea = parseTargetArea(rawAreaInput);
-
-                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 1800, 4500 OF 51.9851, 5.8987", "");
-                    
-                    var targetLatlng = [currentLatlng.lat, currentLatlng.lng];
-
-                    if (coordInput && coordInput.trim() !== "") {
-                        var converted = parseCoordInput(coordInput);
-                        if (converted) {
-                            targetLatlng = converted;
-                        } else {
-                            alert("Ongeldige coördinaten. Locatie blijft ongewijzigd.");
-                        }
-                    }
-
-                    var markerColor = "#000000";
-                    var areaSuffix = "";
-
-                    if (newArea && areaColors[newArea]) {
-                        markerColor = areaColors[newArea];
-                        areaSuffix = " [" + newArea + "]";
-                    } else {
-                        newArea = "";
-                    }
-
-                    var fullName = newName + areaSuffix;
-
-                    if (firebaseKey) {
-                        db.ref('rdPoints/' + firebaseKey).set({
-                            latlng: targetLatlng,
-                            time: newTime,
-                            baseName: newName,
-                            area: newArea,
-                            fullName: fullName,
-                            color: markerColor
-                        });
-                    }
-                }
-            });
-        };
-
         function updateRdRoutes() {
             rdRouteLayer.clearLayers();
-
             for (var area in rdPointsByArea) {
                 var points = rdPointsByArea[area];
                 if (points.length < 2) continue;
@@ -811,12 +820,7 @@
                 var latLngs = points.map(function(p) { return p.latlng; });
                 var lineColor = (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000");
 
-                var polyline = L.polyline(latLngs, {
-                    color: lineColor,
-                    weight: 4,
-                    className: 'route-line'
-                });
-
+                var polyline = L.polyline(latLngs, { color: lineColor, weight: 4, className: 'route-line' });
                 polyline.bindPopup("<b>Chronologische route: " + area + "</b>");
                 rdRouteLayer.addLayer(polyline);
             }
@@ -824,33 +828,31 @@
 
         function clearRdPoints() {
             if (!isAdmin) return;
-            var pinInput = prompt("Voer de pincode in om de RD-lijnen te wissen:", "");
-            if (pinInput === null) return;
-
-            if (pinInput.trim() === "6546") {
+            var pinInput = prompt("Voer de admin-pincode in om de RD-lijnen te wissen:", "");
+            if (pinInput === "6546") {
                 db.ref('rdPoints').remove().then(function() {
-                    alert("RD-punten en tijdlijnen zijn succesvol gewist voor iedereen.");
+                    alert("RD-punten succesvol gewist.");
                 });
-            } else {
-                alert("Onjuiste pincode! Het wissen is geannuleerd.");
+            } else if (pinInput !== null) {
+                alert("Onjuiste pincode!");
             }
         }
 
         function addMarkerByRD() {
             if (!isAdmin) return;
-            var name = prompt("Voer een naam in voor dit punt (bijv. Hint / Sighting):", "Punt");
+            var name = prompt("Voer een naam in voor dit punt:", "Punt");
             if (!name) return;
 
-            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
+            var coordInput = prompt("Voer coördinaten in (RD of GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
             if (!coordInput) return;
 
             var latlng = parseCoordInput(coordInput);
             if (!latlng) {
-                alert("Ongeldige coördinaten ingevoerd. Zorg dat je getallen gebruikt.");
+                alert("Ongeldige coördinaten ingevoerd.");
                 return;
             }
 
-            var rawAreaInput = prompt("Koppel aan deelgebied (kies uit: Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor geen koppeling:", "");
+            var rawAreaInput = prompt("Koppel aan deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor geen koppeling:", "");
             var chosenArea = parseTargetArea(rawAreaInput);
 
             var markerColor = "#000000";
@@ -864,50 +866,20 @@
             }
 
             var now = new Date();
-            var hours = String(now.getHours()).padStart(2, '0');
-            var minutes = String(now.getMinutes()).padStart(2, '0');
-            var defaultTime = hours + ":" + minutes;
-
-            var timeInput = prompt("Voer het tijdstip in (UU:MM):", defaultTime);
-            if (!timeInput) timeInput = defaultTime;
-
-            var fullName = name + areaSuffix;
+            var defaultTime = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
+            var timeInput = prompt("Voer tijdstip in (UU:MM):", defaultTime) || defaultTime;
 
             db.ref('rdPoints').push({
                 latlng: latlng,
                 time: timeInput,
                 baseName: name,
                 area: areaKey,
-                fullName: fullName,
+                fullName: name + areaSuffix,
                 color: markerColor
             }).then(function() {
-                console.log("Punt succesvol opgeslagen in Firebase!");
                 map.setView(latlng, 14);
-            }).catch(function(error) {
-                console.error("Fout bij opslaan in Firebase:", error);
-                alert("Kon het punt niet opslaan in de database.");
             });
         }
-
-        window.updateMarker = function(btn) {
-            if (!isAdmin) return;
-            var popupDiv = btn.closest('.leaflet-popup-content');
-            [fixedHouseLayer, drawnItems, rdPointsLayer].forEach(function(group) {
-                group.eachLayer(function(layer) {
-                    if (layer.getPopup() && layer.getPopup().getElement() && layer.getPopup().getElement().contains(btn)) {
-                        var nameInput = popupDiv.querySelector('input[type="text"]');
-                        var colorInput = popupDiv.querySelector('input[type="color"]');
-                        if (nameInput && colorInput) {
-                            var latlng = layer.getLatLng();
-                            group.removeLayer(layer);
-                            var newMarker = createHouseMarker(latlng, nameInput.value, colorInput.value);
-                            group.addLayer(newMarker);
-                            newMarker.openPopup();
-                        }
-                    }
-                });
-            });
-        };
 
         var allLocations = [
             {name: "André de Thaye en Lido'76", area: "Golf", lat: 51.98140, lng: 5.93388},
@@ -990,122 +962,131 @@
         });
 
         checkZoomLevel();
-        setupDrawTools();
+
+        /* ================= VOSSEN PANEEL SLEPEN & MINIMALISEREN ================= */
+        var panel = document.getElementById('vossen-status-panel');
+        var header = document.getElementById('vossen-status-header');
+        var isDragging = false, startX, startY;
+
+        header.addEventListener('mousedown', function(e) {
+            if (e.target.tagName === 'BUTTON') return;
+            isDragging = true;
+            startX = e.clientX - panel.offsetLeft;
+            startY = e.clientY - panel.offsetTop;
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+
+        header.addEventListener('touchstart', function(e) {
+            if (e.target.tagName === 'BUTTON') return;
+            isDragging = true;
+            var touch = e.touches[0];
+            startX = touch.clientX - panel.offsetLeft;
+            startY = touch.clientY - panel.offsetTop;
+            document.addEventListener('touchmove', onTouchMove);
+            document.addEventListener('touchend', onTouchEnd);
+        });
+
+        function onMouseMove(e) { if (isDragging) movePanel(e.clientX, e.clientY); }
+        function onTouchMove(e) { if (isDragging) movePanel(e.touches[0].clientX, e.touches[0].clientY); }
+
+        function movePanel(clientX, clientY) {
+            var newX = Math.max(0, Math.min(clientX - startX, window.innerWidth - panel.offsetWidth));
+            var newY = Math.max(0, Math.min(clientY - startY, document.getElementById('map-wrapper').clientHeight - panel.offsetHeight));
+            panel.style.left = newX + 'px';
+            panel.style.top = newY + 'px';
+            panel.style.right = 'auto';
+        }
+
+        function onMouseUp() {
+            isDragging = false;
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+        function onTouchEnd() {
+            isDragging = false;
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', onTouchEnd);
+        }
+
+        function toggleVossenPanel() {
+            var list = document.getElementById('vossen-list');
+            var btn = document.getElementById('minimize-btn');
+            if (list.style.display === 'none') {
+                list.style.display = 'block';
+                btn.innerText = '-';
+            } else {
+                list.style.display = 'none';
+                btn.innerText = '+';
+            }
+        }
+
+        var disabledBlinks = {};
+        function toggleBlink(teamName) {
+            disabledBlinks[teamName] = !disabledBlinks[teamName];
+            fetchJotihuntData();
+        }
 
         var knownArticleIds = new Set();
         var isInitialArticleLoad = true;
 
+        function fetchLatestArticleManual() {
+            fetch('https://jotihunt.nl/api/2.0/articles')
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.data && data.data.length > 0) {
+                        var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
+                        document.getElementById('notification-text').innerText = "🔔 Laatste bericht: " + (sorted[0].title || 'Geen titel');
+                        document.getElementById('notification-banner').style.display = 'flex';
+                    }
+                });
+        }
+
         function fetchJotihuntData() {
             fetch('https://jotihunt.nl/api/2.0/articles')
-                .then(response => response.json())
+                .then(r => r.json())
                 .then(data => {
-                    if (data && data.data && Array.isArray(data.data)) {
-                        var sortedArticles = data.data.sort(function(a, b) {
-                            return (b.id || 0) - (a.id || 0);
-                        });
-
+                    if (data && data.data) {
+                        var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
                         if (isInitialArticleLoad) {
-                            sortedArticles.forEach(article => knownArticleIds.add(article.id));
+                            sorted.forEach(a => knownArticleIds.add(a.id));
                             isInitialArticleLoad = false;
                         } else {
-                            sortedArticles.forEach(article => {
-                                if (!knownArticleIds.has(article.id)) {
-                                    knownArticleIds.add(article.id);
-                                    document.getElementById('notification-text').innerText = "🔔 Nieuw bericht: " + (article.title || 'Geen titel');
+                            sorted.forEach(a => {
+                                if (!knownArticleIds.has(a.id)) {
+                                    knownArticleIds.add(a.id);
+                                    document.getElementById('notification-text').innerText = "🔔 Nieuw: " + (a.title || 'Geen titel');
                                     document.getElementById('notification-banner').style.display = 'flex';
-                                    setTimeout(function() { map.invalidateSize(); }, 50);
                                 }
                             });
                         }
+                        document.getElementById('api-status').style.color = "#2ecc71";
                     }
-                })
-                .catch(error => {
-                    console.error("Fout bij ophalen artikelen:", error);
-                });
+                }).catch(() => { document.getElementById('api-status').style.color = "#e74c3c"; });
 
             fetch('https://jotihunt.nl/api/2.0/areas')
-                .then(response => response.json())
+                .then(r => r.json())
                 .then(data => {
                     if (data && data.data) {
-                        var vossenListHtml = '';
-                        
-                        var filteredAreas = data.data.filter(area => {
-                            var name = area.name || area.title || '';
-                            return targetAreas.some(target => name.toLowerCase().includes(target.toLowerCase()));
-                        });
-
+                        var html = '';
                         targetAreas.forEach(targetName => {
-                            var foundArea = filteredAreas.find(a => (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase()));
-                            
-                            var teamName = targetName;
-                            var rawStatus = foundArea ? (foundArea.status || '').toLowerCase() : 'vervangen';
-                            
-                            var statusClass = 'status-vervangen';
-                            
-                            if (rawStatus.includes('actief') || rawStatus === 'active' || rawStatus === 'field') {
-                                statusClass = 'status-actief';
-                            } else if (rawStatus.includes('gevangen') || rawStatus === 'caught' || rawStatus === 'jail') {
-                                statusClass = 'status-gevangen';
-                                if (!disabledBlinks[teamName]) {
-                                    statusClass += ' knipperen';
-                                }
-                            } else if (rawStatus.includes('rust') || rawStatus === 'pause' || rawStatus === 'resting') {
-                                statusClass = 'status-rust';
-                            }
+                            var area = data.data.find(a => (a.name||a.title||'').toLowerCase().includes(targetName.toLowerCase()));
+                            var rawStatus = area ? (area.status||'').toLowerCase() : 'vervangen';
+                            var cls = 'status-vervangen';
+                            if (rawStatus.includes('actief') || rawStatus === 'active') cls = 'status-actief';
+                            else if (rawStatus.includes('gevangen') || rawStatus === 'caught') {
+                                cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
+                            } else if (rawStatus.includes('rust') || rawStatus === 'pause') cls = 'status-rust';
 
-                            vossenListHtml += `<div class="vogel-status-item ${statusClass}" onclick="toggleBlink('${teamName}')" title="Klik om knipperen aan/uit te zetten">${teamName}</div>`;
+                            html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')">${targetName}</div>`;
                         });
-
-                        document.getElementById('vossen-list').innerHTML = vossenListHtml;
+                        document.getElementById('vossen-list').innerHTML = html;
                     }
-                })
-                .catch(error => {
-                    console.error("Fout bij ophalen vossen status:", error);
-                });
+                }).catch(console.error);
         }
 
         fetchJotihuntData();
         setInterval(fetchJotihuntData, 20000);
-
-        map.on(L.Draw.Event.CREATED, function (e) {
-            if (!isAdmin) return;
-            var layer = e.layer;
-            if (e.layerType === 'marker') {
-                var markerName = prompt("Voer een naam in voor deze plek:", "Nieuwe locatie");
-                if (!markerName) markerName = "Locatie";
-                var markerColor = prompt("Kies een kleur (bijv. red, blue, green of hex #ff0000):", "#e74c3c");
-                if (!markerColor) markerColor = "#e74c3c";
-
-                var latlng = layer.getLatLng();
-                db.ref('drawnItems').push({
-                    type: 'marker',
-                    latlng: [latlng.lat, latlng.lng],
-                    name: markerName,
-                    color: markerColor
-                });
-            } else if (e.layerType === 'polyline') {
-                var lineName = prompt("Voer een naam in voor deze route:", "Route");
-                if (!lineName) lineName = "Route";
-
-                var rawAreaInput = prompt("Koppel aan deelgebied (kies uit: Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor standaard zwart:", "");
-                var chosenArea = parseTargetArea(rawAreaInput);
-                
-                var lineColor = "#000000";
-                if (chosenArea && areaColors[chosenArea]) {
-                    lineColor = (chosenArea === "Oscar") ? "#003399" : areaColors[chosenArea];
-                    lineName = lineName + " (" + chosenArea + ")";
-                }
-
-                var latlngs = layer.getLatLngs().map(function(pt) { return [pt.lat, pt.lng]; });
-
-                db.ref('drawnItems').push({
-                    type: 'polyline',
-                    latlngs: latlngs,
-                    name: lineName,
-                    color: lineColor
-                });
-            }
-        });
     </script>
 </body>
 </html>
