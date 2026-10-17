@@ -4,10 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Scouting Amalgama Jotihunt app</title>
+
+    <!-- PWA Instellingen -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Jotihunt">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet Draw CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
     <!-- Proj4js voor RD naar GPS coördinaten conversie -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+
     <style>
         body, html {
             margin: 0;
@@ -107,11 +119,6 @@
             overflow: hidden;
             margin-right: 8px;
         }
-        #header-main-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
         #header h1 {
             margin: 0;
             font-size: 14px;
@@ -129,7 +136,7 @@
         .header-right {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             font-size: 12px;
             flex-shrink: 0;
         }
@@ -145,20 +152,16 @@
             transition: background 0.2s;
             white-space: nowrap;
         }
-        .header-btn:hover { background-color: #2980b9; }
+        .header-btn:hover {
+            background-color: #2980b9;
+        }
         #btn-fetch-latest { background-color: #e67e22; }
         #btn-fetch-latest:hover { background-color: #d35400; }
         #clear-rd-btn { background-color: #c0392b; }
         #btn-logout { background-color: #7f8c8d; }
         #btn-logout:hover { background-color: #95a5a6; }
 
-        #api-fleur-icon {
-            display: inline-block;
-            vertical-align: middle;
-            transition: fill 0.3s;
-        }
-
-        /* Notificatiebanner (Aanklikbaar naar Jotihunt.nl) */
+        /* Notificatiebanner */
         #notification-banner {
             background-color: #e74c3c;
             color: white;
@@ -172,21 +175,7 @@
             font-size: 13px;
             width: 100%;
             box-sizing: border-box;
-        }
-        #notification-link {
-            color: white;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-grow: 1;
             cursor: pointer;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        #notification-link:hover {
-            text-decoration: underline;
         }
 
         #map-wrapper {
@@ -255,6 +244,7 @@
             transition: background-color 0.2s;
         }
         
+        /* Status kleuren */
         .status-actief { background-color: #d4efdf; color: #27ae60; border: 1px solid #2ecc71; }
         .status-gevangen { background-color: #fadbd8; color: #c0392b; border: 1px solid #e74c3c; }
         .status-rust { background-color: #fcf3cf; color: #b7950b; border: 1px solid #f1c40f; }
@@ -282,26 +272,29 @@
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.3);
             display: none;
-            pointer-events: none;
         }
         .zoom-in-to-show .marker-label {
-            display: block !important;
+            display: block;
         }
-
+        
+        /* Labels voor gebruikers */
         .user-gps-label-active {
             background: #27ae60 !important;
             color: #ffffff !important;
             border: 1px solid #ffffff !important;
             font-weight: bold;
+            display: block !important;
         }
         .user-gps-label-inactive {
             background: #7f8c8d !important;
             color: #ffffff !important;
             border: 1px solid #e74c3c !important;
             font-weight: bold;
+            display: block !important;
         }
 
-        .compass-label-cardinal {
+        /* Windrichting labels op de cirkel */
+        .compass-label {
             background: #2c3e50;
             color: #ffffff;
             border: 1px solid #e67e22;
@@ -313,39 +306,6 @@
             font-weight: bold;
             font-size: 12px;
             box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-        }
-        .compass-label-inter {
-            background: #34495e;
-            color: #ecf0f1;
-            border: 1px dashed #e67e22;
-            border-radius: 50%;
-            width: 19px;
-            height: 19px;
-            line-height: 19px;
-            text-align: center;
-            font-weight: bold;
-            font-size: 9px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        }
-
-        .popup-content {
-            text-align: center;
-            font-size: 13px;
-        }
-        .nav-btn {
-            display: inline-block;
-            margin-top: 8px;
-            padding: 6px 10px;
-            background-color: #27ae60;
-            color: #ffffff !important;
-            text-decoration: none;
-            font-weight: bold;
-            border-radius: 4px;
-            font-size: 12px;
-            transition: background 0.2s;
-        }
-        .nav-btn:hover {
-            background-color: #219653;
         }
     </style>
 </head>
@@ -366,12 +326,7 @@
     <div id="app-container">
         <div id="header">
             <div id="header-title-box">
-                <div id="header-main-title">
-                    <svg id="header-fleur" viewBox="0 0 24 24" width="20" height="20" fill="#f1c40f">
-                        <path d="M12 2C11.5 5 9.5 8 7 9c2 1 3 3 3 5 0 2-1 4-2 4 2 0 4-1 4-3 0 2 2 3 4 3-1 0-2-2-2-4 0-2 1-4 3-5-2.5-1-4.5-4-5-7zm-1 17h2v3h-2v-3z"/>
-                    </svg>
-                    <h1>Scouting Amalgama Jotihunt app</h1>
-                </div>
+                <h1>Scouting Amalgama Jotihunt app</h1>
                 <div id="user-badge">Niet ingelogd</div>
             </div>
             <div class="header-right">
@@ -379,20 +334,13 @@
                 <button class="header-btn" id="btn-add-rd" onclick="addMarkerByRD()" style="display:none;">+ RD</button>
                 <button class="header-btn" id="clear-rd-btn" onclick="clearRdPoints()" style="display:none;">Wis</button>
                 <button class="header-btn" id="btn-logout" onclick="logout()" title="Uitloggen">Uitloggen</button>
-                
-                <svg id="api-fleur-icon" viewBox="0 0 24 24" width="20" height="20" fill="#2ecc71" title="API Status">
-                    <path d="M12 2C11.5 5 9.5 8 7 9c2 1 3 3 3 5 0 2-1 4-2 4 2 0 4-1 4-3 0 2 2 3 4 3-1 0-2-2-2-4 0-2 1-4 3-5-2.5-1-4.5-4-5-7zm-1 17h2v3h-2v-3z"/>
-                </svg>
+                <div><span id="api-status" style="color: #2ecc71;">●</span></div>
             </div>
         </div>
 
-        <!-- Notificatiebanner met directe link naar Jotihunt.nl -->
-        <div id="notification-banner">
-            <a id="notification-link" href="https://jotihunt.nl/" target="_blank" rel="noopener noreferrer" title="Klik om naar Jotihunt.nl te gaan">
-                <span id="notification-text">🔔 Nieuw bericht!</span>
-                <span style="font-size: 11px; opacity: 0.85; text-decoration: underline;">(Bekijk op Jotihunt.nl ↗)</span>
-            </a>
-            <button onclick="document.getElementById('notification-banner').style.display='none'" style="background: white; color: #e74c3c; border: none; padding: 2px 7px; border-radius: 3px; cursor: pointer; font-weight: bold; margin-left: 10px;">✕</button>
+        <div id="notification-banner" onclick="openJotihuntSite()">
+            <span id="notification-text">🔔 Nieuw bericht!</span>
+            <button onclick="dismissNotification(event)" style="background: white; color: #e74c3c; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-weight: bold;">✕</button>
         </div>
         
         <div id="map-wrapper">
@@ -410,7 +358,19 @@
         </div>
     </div>
 
+    <!-- Service Worker Registratie -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('Service Worker geregistreerd:', reg.scope))
+                    .catch(err => console.warn('SW registratiefout:', err));
+            });
+        }
+    </script>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 
     <!-- Firebase SDK (Compat v10) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
@@ -434,6 +394,15 @@
         var isAdmin = false;
         var currentUserName = "";
         var currentUserId = "";
+
+        function openJotihuntSite() {
+            window.open('https://jotihunt.nl/', '_blank');
+        }
+
+        function dismissNotification(e) {
+            e.stopPropagation();
+            document.getElementById('notification-banner').style.display = 'none';
+        }
 
         document.getElementById('pin-input').addEventListener('input', function() {
             var val = this.value.trim();
@@ -489,6 +458,9 @@
         function logout() {
             localStorage.removeItem('jh_auth_role');
             localStorage.removeItem('jh_auth_name');
+            if (currentUserId) {
+                db.ref('liveUsers/' + currentUserId).remove();
+            }
             stopLiveTracking();
             location.reload();
         }
@@ -526,20 +498,19 @@
                 document.getElementById('btn-fetch-latest').style.display = 'inline-block';
                 document.getElementById('btn-add-rd').style.display = 'inline-block';
                 document.getElementById('clear-rd-btn').style.display = 'inline-block';
+                setupDrawTools();
             } else {
                 badge.innerText = "Hunter: " + currentUserName;
                 startBackgroundLiveTracking();
             }
 
-            initSyncEngine();
-
             setTimeout(function() {
                 map.invalidateSize();
-                checkZoomLevel();
             }, 100);
         }
 
-        /* ================= GPS TRACKING (ELKE 20 SEC) ================= */
+        /* ================= GPS BACKGROUND TRACKING ================= */
+        var watchId = null;
         var wakeLock = null;
         var workerTimer = null;
         var intervalTimer = null;
@@ -591,7 +562,7 @@
                     sendCurrentLocation();
                 };
             } catch (e) {
-                console.warn("Worker niet beschikbaar, setInterval actief:", e);
+                console.warn("Worker niet beschikbaar:", e);
             }
 
             document.addEventListener("visibilitychange", function() {
@@ -617,7 +588,7 @@
             }
         }
 
-        /* ================= KAART & COÖRDINATEN ================= */
+        /* ================= KAART & LEAFLET ================= */
         proj4.defs("EPSG:28992", "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.387638888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.417,50.3319,465.524,-0.398957,0.343988,-1.8774,4.0725 +units=m +no_defs");
         proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 
@@ -644,37 +615,25 @@
             var parts = coordInput.split(/[\s,;]+/);
             if (parts.length < 2) return null;
 
-            var val1Str = parts[0].replace(',', '.');
-            var val2Str = parts[1].replace(',', '.');
-            var val1 = parseFloat(val1Str);
-            var val2 = parseFloat(val2Str);
-
+            var val1 = parseFloat(parts[0].replace(',', '.'));
+            var val2 = parseFloat(parts[1].replace(',', '.'));
             if (isNaN(val1) || isNaN(val2)) return null;
 
             if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
                 return [val1, val2];
             } else {
-                var xPart = val1Str.split('.')[0];
-                var yPart = val2Str.split('.')[0];
+                var xStr = parts[0].replace(',', '.').split('.')[0];
+                var yStr = parts[1].replace(',', '.').split('.')[0];
 
-                var x = parseFloat(xPart);
-                var y = parseFloat(yPart);
+                while (xStr.length < 6) { xStr += "0"; }
+                while (yStr.length < 6) { yStr += "0"; }
 
-                if (xPart.length === 4) x = x * 100;
-                else if (xPart.length === 5) x = x * 10;
-
-                if (yPart.length === 4) y = y * 100;
-                else if (yPart.length === 5) y = y * 10;
-
-                while (x.toString().length < 6) { x = x * 10; }
-                while (y.toString().length < 6) { y = y * 10; }
+                var x = parseFloat(xStr);
+                var y = parseFloat(yStr);
 
                 try {
                     var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
-                    if (latLngArray[1] >= 50 && latLngArray[1] <= 54 && latLngArray[0] >= 3 && latLngArray[0] <= 8) {
-                        return [latLngArray[1], latLngArray[0]];
-                    }
-                    return null;
+                    return [latLngArray[1], latLngArray[0]];
                 } catch (e) {
                     console.error("Fout bij RD conversie:", e);
                     return null;
@@ -682,21 +641,31 @@
             }
         }
 
-        var map = L.map('map', { closePopupOnClick: true }).setView([51.9851, 5.8987], 10);
+        var map = L.map('map').setView([51.9851, 5.8987], 10);
 
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
             maxZoom: 19,
             attribution: 'Tiles &copy; Esri'
         }).addTo(map);
 
+        function checkZoomLevel() {
+            var mapContainer = document.getElementById('map');
+            if (map.getZoom() >= 12) {
+                mapContainer.classList.add('zoom-in-to-show');
+            } else {
+                mapContainer.classList.remove('zoom-in-to-show');
+            }
+        }
+        map.on('zoomend', checkZoomLevel);
+
         var fixedHouseLayer = new L.FeatureGroup().addTo(map);
+        var drawnItems = new L.FeatureGroup().addTo(map);
         var rdPointsLayer = new L.FeatureGroup().addTo(map);
         var rdRouteLayer = new L.FeatureGroup().addTo(map);
         var usersLiveLayer = new L.FeatureGroup().addTo(map);
-        var circleOverlayLayer = new L.FeatureGroup();
         var liveUserMarkers = {};
 
-        /* ================= 450M CIRKEL & KOMPAS ================= */
+        // 450m cirkel rond Scouting Amalgama
         var amalgamaLat = 51.83915;
         var amalgamaLng = 5.78562;
         var radiusMeters = 450;
@@ -708,77 +677,37 @@
             dashArray: '5, 5',
             fillColor: '#e67e22',
             fillOpacity: 0.12
-        }).addTo(circleOverlayLayer);
+        }).addTo(map).bindTooltip("450m Straal Amalgama", { direction: 'top' });
 
         var latOffset = radiusMeters / 111320; 
         var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180)));
-        var diagOffsetLat = latOffset * 0.7071;
-        var diagOffsetLng = lngOffset * 0.7071;
 
-        var allDirections = [
-            { label: 'N', lat: amalgamaLat + latOffset, lng: amalgamaLng, isCardinal: true },
-            { label: 'O', lat: amalgamaLat, lng: amalgamaLng + lngOffset, isCardinal: true },
-            { label: 'Z', lat: amalgamaLat - latOffset, lng: amalgamaLng, isCardinal: true },
-            { label: 'W', lat: amalgamaLat, lng: amalgamaLng - lngOffset, isCardinal: true },
-            { label: 'NO', lat: amalgamaLat + diagOffsetLat, lng: amalgamaLng + diagOffsetLng, isCardinal: false },
-            { label: 'ZO', lat: amalgamaLat - diagOffsetLat, lng: amalgamaLng + diagOffsetLng, isCardinal: false },
-            { label: 'ZW', lat: amalgamaLat - diagOffsetLat, lng: amalgamaLng - diagOffsetLng, isCardinal: false },
-            { label: 'NW', lat: amalgamaLat + diagOffsetLat, lng: amalgamaLng - diagOffsetLng, isCardinal: false }
+        var directions = [
+            { label: 'N', lat: amalgamaLat + latOffset, lng: amalgamaLng },
+            { label: 'Z', lat: amalgamaLat - latOffset, lng: amalgamaLng },
+            { label: 'O', lat: amalgamaLat, lng: amalgamaLng + lngOffset },
+            { label: 'W', lat: amalgamaLat, lng: amalgamaLng - lngOffset }
         ];
 
-        allDirections.forEach(function(dir) {
-            var cls = dir.isCardinal ? 'compass-label-cardinal' : 'compass-label-inter';
-            var sz = dir.isCardinal ? 22 : 19;
+        directions.forEach(function(dir) {
             var icon = L.divIcon({
                 className: 'compass-icon-wrapper',
-                html: `<div class="${cls}">${dir.label}</div>`,
-                iconSize: [sz, sz],
-                iconAnchor: [sz/2, sz/2]
+                html: `<div class="compass-label">${dir.label}</div>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
             });
-            L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(circleOverlayLayer);
+            L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(map);
         });
 
-        function checkZoomLevel() {
-            var currentZoom = map.getZoom();
-            var mapContainer = document.getElementById('map');
-            if (currentZoom >= 12) {
-                mapContainer.classList.add('zoom-in-to-show');
-                if (!map.hasLayer(circleOverlayLayer)) {
-                    map.addLayer(circleOverlayLayer);
-                }
-            } else {
-                mapContainer.classList.remove('zoom-in-to-show');
-                if (map.hasLayer(circleOverlayLayer)) {
-                    map.removeLayer(circleOverlayLayer);
-                }
-            }
-        }
-        map.on('zoomend', checkZoomLevel);
-
-        function attachSmartTooltip(marker, labelText, extraClass = '') {
-            marker.bindTooltip(labelText, {
-                permanent: true,
-                direction: 'right',
-                className: 'marker-label ' + extraClass
-            });
-
-            marker.on('mouseover', function() {
-                if (map.getZoom() < 12) {
-                    var tip = marker.getTooltip();
-                    if (tip && tip.getElement()) {
-                        tip.getElement().style.display = 'block';
-                    }
+        function setupDrawTools() {
+            var drawControl = new L.Control.Draw({
+                edit: { featureGroup: drawnItems, remove: true },
+                draw: {
+                    polygon: false, rectangle: false, circle: false, circlemarker: false, marker: true,
+                    polyline: { shapeOptions: { color: '#000000', weight: 4, className: 'route-line' } }
                 }
             });
-
-            marker.on('mouseout', function() {
-                if (map.getZoom() < 12) {
-                    var tip = marker.getTooltip();
-                    if (tip && tip.getElement()) {
-                        tip.getElement().style.display = 'none';
-                    }
-                }
-            });
+            map.addControl(drawControl);
         }
 
         function createHouseMarker(latlng, name, color, isOscar = false) {
@@ -796,17 +725,7 @@
             });
 
             var marker = L.marker(latlng, { icon: customIcon });
-            attachSmartTooltip(marker, name);
-
-            var googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latlng[0]},${latlng[1]}`;
-
-            var popupContent = `
-                <div class="popup-content">
-                    <b>${name}</b><br>
-                    <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="nav-btn">📍 Navigeer via Google Maps</a>
-                </div>
-            `;
-            marker.bindPopup(popupContent);
+            marker.bindTooltip(name, { permanent: true, direction: 'right', className: 'marker-label' });
             return marker;
         }
 
@@ -825,27 +744,10 @@
             });
 
             var marker = L.marker(latlng, { icon: customIcon });
-            attachSmartTooltip(marker, name + " (" + timeStr + ")");
-
-            var googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latlng[0]},${latlng[1]}`;
-
-            var popupContent = `
-                <div class="popup-content">
-                    <b>${name}</b><br>
-                    <span style="font-size: 12px; color: #2c3e50; font-weight: bold;">Tijd: ${timeStr}</span><br>
-                    <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="nav-btn">📍 Navigeer via Google Maps</a>
-                    ${isAdmin ? `
-                        <div style="margin-top: 8px; border-top: 1px solid #ddd; padding-top: 5px;">
-                            <button onclick="window.editRdPoint(this)" title="Bewerk punt" style="background: #f39c12; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: bold;">✏️ Bewerk</button>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
-            marker.bindPopup(popupContent);
+            marker.bindTooltip(name + " (" + timeStr + ")", { permanent: true, direction: 'right', className: 'marker-label' });
             return marker;
         }
 
-        /* ================= LIVE GEBRUIKERS (BLIJVEN ALTIJD ZICHTBAAR) ================= */
         function createUserIcon(isActive) {
             var fillColor = isActive ? "#2ecc71" : "#7f8c8d";
             var strokeColor = isActive ? "#ffffff" : "#e74c3c";
@@ -864,15 +766,7 @@
             });
         }
 
-        function formatTimeAgo(diffMs) {
-            var minutes = Math.floor(diffMs / 60000);
-            if (minutes <= 0) return "Zojuist";
-            if (minutes < 60) return minutes + "m geleden";
-            var hours = Math.floor(minutes / 60);
-            var remainingMin = minutes % 60;
-            return hours + "u " + (remainingMin > 0 ? remainingMin + "m " : "") + "geleden";
-        }
-
+        /* ================= LIVE GEBRUIKERS BEHOUDEN OP KAART ================= */
         db.ref('liveUsers').on('value', function(snapshot) {
             var users = snapshot.val();
             var now = Date.now();
@@ -887,38 +781,23 @@
                 var u = users[userId];
                 if (!u || !u.lat || !u.lng) return;
 
-                // De marker verdwijnt nooit: actieve status binnen 3 min, anders inactief
-                var diff = now - (u.lastSeen || 0);
-                var isActive = diff <= (3 * 60 * 1000);
-                var timeAgoText = formatTimeAgo(diff);
+                var isActive = (now - (u.lastSeen || 0)) <= (3 * 60 * 1000);
+                var minutesAgo = Math.floor((now - (u.lastSeen || 0)) / 60000);
+                var timeAgoText = minutesAgo <= 0 ? "Zojuist" : minutesAgo + "m geleden";
 
                 var icon = createUserIcon(isActive);
-                var labelClass = isActive ? 'user-gps-label-active' : 'user-gps-label-inactive';
-                var statusText = isActive ? '<span style="color:#2ecc71; font-weight:bold;">● Actief</span>' : '<span style="color:#e74c3c; font-weight:bold;">● Laatst bekende positie</span>';
-
-                var googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${u.lat},${u.lng}`;
+                var labelClass = isActive ? 'marker-label user-gps-label-active' : 'marker-label user-gps-label-inactive';
+                var statusText = isActive ? '<span style="color:#2ecc71; font-weight:bold;">● Actief</span>' : '<span style="color:#e74c3c; font-weight:bold;">● Inactief</span>';
 
                 if (liveUserMarkers[userId]) {
                     liveUserMarkers[userId].setLatLng([u.lat, u.lng]);
                     liveUserMarkers[userId].setIcon(icon);
                     liveUserMarkers[userId].setTooltipContent("🚗 " + u.name);
-                    liveUserMarkers[userId].getPopup().setContent(`
-                        <b>🚗 ${u.name}</b><br>
-                        Status: ${statusText}<br>
-                        Nauwkeurigheid: ~${u.accuracy || '?'}m<br>
-                        Laatste update: ${timeAgoText}<br>
-                        <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="nav-btn">📍 Navigeer naar auto</a>
-                    `);
+                    liveUserMarkers[userId].getPopup().setContent(`<b>🚗 ${u.name}</b><br>Status: ${statusText}<br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
                 } else {
                     var m = L.marker([u.lat, u.lng], { icon: icon });
-                    attachSmartTooltip(m, "🚗 " + u.name, labelClass);
-                    m.bindPopup(`
-                        <b>🚗 ${u.name}</b><br>
-                        Status: ${statusText}<br>
-                        Nauwkeurigheid: ~${u.accuracy || '?'}m<br>
-                        Laatste update: ${timeAgoText}<br>
-                        <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="nav-btn">📍 Navigeer naar auto</a>
-                    `);
+                    m.bindTooltip("🚗 " + u.name, { permanent: true, direction: 'top', className: labelClass });
+                    m.bindPopup(`<b>🚗 ${u.name}</b><br>Status: ${statusText}<br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
                     usersLiveLayer.addLayer(m);
                     liveUserMarkers[userId] = m;
                 }
@@ -966,81 +845,28 @@
             updateRdRoutes();
         });
 
-        window.editRdPoint = function(btn) {
-            if (!isAdmin) return;
-            
-            rdPointsLayer.eachLayer(function(layer) {
-                if (layer.getPopup() && layer.getPopup().getElement() && layer.getPopup().getElement().contains(btn)) {
-                    var currentLatlng = layer.getLatLng();
+        db.ref('drawnItems').on('value', function(snapshot) {
+            drawnItems.clearLayers();
+            var data = snapshot.val();
+            if (!data) return;
 
-                    var foundArea = "";
-                    var foundObj = null;
-                    for (var area in rdPointsByArea) {
-                        var idx = rdPointsByArea[area].findIndex(p => p.marker === layer);
-                        if (idx !== -1) {
-                            foundArea = area;
-                            foundObj = rdPointsByArea[area][idx];
-                            break;
-                        }
-                    }
-
-                    var currentBaseName = foundObj ? foundObj.baseName : "Punt";
-                    var currentTime = foundObj ? foundObj.time : "12:00";
-                    var firebaseKey = foundObj ? foundObj.firebaseKey : null;
-
-                    var newName = prompt("Bewerk naam voor dit punt:", currentBaseName);
-                    if (newName === null) return;
-
-                    var newTime = prompt("Bewerk tijdstip (UU:MM):", currentTime);
-                    if (!newTime) newTime = currentTime;
-
-                    var rawAreaInput = prompt("Koppel aan deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar):\nLaat leeg voor geen koppeling", foundArea);
-                    if (rawAreaInput === null) rawAreaInput = foundArea;
-                    
-                    var newArea = parseTargetArea(rawAreaInput);
-
-                    var coordInput = prompt("Nieuwe coördinaten invoeren (RD of GPS)?\nLaat leeg om huidige locatie te behouden.\nBijv: 1800, 4500 OF 51.9851, 5.8987", "");
-                    
-                    var targetLatlng = [currentLatlng.lat, currentLatlng.lng];
-
-                    if (coordInput && coordInput.trim() !== "") {
-                        var converted = parseCoordInput(coordInput);
-                        if (converted) {
-                            targetLatlng = converted;
-                        } else {
-                            alert("Ongeldige coördinaten. Locatie blijft ongewijzigd.");
-                        }
-                    }
-
-                    var markerColor = "#000000";
-                    var areaSuffix = "";
-
-                    if (newArea && areaColors[newArea]) {
-                        markerColor = areaColors[newArea];
-                        areaSuffix = " [" + newArea + "]";
-                    } else {
-                        newArea = "";
-                    }
-
-                    var fullName = newName + areaSuffix;
-
-                    if (firebaseKey) {
-                        db.ref('rdPoints/' + firebaseKey).set({
-                            latlng: targetLatlng,
-                            time: newTime,
-                            baseName: newName,
-                            area: newArea,
-                            fullName: fullName,
-                            color: markerColor
-                        });
-                    }
+            Object.keys(data).forEach(function(key) {
+                var item = data[key];
+                if (item.type === 'marker') {
+                    var isOscar = item.name.includes("[Oscar]");
+                    var m = createHouseMarker(item.latlng, item.name, item.color, isOscar);
+                    drawnItems.addLayer(m);
+                } else if (item.type === 'polyline') {
+                    var pl = L.polyline(item.latlngs, { color: item.color, weight: 4, className: 'route-line' });
+                    pl.bindTooltip(item.name, { permanent: true, direction: 'center', className: 'marker-label' });
+                    pl.bindPopup("<b>" + item.name + "</b>");
+                    drawnItems.addLayer(pl);
                 }
             });
-        };
+        });
 
         function updateRdRoutes() {
             rdRouteLayer.clearLayers();
-
             for (var area in rdPointsByArea) {
                 var points = rdPointsByArea[area];
                 if (points.length < 2) continue;
@@ -1060,33 +886,31 @@
 
         function clearRdPoints() {
             if (!isAdmin) return;
-            var pinInput = prompt("Voer de pincode in om de RD-lijnen te wissen:", "");
-            if (pinInput === null) return;
-
-            if (pinInput.trim() === "6546") {
+            var pinInput = prompt("Voer de admin-pincode in om de RD-lijnen te wissen:", "");
+            if (pinInput === "6546") {
                 db.ref('rdPoints').remove().then(function() {
-                    alert("RD-punten en tijdlijnen zijn succesvol gewist voor iedereen.");
+                    alert("RD-punten succesvol gewist.");
                 });
-            } else {
-                alert("Onjuiste pincode! Het wissen is geannuleerd.");
+            } else if (pinInput !== null) {
+                alert("Onjuiste pincode!");
             }
         }
 
         function addMarkerByRD() {
             if (!isAdmin) return;
-            var name = prompt("Voer een naam in voor dit punt (bijv. Hint / Sighting):", "Punt");
+            var name = prompt("Voer een naam in voor dit punt:", "Punt");
             if (!name) return;
 
-            var coordInput = prompt("Voer coördinaten in (RD of Google Maps GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
+            var coordInput = prompt("Voer coördinaten in (RD of GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
             if (!coordInput) return;
 
             var latlng = parseCoordInput(coordInput);
             if (!latlng) {
-                alert("Ongeldige coördinaten ingevoerd. Zorg dat je getallen gebruikt.");
+                alert("Ongeldige coördinaten ingevoerd.");
                 return;
             }
 
-            var rawAreaInput = prompt("Koppel aan deelgebied (kies uit: Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor geen koppeling:", "");
+            var rawAreaInput = prompt("Koppel aan deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg voor geen koppeling:", "");
             var chosenArea = parseTargetArea(rawAreaInput);
 
             var markerColor = "#000000";
@@ -1100,27 +924,18 @@
             }
 
             var now = new Date();
-            var hours = String(now.getHours()).padStart(2, '0');
-            var minutes = String(now.getMinutes()).padStart(2, '0');
-            var defaultTime = hours + ":" + minutes;
-
-            var timeInput = prompt("Voer het tijdstip in (UU:MM):", defaultTime);
-            if (!timeInput) timeInput = defaultTime;
-
-            var fullName = name + areaSuffix;
+            var defaultTime = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
+            var timeInput = prompt("Voer tijdstip in (UU:MM):", defaultTime) || defaultTime;
 
             db.ref('rdPoints').push({
                 latlng: latlng,
                 time: timeInput,
                 baseName: name,
                 area: areaKey,
-                fullName: fullName,
+                fullName: name + areaSuffix,
                 color: markerColor
             }).then(function() {
                 map.setView(latlng, 14);
-            }).catch(function(error) {
-                console.error("Fout bij opslaan in Firebase:", error);
-                alert("Kon het punt niet opslaan in de database.");
             });
         }
 
@@ -1267,115 +1082,69 @@
         var disabledBlinks = {};
         function toggleBlink(teamName) {
             disabledBlinks[teamName] = !disabledBlinks[teamName];
-            renderVossenFromCache(lastCachedAreas);
+            fetchJotihuntData();
         }
 
-        function getSafeProxyUrl(apiUrl) {
-            return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(apiUrl);
-        }
+        var knownArticleIds = new Set();
+        var isInitialArticleLoad = true;
 
         function fetchLatestArticleManual() {
-            db.ref('jotihuntSync/latestArticle').once('value', snapshot => {
-                var article = snapshot.val();
-                if (article) {
-                    var title = article.title || article.message || article.msg || 'Nieuw bericht';
-                    document.getElementById('notification-text').innerText = "🔔 Laatste: " + title;
-                    document.getElementById('notification-banner').style.display = 'flex';
-                } else {
-                    alert("Er is nog geen recent artikel gesynchroniseerd.");
-                }
-            });
-        }
-
-        /* ================= CENTRALE CACHE-SYNC (ADMIN MASTER -> FIREBASE) ================= */
-        var lastCachedAreas = null;
-
-        function renderVossenFromCache(areasData) {
-            if (!areasData) return;
-            lastCachedAreas = areasData;
-
-            var html = '';
-            targetAreas.forEach(targetName => {
-                var area = areasData.find(a => (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase()));
-                var rawStatus = area ? (area.status || '').toLowerCase().trim() : 'vervangen';
-                
-                var cls = 'status-vervangen';
-
-                if (rawStatus === 'inactief' || rawStatus.includes('red') || rawStatus.includes('gevangen') || rawStatus === 'caught' || rawStatus === 'jail') {
-                    cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
-                } else if (rawStatus.includes('rust') || rawStatus === 'pause' || rawStatus === 'resting' || rawStatus.includes('orange') || rawStatus.includes('yellow')) {
-                    cls = 'status-rust';
-                } else if (rawStatus.includes('actief') || rawStatus === 'active' || rawStatus === 'green' || rawStatus === 'field') {
-                    cls = 'status-actief';
-                }
-
-                html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')">${targetName}</div>`;
-            });
-            document.getElementById('vossen-list').innerHTML = html;
-        }
-
-        function initSyncEngine() {
-            // 1. Zowel Admin als alle Hunters luisteren naar Firebase (geen API calls voor hunters)
-            db.ref('jotihuntSync/areas').on('value', snapshot => {
-                var data = snapshot.val();
-                if (data) renderVossenFromCache(data);
-                document.getElementById('api-fleur-icon').setAttribute('fill', '#2ecc71');
-            });
-
-            // Toont het meest recente bericht direct voor IEDEREEN
-            db.ref('jotihuntSync/latestArticle').on('value', snapshot => {
-                var article = snapshot.val();
-                if (!article) return;
-
-                var title = article.title || article.message || article.msg || 'Nieuw bericht';
-                document.getElementById('notification-text').innerText = "🔔 Meest recent: " + title;
-                document.getElementById('notification-banner').style.display = 'flex';
-            });
-
-            // 2. Alleen Admin pollt Jotihunt via proxy; hunters fungeren als fail-over na inactiviteit
-            setInterval(checkAndPerformApiSync, 25000);
-            checkAndPerformApiSync();
-        }
-
-        async function checkAndPerformApiSync() {
-            db.ref('jotihuntSync/lastSyncTimestamp').once('value', async snapshot => {
-                var lastSync = snapshot.val() || 0;
-                var now = Date.now();
-
-                var shouldSync = isAdmin ? (now - lastSync > 20000) : (now - lastSync > 90000);
-
-                if (shouldSync) {
-                    try {
-                        db.ref('jotihuntSync/lastSyncTimestamp').set(now);
-
-                        var resArt = await fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/articles'));
-                        if (resArt.status === 429) {
-                            document.getElementById('api-fleur-icon').setAttribute('fill', '#e67e22');
-                            return;
-                        }
-                        var dataArt = await resArt.json();
-                        if (dataArt && dataArt.data && dataArt.data.length > 0) {
-                            var sorted = dataArt.data.sort((a,b) => (b.id||0) - (a.id||0));
-                            db.ref('jotihuntSync/latestArticle').set(sorted[0]);
-                        }
-
-                        setTimeout(async () => {
-                            var resArea = await fetch(getSafeProxyUrl('https://jotihunt.nl/api/2.0/areas'));
-                            if (resArea.ok) {
-                                var dataArea = await resArea.json();
-                                if (dataArea && dataArea.data) {
-                                    db.ref('jotihuntSync/areas').set(dataArea.data);
-                                }
-                            }
-                        }, 3000);
-
-                    } catch (err) {
-                        console.warn("Centrale sync fout:", err);
-                        document.getElementById('api-fleur-icon').setAttribute('fill', '#e74c3c');
+            fetch('https://jotihunt.nl/api/2.0/articles')
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.data && data.data.length > 0) {
+                        var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
+                        document.getElementById('notification-text').innerText = "🔔 Laatste bericht: " + (sorted[0].title || 'Geen titel');
+                        document.getElementById('notification-banner').style.display = 'flex';
                     }
-                }
-            });
+                });
         }
+
+        function fetchJotihuntData() {
+            fetch('https://jotihunt.nl/api/2.0/articles')
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.data) {
+                        var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
+                        if (isInitialArticleLoad) {
+                            sorted.forEach(a => knownArticleIds.add(a.id));
+                            isInitialArticleLoad = false;
+                        } else {
+                            sorted.forEach(a => {
+                                if (!knownArticleIds.has(a.id)) {
+                                    knownArticleIds.add(a.id);
+                                    document.getElementById('notification-text').innerText = "🔔 Nieuw: " + (a.title || 'Geen titel');
+                                    document.getElementById('notification-banner').style.display = 'flex';
+                                }
+                            });
+                        }
+                        document.getElementById('api-status').style.color = "#2ecc71";
+                    }
+                }).catch(() => { document.getElementById('api-status').style.color = "#e74c3c"; });
+
+            fetch('https://jotihunt.nl/api/2.0/areas')
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.data) {
+                        var html = '';
+                        targetAreas.forEach(targetName => {
+                            var area = data.data.find(a => (a.name||a.title||'').toLowerCase().includes(targetName.toLowerCase()));
+                            var rawStatus = area ? (area.status||'').toLowerCase() : 'vervangen';
+                            var cls = 'status-vervangen';
+                            if (rawStatus.includes('actief') || rawStatus === 'active') cls = 'status-actief';
+                            else if (rawStatus.includes('gevangen') || rawStatus === 'caught') {
+                                cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
+                            } else if (rawStatus.includes('rust') || rawStatus === 'pause') cls = 'status-rust';
+
+                            html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')">${targetName}</div>`;
+                        });
+                        document.getElementById('vossen-list').innerHTML = html;
+                    }
+                }).catch(console.error);
+        }
+
+        fetchJotihuntData();
+        setInterval(fetchJotihuntData, 20000);
     </script>
 </body>
 </html>
