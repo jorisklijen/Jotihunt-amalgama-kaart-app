@@ -319,6 +319,7 @@
                 document.getElementById('btn-add-rd').style.display = 'inline-block';
                 document.getElementById('clear-rd-btn').style.display = 'inline-block';
                 setupDrawTools();
+                syncJotihuntToFirebase();
             } else {
                 badge.innerText = "Hunter: " + currentUserName;
                 startBackgroundLiveTracking();
@@ -331,20 +332,17 @@
             }, 100);
         }
 
-        /* ================= SCREEN WAKE LOCK (SCHERM AAN HOUDEN) ================= */
+        /* ================= SCREEN WAKE LOCK ================= */
         var wakeLock = null;
         async function keepScreenAwake() {
             try {
                 if ('wakeLock' in navigator) {
                     wakeLock = await navigator.wakeLock.request('screen');
                     wakeLock.addEventListener('release', function() {
-                        // Automatisch herstarten indien vrijgegeven
                         setTimeout(keepScreenAwake, 2000);
                     });
                 }
-            } catch (err) {
-                console.log("WakeLock niet actief of niet ondersteund:", err);
-            }
+            } catch (err) {}
         }
         document.addEventListener("visibilitychange", function() {
             if (document.visibilityState === 'visible') {
@@ -371,7 +369,7 @@
                     lastSeen: Date.now()
                 });
             }, function(err) {
-                console.warn("GPS update fout:", err.message);
+                console.warn("GPS fout:", err.message);
             }, {
                 enableHighAccuracy: true,
                 maximumAge: 5000,
@@ -399,9 +397,9 @@
             if (wakeLock !== null) { wakeLock.release(); wakeLock = null; }
         }
 
-        /* ================= WISKUNDE & GEOGRAFIE HULPMIDDELEN ================= */
+        /* ================= WISKUNDE & GEOGRAFIE ================= */
         function getDistanceKm(lat1, lon1, lat2, lon2) {
-            var R = 6371; // km
+            var R = 6371;
             var dLat = (lat2 - lat1) * Math.PI / 180;
             var dLon = (lon2 - lon1) * Math.PI / 180;
             var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
@@ -613,9 +611,9 @@
             });
         }
 
-        /* ================= VOSSEN & RD ROUTE SYNC MET VERVAGING, SNELHEID & CIRKEL ================= */
+        /* ================= VOSSEN & RD ROUTE SYNC ================= */
         var rdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
-        var latestKnownAreaPoints = {}; // Bewaart laatste coördinaat per deelgebied voor jagersnavigatie
+        var latestKnownAreaPoints = {};
 
         db.ref('rdPoints').on('value', function(snapshot) {
             for (var a in rdPointsByArea) rdPointsByArea[a] = [];
@@ -655,16 +653,13 @@
                 var points = rdPointsByArea[area];
                 if (points.length === 0) continue;
 
-                // Chronologisch sorteren
                 points.sort(function(a, b) {
                     return (a.time || "").localeCompare(b.time || "");
                 });
 
-                // Laatste bekende punt opslaan voor jagersnavigatie
                 var lastPoint = points[points.length - 1];
                 latestKnownAreaPoints[area] = lastPoint;
 
-                // Snelheid berekenen (laatste 2 tot maximaal 3 punten)
                 var speedText = "";
                 var bearingDeg = null;
                 var samplePoints = points.slice(-3);
@@ -688,28 +683,25 @@
                         }
                     }
 
-                    // Looprichting bepalen aan de hand van voorlaatste naar laatste punt
                     var prevP = points[points.length - 2];
                     bearingDeg = getBearing(prevP.latlng[0], prevP.latlng[1], lastPoint.latlng[0], lastPoint.latlng[1]);
                 }
 
-                // Teken de punten met Tijdverloop-tinting (maximaal 50% transparant)
+                // Teken punten met vervaging
                 points.forEach(function(pt, idx) {
                     var isLatest = (idx === points.length - 1);
                     var isOscar = (pt.area === "Oscar");
 
-                    // Bereken leeftijd in minuten
                     var ptMinutes = parseTimeToMinutes(pt.time);
                     var diffMinutes = 0;
                     if (ptMinutes !== null) {
                         diffMinutes = currentTotalMinutes - ptMinutes;
-                        if (diffMinutes < 0) diffMinutes += 1440; // over middernacht
+                        if (diffMinutes < 0) diffMinutes += 1440;
                     }
 
-                    // Transparantie: binnen 60 min = 1.0; daarna afbouwend naar minimaal 0.50
                     var opacity = 1.0;
                     if (diffMinutes > 60) {
-                        var fade = (diffMinutes - 60) / 180; // vervaagt verder over 3 uur
+                        var fade = (diffMinutes - 60) / 180;
                         opacity = Math.max(0.50, 1.0 - (fade * 0.50));
                     }
 
@@ -718,7 +710,7 @@
                     rdPointsLayer.addLayer(marker);
                 });
 
-                // Chronologische route-lijn
+                // Chronologische lijn
                 if (points.length >= 2) {
                     var latLngs = points.map(function(p) { return p.latlng; });
                     var lineColor = (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000");
@@ -727,18 +719,24 @@
                     rdRouteLayer.addLayer(polyline);
                 }
 
-                // ================= GEOFENCE & GROEIENDE CIRKEL =================
-                // Groeit met 5,5 km/u = 1.5277 meter per seconde
+                // ================= GEOFENCE CIRKEL (START 3M + 5,5 KM/U) =================
+                // 5,5 km/u = 5500m / 3600s = 1.527777 m/s
                 var lastPtMinutes = parseTimeToMinutes(lastPoint.time);
-                var minutesPassed = 5; // veilige basis
+                var secondsPassed = 0;
+
                 if (lastPtMinutes !== null) {
-                    minutesPassed = currentTotalMinutes - lastPtMinutes;
-                    if (minutesPassed < 0) minutesPassed += 1440;
+                    var currentTotalSeconds = (now.getHours() * 3600) + (now.getMinutes() * 60) + now.getSeconds();
+                    var pointSeconds = lastPtMinutes * 60;
+                    secondsPassed = currentTotalSeconds - pointSeconds;
+                    if (secondsPassed < 0) secondsPassed += 86400; // over middernacht
+                } else if (lastPoint.createdTimestamp) {
+                    secondsPassed = Math.max(0, Math.floor((Date.now() - lastPoint.createdTimestamp) / 1000));
                 }
-                var currentRadiusMeters = Math.max(250, Math.round(minutesPassed * (5500 / 60)));
+
+                // Begint op exact 3 meter en groeit realtime
+                var currentRadiusMeters = Math.max(3, Math.round(3 + (secondsPassed * (5500 / 3600))));
                 var areaColor = areaColors[area] || "#e74c3c";
 
-                // Groeiende cirkel
                 var circle = L.circle(lastPoint.latlng, {
                     radius: currentRadiusMeters,
                     color: areaColor,
@@ -750,7 +748,7 @@
                 });
                 geofenceLayer.addLayer(circle);
 
-                // Afstandsbadge in het midden
+                // Badge met de radius
                 var badgeIcon = L.divIcon({
                     className: 'geofence-badge-wrapper',
                     html: `<div class="geofence-radius-badge" style="border-color:${areaColor};">🎯 ${area}: ${currentRadiusMeters >= 1000 ? (currentRadiusMeters/1000).toFixed(1) + ' km' : currentRadiusMeters + ' m'}</div>`,
@@ -760,9 +758,8 @@
                 var badgeMarker = L.marker(lastPoint.latlng, { icon: badgeIcon, interactive: false });
                 geofenceLayer.addLayer(badgeMarker);
 
-                // ================= RICHTINGSPIJLEN (120 GRADEN GRADENBOOG) =================
+                // Twee richtingspijlen (120 graden gradenboog)
                 if (bearingDeg !== null) {
-                    // Twee pijlen: -60 graden en +60 graden vanaf de looprichting
                     [-60, 60].forEach(function(offsetAngle) {
                         var arrowAngle = (bearingDeg + offsetAngle + 360) % 360;
                         var arrowEndCoord = getDestinationLatLng(lastPoint.latlng[0], lastPoint.latlng[1], currentRadiusMeters, arrowAngle);
@@ -775,7 +772,6 @@
                         });
                         geofenceLayer.addLayer(arrowLine);
 
-                        // Pijlpunttip aan het einde van de boog
                         var tipSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" style="transform: rotate(${arrowAngle}deg);">
                             <polygon points="12,2 22,22 12,17 2,22" fill="${areaColor}" stroke="#ffffff" stroke-width="1.5"/>
                         </svg>`;
@@ -791,7 +787,7 @@
             }
         }
 
-        // Cirkel elke 20 seconden laten doorgroeien
+        // Cirkel elke 20 seconden laten bijwerken
         setInterval(renderRdPointsAndGeofences, 20000);
 
         /* ================= LIVE GEBRUIKERS & AFSTANDSPOPUP ================= */
@@ -821,11 +817,9 @@
                 var labelClass = isActive ? 'marker-label user-gps-label-active' : 'marker-label user-gps-label-inactive';
                 var statusText = isActive ? '<span style="color:#2ecc71; font-weight:bold;">● Actief</span>' : '<span style="color:#e74c3c; font-weight:bold;">● Inactief</span>';
 
-                // Afstand naar Scouting Amalgama
                 var distAmalgama = getDistanceKm(u.lat, u.lng, amalgamaLat, amalgamaLng).toFixed(1);
-                var etaAmalgama = Math.round((distAmalgama / 45) * 60); // geschat op 45 km/u
+                var etaAmalgama = Math.round((distAmalgama / 45) * 60);
 
-                // Dynamische afstanden naar vossen bouwen
                 var vossenOptions = `<option value="${amalgamaLat},${amalgamaLng}">Clubgebouw (${distAmalgama} km - ~${etaAmalgama} min)</option>`;
                 targetAreas.forEach(function(areaName) {
                     if (latestKnownAreaPoints[areaName]) {
@@ -877,7 +871,7 @@
             });
         });
 
-        /* ================= CRUD RD EN TEKENTOOLS ================= */
+        /* ================= RD TOEVOEGEN & WISSEN ================= */
         db.ref('drawnItems').on('value', function(snapshot) {
             drawnItems.clearLayers();
             var data = snapshot.val();
@@ -954,7 +948,7 @@
             });
         }
 
-        /* ================= VASTE GROEPEN / LOCATIES ================= */
+        /* ================= VASTE GROEPEN ================= */
         var allLocations = [
             {name: "André de Thaye en Lido'76", area: "Golf", lat: 51.98140, lng: 5.93388},
             {name: "Clan MacCastor", area: "Foxtrot", lat: 51.80907, lng: 5.78972},
@@ -1091,69 +1085,105 @@
         var disabledBlinks = {};
         function toggleBlink(teamName) {
             disabledBlinks[teamName] = !disabledBlinks[teamName];
-            fetchJotihuntData();
+            renderVossenUIFromData();
         }
 
-        var knownArticleIds = new Set();
-        var isInitialArticleLoad = true;
+        /* ================= JOTIHUNT SYNC VIA FIREBASE ================= */
+        var lastCachedAreas = [];
+        var knownArticleId = localStorage.getItem('jh_last_article_id') || null;
+
+        function renderVossenUIFromData() {
+            if (!lastCachedAreas || lastCachedAreas.length === 0) return;
+            var html = '';
+            targetAreas.forEach(function(targetName) {
+                var area = lastCachedAreas.find(function(a) {
+                    return (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase());
+                });
+                var rawStatus = area ? (area.status || '').toLowerCase() : 'vervangen';
+                var cls = 'status-vervangen';
+                
+                if (rawStatus === 'inactief' || rawStatus.includes('red') || rawStatus.includes('gevangen') || rawStatus.includes('caught')) {
+                    cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
+                } else if (rawStatus.includes('actief') || rawStatus === 'active') {
+                    cls = 'status-actief';
+                } else if (rawStatus.includes('rust') || rawStatus === 'pause') {
+                    cls = 'status-rust';
+                }
+
+                html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')">${targetName}</div>`;
+            });
+            document.getElementById('vossen-list').innerHTML = html;
+        }
+
+        // IEDEREEN luistert live naar Firebase (geen CORS, geen ratelimits)
+        db.ref('jotihuntSync').on('value', function(snapshot) {
+            var data = snapshot.val();
+            if (!data) return;
+
+            if (data.areas && Array.isArray(data.areas)) {
+                lastCachedAreas = data.areas;
+                renderVossenUIFromData();
+            }
+
+            if (data.latestArticle && data.latestArticle.title) {
+                var art = data.latestArticle;
+                if (!knownArticleId || knownArticleId !== String(art.id)) {
+                    knownArticleId = String(art.id);
+                    localStorage.setItem('jh_last_article_id', knownArticleId);
+                    document.getElementById('notification-text').innerText = "🔔 Nieuw: " + art.title;
+                    document.getElementById('notification-banner').style.display = 'flex';
+                }
+            }
+
+            document.getElementById('api-status').style.color = "#2ecc71";
+        });
+
+        // Alleen Beheerder (Admin) haalt data op via proxy
+        async function syncJotihuntToFirebase() {
+            if (!isAdmin) return;
+
+            var proxyUrl = "https://api.allorigins.win/raw?url=";
+
+            try {
+                var artRes = await fetch(proxyUrl + encodeURIComponent("https://jotihunt.nl/api/2.0/articles"));
+                var artData = await artRes.json();
+                var latestArticle = null;
+                if (artData && artData.data && artData.data.length > 0) {
+                    var sorted = artData.data.sort(function(a, b) { return (b.id || 0) - (a.id || 0); });
+                    latestArticle = sorted[0];
+                }
+
+                await new Promise(r => setTimeout(r, 2000));
+
+                var areaRes = await fetch(proxyUrl + encodeURIComponent("https://jotihunt.nl/api/2.0/areas"));
+                var areaData = await areaRes.json();
+                var areas = (areaData && areaData.data) ? areaData.data : [];
+
+                await db.ref('jotihuntSync').update({
+                    latestArticle: latestArticle,
+                    areas: areas,
+                    lastSync: Date.now()
+                });
+
+                document.getElementById('api-status').style.color = "#2ecc71";
+            } catch (err) {
+                console.warn("Sync mislukt:", err);
+                document.getElementById('api-status').style.color = "#e74c3c";
+            }
+        }
 
         function fetchLatestArticleManual() {
-            fetch('https://jotihunt.nl/api/2.0/articles')
-                .then(r => r.json())
-                .then(data => {
-                    if (data && data.data && data.data.length > 0) {
-                        var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
-                        document.getElementById('notification-text').innerText = "🔔 Laatste: " + (sorted[0].title || 'Geen titel');
-                        document.getElementById('notification-banner').style.display = 'flex';
-                    }
-                });
+            syncJotihuntToFirebase().then(function() {
+                var art = document.getElementById('notification-text').innerText;
+                if (art) document.getElementById('notification-banner').style.display = 'flex';
+            });
         }
 
-        function fetchJotihuntData() {
-            fetch('https://jotihunt.nl/api/2.0/articles')
-                .then(r => r.json())
-                .then(data => {
-                    if (data && data.data) {
-                        var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
-                        if (isInitialArticleLoad) {
-                            sorted.forEach(a => knownArticleIds.add(a.id));
-                            isInitialArticleLoad = false;
-                        } else {
-                            sorted.forEach(a => {
-                                if (!knownArticleIds.has(a.id)) {
-                                    knownArticleIds.add(a.id);
-                                    document.getElementById('notification-text').innerText = "🔔 Nieuw: " + (a.title || 'Geen titel');
-                                    document.getElementById('notification-banner').style.display = 'flex';
-                                }
-                            });
-                        }
-                        document.getElementById('api-status').style.color = "#2ecc71";
-                    }
-                }).catch(() => { document.getElementById('api-status').style.color = "#e74c3c"; });
-
-            fetch('https://jotihunt.nl/api/2.0/areas')
-                .then(r => r.json())
-                .then(data => {
-                    if (data && data.data) {
-                        var html = '';
-                        targetAreas.forEach(targetName => {
-                            var area = data.data.find(a => (a.name||a.title||'').toLowerCase().includes(targetName.toLowerCase()));
-                            var rawStatus = area ? (area.status||'').toLowerCase() : 'vervangen';
-                            var cls = 'status-vervangen';
-                            if (rawStatus.includes('actief') || rawStatus === 'active') cls = 'status-actief';
-                            else if (rawStatus.includes('gevangen') || rawStatus === 'caught') {
-                                cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
-                            } else if (rawStatus.includes('rust') || rawStatus === 'pause') cls = 'status-rust';
-
-                            html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')">${targetName}</div>`;
-                        });
-                        document.getElementById('vossen-list').innerHTML = html;
-                    }
-                }).catch(console.error);
-        }
-
-        fetchJotihuntData();
-        setInterval(fetchJotihuntData, 20000);
+        setInterval(function() {
+            if (isAdmin) {
+                syncJotihuntToFirebase();
+            }
+        }, 25000);
     </script>
 </body>
 </html>
