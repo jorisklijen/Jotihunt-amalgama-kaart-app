@@ -125,8 +125,11 @@
         }
         .zoom-in-to-show .marker-label { display: block; }
 
-        .user-gps-label-active { background: #27ae60 !important; color: #ffffff !important; border: 1px solid #ffffff !important; font-weight: bold; display: block !important; }
-        .user-gps-label-inactive { background: #7f8c8d !important; color: #ffffff !important; border: 1px solid #e74c3c !important; font-weight: bold; display: block !important; }
+        /* Zorgt dat labels van geïsoleerde gebruikers ook uitgezoomd zichtbaar zijn */
+        .user-label-always-show { display: block !important; }
+
+        .user-gps-label-active { background: #27ae60 !important; color: #ffffff !important; border: 1px solid #ffffff !important; font-weight: bold; }
+        .user-gps-label-inactive { background: #7f8c8d !important; color: #ffffff !important; border: 1px solid #e74c3c !important; font-weight: bold; }
 
         .compass-label {
             background: #2c3e50; color: #ffffff; border: 1px solid #e67e22;
@@ -502,17 +505,58 @@
         var rdRouteLayer = new L.FeatureGroup().addTo(map);
         var usersLiveLayer = new L.FeatureGroup().addTo(map);
         var geofenceLayer = new L.FeatureGroup().addTo(map);
+        var compassRoseLayer = new L.FeatureGroup(); // Bevat de kompas-icoontjes op de rand
         var liveUserMarkers = {};
+        var cachedUsersData = {};
+
+        function updateUsersIsolationLabels() {
+            var userIds = Object.keys(cachedUsersData);
+            var isZoomedIn = map.getZoom() >= 12;
+
+            userIds.forEach(function(uId) {
+                var m = liveUserMarkers[uId];
+                if (!m) return;
+                var currentU = cachedUsersData[uId];
+                if (!currentU || !currentU.lat || !currentU.lng) return;
+
+                // Bereken afstand tot dichtstbijzijnde andere gebruiker
+                var minDistanceKm = Infinity;
+                userIds.forEach(function(otherId) {
+                    if (otherId === uId) return;
+                    var otherU = cachedUsersData[otherId];
+                    if (!otherU || !otherU.lat || !otherU.lng) return;
+                    var dist = getDistanceKm(currentU.lat, currentU.lng, otherU.lat, otherU.lng);
+                    if (dist < minDistanceKm) {
+                        minDistanceKm = dist;
+                    }
+                });
+
+                // Is geïsoleerd als er > 500m (0.5 km) tussen zit of als er maar 1 gebruiker is
+                var isIsolated = (userIds.length <= 1) || (minDistanceKm > 0.5);
+
+                var tooltip = m.getTooltip();
+                if (tooltip && tooltip._container) {
+                    if (!isZoomedIn && isIsolated) {
+                        tooltip._container.classList.add('user-label-always-show');
+                    } else {
+                        tooltip._container.classList.remove('user-label-always-show');
+                    }
+                }
+            });
+        }
 
         function checkZoomLevel() {
             var mapContainer = document.getElementById('map');
             if (map.getZoom() >= 12) {
                 mapContainer.classList.add('zoom-in-to-show');
                 if (!map.hasLayer(geofenceLayer)) map.addLayer(geofenceLayer);
+                if (!map.hasLayer(compassRoseLayer)) map.addLayer(compassRoseLayer);
             } else {
                 mapContainer.classList.remove('zoom-in-to-show');
                 if (map.hasLayer(geofenceLayer)) map.removeLayer(geofenceLayer);
+                if (map.hasLayer(compassRoseLayer)) map.removeLayer(compassRoseLayer);
             }
+            updateUsersIsolationLabels();
         }
         map.on('zoomend', checkZoomLevel);
 
@@ -544,7 +588,7 @@
                 html: `<div class="compass-label">${dir.label}</div>`,
                 iconSize: [22, 22], iconAnchor: [11, 11]
             });
-            L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(map);
+            L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(compassRoseLayer);
         });
 
         function setupDrawTools() {
@@ -760,8 +804,46 @@
                         }
                     }
 
-                    var prevP = points[points.length - 2];
-                    bearingDeg = getBearing(prevP.latlng[0], prevP.latlng[1], lastPoint.latlng[0], lastPoint.latlng[1]);
+                    // Gewogen koershoek berekening: 60% laatste, 30% eerdere, 10% oudste
+                    var totalWeight = 0;
+                    var sumSin = 0;
+                    var sumCos = 0;
+                    var numPoints = points.length;
+
+                    // 60% voor laatste segment
+                    if (numPoints >= 2) {
+                        var pA = points[numPoints - 2];
+                        var pB = points[numPoints - 1];
+                        var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
+                        sumSin += 0.60 * Math.sin(b1);
+                        sumCos += 0.60 * Math.cos(b1);
+                        totalWeight += 0.60;
+                    }
+
+                    // 30% voor het segment daarvoor
+                    if (numPoints >= 3) {
+                        var pA2 = points[numPoints - 3];
+                        var pB2 = points[numPoints - 2];
+                        var b2 = getBearing(pA2.latlng[0], pA2.latlng[1], pB2.latlng[0], pB2.latlng[1]) * Math.PI / 180;
+                        sumSin += 0.30 * Math.sin(b2);
+                        sumCos += 0.30 * Math.cos(b2);
+                        totalWeight += 0.30;
+                    }
+
+                    // 10% voor het segment daar weer voor
+                    if (numPoints >= 4) {
+                        var pA3 = points[numPoints - 4];
+                        var pB3 = points[numPoints - 3];
+                        var b3 = getBearing(pA3.latlng[0], pA3.latlng[1], pB3.latlng[0], pB3.latlng[1]) * Math.PI / 180;
+                        sumSin += 0.10 * Math.sin(b3);
+                        sumCos += 0.10 * Math.cos(b3);
+                        totalWeight += 0.10;
+                    }
+
+                    if (totalWeight > 0) {
+                        var avgRad = Math.atan2(sumSin / totalWeight, sumCos / totalWeight);
+                        bearingDeg = ((avgRad * 180 / Math.PI) + 360) % 360;
+                    }
                 }
 
                 points.forEach(function(pt, idx) {
@@ -933,10 +1015,13 @@
             var now = Date.now();
 
             if (!users) {
+                cachedUsersData = {};
                 usersLiveLayer.clearLayers();
                 liveUserMarkers = {};
                 return;
             }
+
+            cachedUsersData = users;
 
             Object.keys(users).forEach(function(userId) {
                 var u = users[userId];
@@ -1003,6 +1088,8 @@
                     delete liveUserMarkers[userId];
                 }
             });
+
+            updateUsersIsolationLabels();
         });
 
         /* ================= RD TOEVOEGEN & WISSEN ================= */
@@ -1223,7 +1310,6 @@
             renderVossenUIFromData();
         }
 
-        // Dubbelklik op vossennaam zoomt direct in naar het meest recente RD-punt
         function zoomToLatestAreaPoint(teamName) {
             if (latestKnownAreaPoints[teamName] && latestKnownAreaPoints[teamName].latlng) {
                 var pt = latestKnownAreaPoints[teamName];
