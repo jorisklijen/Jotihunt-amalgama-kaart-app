@@ -15,9 +15,8 @@
 
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <!-- Leaflet Draw CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-    <!-- Proj4js voor RD naar GPS coördinaten conversie -->
+    <!-- Proj4js voor RD conversie -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 
     <style>
@@ -30,282 +29,115 @@
             background-color: #1a252f;
         }
 
-        /* Inlogscherm overlay */
         #auth-overlay {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            top: 0; left: 0; width: 100%; height: 100%;
             background-color: #1a252f;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 99999;
-            color: white;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 99999; color: white;
         }
         #auth-box {
-            background: #2c3e50;
-            padding: 25px 30px;
-            border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            text-align: center;
-            width: 300px;
+            background: #2c3e50; padding: 25px 30px; border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); text-align: center; width: 300px;
         }
-        #auth-box h2 {
-            margin-top: 0;
-            font-size: 20px;
-            margin-bottom: 15px;
-        }
+        #auth-box h2 { margin-top: 0; font-size: 20px; margin-bottom: 15px; }
         #auth-box input {
-            width: 85%;
-            padding: 10px;
-            font-size: 15px;
-            text-align: center;
-            border: 1px solid #bdc3c7;
-            border-radius: 4px;
-            margin-bottom: 12px;
-            outline: none;
-            box-sizing: border-box;
+            width: 85%; padding: 10px; font-size: 15px; text-align: center;
+            border: 1px solid #bdc3c7; border-radius: 4px; margin-bottom: 12px;
+            outline: none; box-sizing: border-box;
         }
         #auth-box button {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            font-size: 15px;
-            font-weight: bold;
-            border-radius: 4px;
-            cursor: pointer;
-            width: 85%;
-            transition: background 0.2s;
-            margin-top: 5px;
+            background-color: #3498db; color: white; border: none; padding: 10px 20px;
+            font-size: 15px; font-weight: bold; border-radius: 4px; cursor: pointer;
+            width: 85%; transition: background 0.2s; margin-top: 5px;
         }
-        #auth-box button:hover {
-            background-color: #2980b9;
-        }
-        #auth-error {
-            color: #e74c3c;
-            font-size: 13px;
-            margin-top: 10px;
-            display: none;
-        }
+        #auth-box button:hover { background-color: #2980b9; }
+        #auth-error { color: #e74c3c; font-size: 13px; margin-top: 10px; display: none; }
 
-        /* Hoofdinterface */
         #app-container {
-            display: none;
-            width: 100%;
-            height: 100%;
-            position: relative;
-            flex-direction: column;
+            display: none; width: 100%; height: 100%;
+            position: relative; flex-direction: column;
         }
 
         #header {
-            height: 60px;
-            min-height: 60px;
-            background-color: #2c3e50;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 12px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            z-index: 2001;
+            height: 60px; min-height: 60px; background-color: #2c3e50;
+            color: white; display: flex; align-items: center; justify-content: space-between;
+            padding: 0 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 2001;
         }
-        #header-title-box {
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            margin-right: 8px;
-        }
-        #header h1 {
-            margin: 0;
-            font-size: 14px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        #user-badge {
-            font-size: 11px;
-            color: #bdc3c7;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 12px;
-            flex-shrink: 0;
-        }
+        #header-title-box { display: flex; flex-direction: column; overflow: hidden; margin-right: 8px; }
+        #header h1 { margin: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #user-badge { font-size: 11px; color: #bdc3c7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .header-right { display: flex; align-items: center; gap: 5px; font-size: 12px; flex-shrink: 0; }
         .header-btn {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 6px 9px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 11px;
-            transition: background 0.2s;
-            white-space: nowrap;
+            background-color: #3498db; color: white; border: none; padding: 6px 9px;
+            border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px;
+            transition: background 0.2s; white-space: nowrap;
         }
-        .header-btn:hover {
-            background-color: #2980b9;
-        }
+        .header-btn:hover { background-color: #2980b9; }
         #btn-fetch-latest { background-color: #e67e22; }
-        #btn-fetch-latest:hover { background-color: #d35400; }
         #clear-rd-btn { background-color: #c0392b; }
         #btn-logout { background-color: #7f8c8d; }
-        #btn-logout:hover { background-color: #95a5a6; }
 
-        /* Notificatiebanner */
         #notification-banner {
-            background-color: #e74c3c;
-            color: white;
-            padding: 10px 15px;
-            font-weight: bold;
-            display: none;
-            align-items: center;
-            justify-content: space-between;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-            z-index: 2000;
-            font-size: 13px;
-            width: 100%;
-            box-sizing: border-box;
-            cursor: pointer;
+            background-color: #e74c3c; color: white; padding: 10px 15px; font-weight: bold;
+            display: none; align-items: center; justify-content: space-between;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3); z-index: 2000; font-size: 13px;
+            width: 100%; box-sizing: border-box; cursor: pointer;
         }
 
-        #map-wrapper {
-            position: relative;
-            flex-grow: 1;
-            width: 100%;
-            height: 100%;
-        }
+        #map-wrapper { position: relative; flex-grow: 1; width: 100%; height: 100%; }
+        #map { width: 100%; height: 100%; }
 
-        #map {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* Vossen status paneel */
         #vossen-status-panel {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            z-index: 2000;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-            width: 150px;
-            max-width: 45vw;
-            overflow: hidden;
-            font-family: Arial, sans-serif;
-            user-select: none;
-            touch-action: none;
+            position: absolute; top: 15px; right: 15px; z-index: 2000;
+            background: rgba(255, 255, 255, 0.95); border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4); width: 150px; max-width: 45vw;
+            overflow: hidden; font-family: Arial, sans-serif; user-select: none; touch-action: none;
         }
         #vossen-status-header {
-            background-color: #2c3e50;
-            color: white;
-            padding: 8px 10px;
-            font-weight: bold;
-            font-size: 13px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: move;
+            background-color: #2c3e50; color: white; padding: 8px 10px; font-weight: bold;
+            font-size: 13px; display: flex; justify-content: space-between; align-items: center; cursor: move;
         }
         #vossen-status-header button {
-            background: rgba(255,255,255,0.2);
-            border: none;
-            color: white;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            padding: 2px 8px;
-            border-radius: 4px;
+            background: rgba(255,255,255,0.2); border: none; color: white;
+            font-size: 14px; font-weight: bold; cursor: pointer; padding: 2px 8px; border-radius: 4px;
         }
-        #vossen-list {
-            padding: 4px;
-            max-height: 50vh;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-        }
+        #vossen-list { padding: 4px; max-height: 50vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
         .vogel-status-item {
-            padding: 6px 8px;
-            margin: 4px;
-            text-align: center;
-            font-weight: bold;
-            font-size: 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background-color 0.2s;
+            padding: 6px 8px; margin: 4px; text-align: center; font-weight: bold;
+            font-size: 12px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;
         }
         
-        /* Status kleuren */
         .status-actief { background-color: #d4efdf; color: #27ae60; border: 1px solid #2ecc71; }
         .status-gevangen { background-color: #fadbd8; color: #c0392b; border: 1px solid #e74c3c; }
         .status-rust { background-color: #fcf3cf; color: #b7950b; border: 1px solid #f1c40f; }
         .status-vervangen { background-color: #ebedef; color: #7f8c8d; border: 1px solid #bdc3c7; }
 
-        @keyframes softBlink {
-            0% { opacity: 1; }
-            50% { opacity: 0.4; }
-            100% { opacity: 1; }
-        }
-        .knipperen {
-            animation: softBlink 1.5s infinite ease-in-out;
-        }
+        @keyframes softBlink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+        .knipperen { animation: softBlink 1.5s infinite ease-in-out; }
 
-        .route-line {
-            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
-        }
+        .route-line { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)); }
 
         .marker-label {
-            background: white;
-            border: 1px solid #777;
-            padding: 2px 6px;
-            font-weight: bold;
-            font-size: 11px;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-            display: none;
+            background: white; border: 1px solid #777; padding: 2px 6px;
+            font-weight: bold; font-size: 11px; border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: none;
         }
-        .zoom-in-to-show .marker-label {
-            display: block;
-        }
-        
-        /* Labels voor gebruikers */
-        .user-gps-label-active {
-            background: #27ae60 !important;
-            color: #ffffff !important;
-            border: 1px solid #ffffff !important;
-            font-weight: bold;
-            display: block !important;
-        }
-        .user-gps-label-inactive {
-            background: #7f8c8d !important;
-            color: #ffffff !important;
-            border: 1px solid #e74c3c !important;
-            font-weight: bold;
-            display: block !important;
+        .zoom-in-to-show .marker-label { display: block; }
+
+        .user-gps-label-active { background: #27ae60 !important; color: #ffffff !important; border: 1px solid #ffffff !important; font-weight: bold; display: block !important; }
+        .user-gps-label-inactive { background: #7f8c8d !important; color: #ffffff !important; border: 1px solid #e74c3c !important; font-weight: bold; display: block !important; }
+
+        .compass-label {
+            background: #2c3e50; color: #ffffff; border: 1px solid #e67e22;
+            border-radius: 50%; width: 22px; height: 22px; line-height: 22px;
+            text-align: center; font-weight: bold; font-size: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.4);
         }
 
-        /* Windrichting labels op de cirkel */
-        .compass-label {
-            background: #2c3e50;
-            color: #ffffff;
-            border: 1px solid #e67e22;
-            border-radius: 50%;
-            width: 22px;
-            height: 22px;
-            line-height: 22px;
-            text-align: center;
-            font-weight: bold;
-            font-size: 12px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+        .geofence-radius-badge {
+            background: rgba(44, 62, 80, 0.85); color: #fff; padding: 2px 6px;
+            border-radius: 4px; font-size: 10px; font-weight: bold; white-space: nowrap;
+            border: 1px solid rgba(255,255,255,0.7); box-shadow: 0 1px 3px rgba(0,0,0,0.4);
         }
     </style>
 </head>
@@ -362,9 +194,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('Service Worker geregistreerd:', reg.scope))
-                    .catch(err => console.warn('SW registratiefout:', err));
+                navigator.serviceWorker.register('./sw.js').catch(console.warn);
             });
         }
     </script>
@@ -395,10 +225,7 @@
         var currentUserName = "";
         var currentUserId = "";
 
-        function openJotihuntSite() {
-            window.open('https://jotihunt.nl/', '_blank');
-        }
-
+        function openJotihuntSite() { window.open('https://jotihunt.nl/', '_blank'); }
         function dismissNotification(e) {
             e.stopPropagation();
             document.getElementById('notification-banner').style.display = 'none';
@@ -458,9 +285,7 @@
         function logout() {
             localStorage.removeItem('jh_auth_role');
             localStorage.removeItem('jh_auth_name');
-            if (currentUserId) {
-                db.ref('liveUsers/' + currentUserId).remove();
-            }
+            if (currentUserId) { db.ref('liveUsers/' + currentUserId).remove(); }
             stopLiveTracking();
             location.reload();
         }
@@ -468,7 +293,6 @@
         window.addEventListener('load', function() {
             var savedRole = localStorage.getItem('jh_auth_role');
             var savedName = localStorage.getItem('jh_auth_name');
-
             if (savedRole === 'admin') {
                 isAdmin = true;
                 currentUserName = "Admin";
@@ -481,12 +305,8 @@
             }
         });
 
-        document.getElementById('pin-input').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') checkPin();
-        });
-        document.getElementById('username-input').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') checkPin();
-        });
+        document.getElementById('pin-input').addEventListener('keypress', function (e) { if (e.key === 'Enter') checkPin(); });
+        document.getElementById('username-input').addEventListener('keypress', function (e) { if (e.key === 'Enter') checkPin(); });
 
         function initApp() {
             document.getElementById('auth-overlay').style.display = 'none';
@@ -504,24 +324,37 @@
                 startBackgroundLiveTracking();
             }
 
+            keepScreenAwake();
+
             setTimeout(function() {
                 map.invalidateSize();
             }, 100);
         }
 
-        /* ================= GPS BACKGROUND TRACKING ================= */
-        var watchId = null;
+        /* ================= SCREEN WAKE LOCK (SCHERM AAN HOUDEN) ================= */
         var wakeLock = null;
-        var workerTimer = null;
-        var intervalTimer = null;
-
-        async function requestWakeLock() {
+        async function keepScreenAwake() {
             try {
                 if ('wakeLock' in navigator) {
                     wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', function() {
+                        // Automatisch herstarten indien vrijgegeven
+                        setTimeout(keepScreenAwake, 2000);
+                    });
                 }
-            } catch (err) {}
+            } catch (err) {
+                console.log("WakeLock niet actief of niet ondersteund:", err);
+            }
         }
+        document.addEventListener("visibilitychange", function() {
+            if (document.visibilityState === 'visible') {
+                keepScreenAwake();
+            }
+        });
+
+        /* ================= GPS BACKGROUND TRACKING ================= */
+        var intervalTimer = null;
+        var workerTimer = null;
 
         function sendCurrentLocation() {
             if (!navigator.geolocation || !currentUserId) return;
@@ -547,45 +380,62 @@
         }
 
         function startBackgroundLiveTracking() {
-            requestWakeLock();
             sendCurrentLocation();
-
             if (intervalTimer) clearInterval(intervalTimer);
             intervalTimer = setInterval(sendCurrentLocation, 20000);
 
             try {
-                var blob = new Blob([
-                    "setInterval(function() { postMessage('tick'); }, 20000);"
-                ], { type: "text/javascript" });
+                var blob = new Blob(["setInterval(function() { postMessage('tick'); }, 20000);"], { type: "text/javascript" });
                 workerTimer = new Worker(URL.createObjectURL(blob));
-                workerTimer.onmessage = function() {
-                    sendCurrentLocation();
-                };
+                workerTimer.onmessage = function() { sendCurrentLocation(); };
             } catch (e) {
                 console.warn("Worker niet beschikbaar:", e);
             }
-
-            document.addEventListener("visibilitychange", function() {
-                if (document.visibilityState === 'visible') {
-                    requestWakeLock();
-                    sendCurrentLocation();
-                }
-            });
         }
 
         function stopLiveTracking() {
-            if (intervalTimer) {
-                clearInterval(intervalTimer);
-                intervalTimer = null;
-            }
-            if (workerTimer) {
-                workerTimer.terminate();
-                workerTimer = null;
-            }
-            if (wakeLock !== null) {
-                wakeLock.release();
-                wakeLock = null;
-            }
+            if (intervalTimer) { clearInterval(intervalTimer); intervalTimer = null; }
+            if (workerTimer) { workerTimer.terminate(); workerTimer = null; }
+            if (wakeLock !== null) { wakeLock.release(); wakeLock = null; }
+        }
+
+        /* ================= WISKUNDE & GEOGRAFIE HULPMIDDELEN ================= */
+        function getDistanceKm(lat1, lon1, lat2, lon2) {
+            var R = 6371; // km
+            var dLat = (lat2 - lat1) * Math.PI / 180;
+            var dLon = (lon2 - lon1) * Math.PI / 180;
+            var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                    Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+        }
+
+        function getBearing(lat1, lon1, lat2, lon2) {
+            var y = Math.sin((lon2 - lon1) * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
+            var x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+                    Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos((lon2 - lon1) * Math.PI / 180);
+            var brng = Math.atan2(y, x) * 180 / Math.PI;
+            return (brng + 360) % 360;
+        }
+
+        function getDestinationLatLng(lat, lng, distMeters, bearingDeg) {
+            var distRatio = distMeters / 6371000;
+            var brngRad = bearingDeg * Math.PI / 180;
+            var latRad = lat * Math.PI / 180;
+            var lngRad = lng * Math.PI / 180;
+
+            var endLat = Math.asin(Math.sin(latRad) * Math.cos(distRatio) +
+                         Math.cos(latRad) * Math.sin(distRatio) * Math.cos(brngRad));
+            var endLng = lngRad + Math.atan2(Math.sin(brngRad) * Math.sin(distRatio) * Math.cos(latRad),
+                         Math.cos(distRatio) - Math.sin(latRad) * Math.sin(endLat));
+
+            return [endLat * 180 / Math.PI, endLng * 180 / Math.PI];
+        }
+
+        function parseTimeToMinutes(timeStr) {
+            if (!timeStr || !timeStr.includes(':')) return null;
+            var p = timeStr.split(':');
+            return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
         }
 
         /* ================= KAART & LEAFLET ================= */
@@ -600,7 +450,7 @@
             "Foxtrot": "#3498db",
             "Golf": "#ff69b4",
             "Hotel": "#e67e22",
-            "Oscar": "#f1c40f"
+            "Oscar": "#003399"
         };
 
         function parseTargetArea(input) {
@@ -624,13 +474,10 @@
             } else {
                 var xStr = parts[0].replace(',', '.').split('.')[0];
                 var yStr = parts[1].replace(',', '.').split('.')[0];
-
                 while (xStr.length < 6) { xStr += "0"; }
                 while (yStr.length < 6) { yStr += "0"; }
-
                 var x = parseFloat(xStr);
                 var y = parseFloat(yStr);
-
                 try {
                     var latLngArray = proj4("EPSG:28992", "EPSG:4326", [x, y]);
                     return [latLngArray[1], latLngArray[0]];
@@ -644,28 +491,30 @@
         var map = L.map('map').setView([51.9851, 5.8987], 10);
 
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 19,
-            attribution: 'Tiles &copy; Esri'
+            maxZoom: 19, attribution: 'Tiles &copy; Esri'
         }).addTo(map);
-
-        function checkZoomLevel() {
-            var mapContainer = document.getElementById('map');
-            if (map.getZoom() >= 12) {
-                mapContainer.classList.add('zoom-in-to-show');
-            } else {
-                mapContainer.classList.remove('zoom-in-to-show');
-            }
-        }
-        map.on('zoomend', checkZoomLevel);
 
         var fixedHouseLayer = new L.FeatureGroup().addTo(map);
         var drawnItems = new L.FeatureGroup().addTo(map);
         var rdPointsLayer = new L.FeatureGroup().addTo(map);
         var rdRouteLayer = new L.FeatureGroup().addTo(map);
         var usersLiveLayer = new L.FeatureGroup().addTo(map);
+        var geofenceLayer = new L.FeatureGroup().addTo(map);
         var liveUserMarkers = {};
 
-        // 450m cirkel rond Scouting Amalgama
+        function checkZoomLevel() {
+            var mapContainer = document.getElementById('map');
+            if (map.getZoom() >= 12) {
+                mapContainer.classList.add('zoom-in-to-show');
+                if (!map.hasLayer(geofenceLayer)) map.addLayer(geofenceLayer);
+            } else {
+                mapContainer.classList.remove('zoom-in-to-show');
+                if (map.hasLayer(geofenceLayer)) map.removeLayer(geofenceLayer);
+            }
+        }
+        map.on('zoomend', checkZoomLevel);
+
+        // Amalgama 450m cirkel
         var amalgamaLat = 51.83915;
         var amalgamaLng = 5.78562;
         var radiusMeters = 450;
@@ -682,19 +531,16 @@
         var latOffset = radiusMeters / 111320; 
         var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180)));
 
-        var directions = [
+        [
             { label: 'N', lat: amalgamaLat + latOffset, lng: amalgamaLng },
             { label: 'Z', lat: amalgamaLat - latOffset, lng: amalgamaLng },
             { label: 'O', lat: amalgamaLat, lng: amalgamaLng + lngOffset },
             { label: 'W', lat: amalgamaLat, lng: amalgamaLng - lngOffset }
-        ];
-
-        directions.forEach(function(dir) {
+        ].forEach(function(dir) {
             var icon = L.divIcon({
                 className: 'compass-icon-wrapper',
                 html: `<div class="compass-label">${dir.label}</div>`,
-                iconSize: [22, 22],
-                iconAnchor: [11, 11]
+                iconSize: [22, 22], iconAnchor: [11, 11]
             });
             L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(map);
         });
@@ -729,9 +575,9 @@
             return marker;
         }
 
-        function createWalkerMarker(latlng, name, color, timeStr, isOscar = false) {
+        function createWalkerMarker(latlng, name, color, timeStr, opacity, extraInfo, isOscar = false) {
             var strokeColor = isOscar ? "#003399" : "#000000";
-            var walkerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30" fill="${color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1.5}" filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.4))">
+            var walkerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30" fill="${color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1.5}" style="opacity: ${opacity};" filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.4))">
                 <path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.2L6 8.3V13h2V9.6l1.8-.7z"/>
             </svg>`;
 
@@ -743,8 +589,9 @@
                 popupAnchor: [0, -15]
             });
 
+            var labelText = name + " (" + timeStr + ")" + (extraInfo ? " • " + extraInfo : "");
             var marker = L.marker(latlng, { icon: customIcon });
-            marker.bindTooltip(name + " (" + timeStr + ")", { permanent: true, direction: 'right', className: 'marker-label' });
+            marker.bindTooltip(labelText, { permanent: true, direction: 'right', className: 'marker-label' });
             return marker;
         }
 
@@ -766,7 +613,192 @@
             });
         }
 
-        /* ================= LIVE GEBRUIKERS BEHOUDEN OP KAART ================= */
+        /* ================= VOSSEN & RD ROUTE SYNC MET VERVAGING, SNELHEID & CIRKEL ================= */
+        var rdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
+        var latestKnownAreaPoints = {}; // Bewaart laatste coördinaat per deelgebied voor jagersnavigatie
+
+        db.ref('rdPoints').on('value', function(snapshot) {
+            for (var a in rdPointsByArea) rdPointsByArea[a] = [];
+            latestKnownAreaPoints = {};
+
+            var data = snapshot.val();
+            if (data) {
+                Object.keys(data).forEach(function(key) {
+                    var p = data[key];
+                    if (p && p.latlng && Array.isArray(p.latlng) && p.latlng.length === 2) {
+                        if (p.area && rdPointsByArea[p.area]) {
+                            rdPointsByArea[p.area].push({
+                                latlng: p.latlng,
+                                time: p.time || "12:00",
+                                baseName: p.baseName || "Punt",
+                                fullName: p.fullName || p.baseName,
+                                area: p.area,
+                                color: p.color || areaColors[p.area] || "#000000",
+                                createdTimestamp: p.createdTimestamp || Date.now()
+                            });
+                        }
+                    }
+                });
+            }
+            renderRdPointsAndGeofences();
+        });
+
+        function renderRdPointsAndGeofences() {
+            rdPointsLayer.clearLayers();
+            rdRouteLayer.clearLayers();
+            geofenceLayer.clearLayers();
+
+            var now = new Date();
+            var currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
+
+            for (var area in rdPointsByArea) {
+                var points = rdPointsByArea[area];
+                if (points.length === 0) continue;
+
+                // Chronologisch sorteren
+                points.sort(function(a, b) {
+                    return (a.time || "").localeCompare(b.time || "");
+                });
+
+                // Laatste bekende punt opslaan voor jagersnavigatie
+                var lastPoint = points[points.length - 1];
+                latestKnownAreaPoints[area] = lastPoint;
+
+                // Snelheid berekenen (laatste 2 tot maximaal 3 punten)
+                var speedText = "";
+                var bearingDeg = null;
+                var samplePoints = points.slice(-3);
+
+                if (samplePoints.length >= 2) {
+                    var pFirst = samplePoints[0];
+                    var pLast = samplePoints[samplePoints.length - 1];
+                    var t1 = parseTimeToMinutes(pFirst.time);
+                    var t2 = parseTimeToMinutes(pLast.time);
+
+                    if (t1 !== null && t2 !== null && t2 > t1) {
+                        var totalDistKm = 0;
+                        for (var i = 0; i < samplePoints.length - 1; i++) {
+                            totalDistKm += getDistanceKm(samplePoints[i].latlng[0], samplePoints[i].latlng[1],
+                                                         samplePoints[i+1].latlng[0], samplePoints[i+1].latlng[1]);
+                        }
+                        var timeDiffHours = (t2 - t1) / 60;
+                        if (timeDiffHours > 0) {
+                            var kmh = Math.round((totalDistKm / timeDiffHours) * 10) / 10;
+                            speedText = `~${kmh} km/u`;
+                        }
+                    }
+
+                    // Looprichting bepalen aan de hand van voorlaatste naar laatste punt
+                    var prevP = points[points.length - 2];
+                    bearingDeg = getBearing(prevP.latlng[0], prevP.latlng[1], lastPoint.latlng[0], lastPoint.latlng[1]);
+                }
+
+                // Teken de punten met Tijdverloop-tinting (maximaal 50% transparant)
+                points.forEach(function(pt, idx) {
+                    var isLatest = (idx === points.length - 1);
+                    var isOscar = (pt.area === "Oscar");
+
+                    // Bereken leeftijd in minuten
+                    var ptMinutes = parseTimeToMinutes(pt.time);
+                    var diffMinutes = 0;
+                    if (ptMinutes !== null) {
+                        diffMinutes = currentTotalMinutes - ptMinutes;
+                        if (diffMinutes < 0) diffMinutes += 1440; // over middernacht
+                    }
+
+                    // Transparantie: binnen 60 min = 1.0; daarna afbouwend naar minimaal 0.50
+                    var opacity = 1.0;
+                    if (diffMinutes > 60) {
+                        var fade = (diffMinutes - 60) / 180; // vervaagt verder over 3 uur
+                        opacity = Math.max(0.50, 1.0 - (fade * 0.50));
+                    }
+
+                    var extra = isLatest && speedText ? speedText : "";
+                    var marker = createWalkerMarker(pt.latlng, pt.fullName || pt.baseName, pt.color, pt.time, opacity, extra, isOscar);
+                    rdPointsLayer.addLayer(marker);
+                });
+
+                // Chronologische route-lijn
+                if (points.length >= 2) {
+                    var latLngs = points.map(function(p) { return p.latlng; });
+                    var lineColor = (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000");
+                    var polyline = L.polyline(latLngs, { color: lineColor, weight: 4, className: 'route-line' });
+                    polyline.bindPopup("<b>Chronologische route: " + area + "</b>");
+                    rdRouteLayer.addLayer(polyline);
+                }
+
+                // ================= GEOFENCE & GROEIENDE CIRKEL =================
+                // Groeit met 5,5 km/u = 1.5277 meter per seconde
+                var lastPtMinutes = parseTimeToMinutes(lastPoint.time);
+                var minutesPassed = 5; // veilige basis
+                if (lastPtMinutes !== null) {
+                    minutesPassed = currentTotalMinutes - lastPtMinutes;
+                    if (minutesPassed < 0) minutesPassed += 1440;
+                }
+                var currentRadiusMeters = Math.max(250, Math.round(minutesPassed * (5500 / 60)));
+                var areaColor = areaColors[area] || "#e74c3c";
+
+                // Groeiende cirkel
+                var circle = L.circle(lastPoint.latlng, {
+                    radius: currentRadiusMeters,
+                    color: areaColor,
+                    weight: 2,
+                    dashArray: '6, 6',
+                    fillColor: areaColor,
+                    fillOpacity: 0.12,
+                    interactive: false
+                });
+                geofenceLayer.addLayer(circle);
+
+                // Afstandsbadge in het midden
+                var badgeIcon = L.divIcon({
+                    className: 'geofence-badge-wrapper',
+                    html: `<div class="geofence-radius-badge" style="border-color:${areaColor};">🎯 ${area}: ${currentRadiusMeters >= 1000 ? (currentRadiusMeters/1000).toFixed(1) + ' km' : currentRadiusMeters + ' m'}</div>`,
+                    iconSize: [80, 20],
+                    iconAnchor: [40, 10]
+                });
+                var badgeMarker = L.marker(lastPoint.latlng, { icon: badgeIcon, interactive: false });
+                geofenceLayer.addLayer(badgeMarker);
+
+                // ================= RICHTINGSPIJLEN (120 GRADEN GRADENBOOG) =================
+                if (bearingDeg !== null) {
+                    // Twee pijlen: -60 graden en +60 graden vanaf de looprichting
+                    [-60, 60].forEach(function(offsetAngle) {
+                        var arrowAngle = (bearingDeg + offsetAngle + 360) % 360;
+                        var arrowEndCoord = getDestinationLatLng(lastPoint.latlng[0], lastPoint.latlng[1], currentRadiusMeters, arrowAngle);
+
+                        var arrowLine = L.polyline([lastPoint.latlng, arrowEndCoord], {
+                            color: areaColor,
+                            weight: 2.5,
+                            dashArray: '4, 4',
+                            opacity: 0.85
+                        });
+                        geofenceLayer.addLayer(arrowLine);
+
+                        // Pijlpunttip aan het einde van de boog
+                        var tipSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" style="transform: rotate(${arrowAngle}deg);">
+                            <polygon points="12,2 22,22 12,17 2,22" fill="${areaColor}" stroke="#ffffff" stroke-width="1.5"/>
+                        </svg>`;
+                        var tipIcon = L.divIcon({
+                            className: 'arrow-tip-icon',
+                            html: tipSvg,
+                            iconSize: [20, 20],
+                            iconAnchor: [10, 10]
+                        });
+                        geofenceLayer.addLayer(L.marker(arrowEndCoord, { icon: tipIcon, interactive: false }));
+                    });
+                }
+            }
+        }
+
+        // Cirkel elke 20 seconden laten doorgroeien
+        setInterval(renderRdPointsAndGeofences, 20000);
+
+        /* ================= LIVE GEBRUIKERS & AFSTANDSPOPUP ================= */
+        window.navigateToAreaPoint = function(lat, lng) {
+            window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+        };
+
         db.ref('liveUsers').on('value', function(snapshot) {
             var users = snapshot.val();
             var now = Date.now();
@@ -789,15 +821,49 @@
                 var labelClass = isActive ? 'marker-label user-gps-label-active' : 'marker-label user-gps-label-inactive';
                 var statusText = isActive ? '<span style="color:#2ecc71; font-weight:bold;">● Actief</span>' : '<span style="color:#e74c3c; font-weight:bold;">● Inactief</span>';
 
+                // Afstand naar Scouting Amalgama
+                var distAmalgama = getDistanceKm(u.lat, u.lng, amalgamaLat, amalgamaLng).toFixed(1);
+                var etaAmalgama = Math.round((distAmalgama / 45) * 60); // geschat op 45 km/u
+
+                // Dynamische afstanden naar vossen bouwen
+                var vossenOptions = `<option value="${amalgamaLat},${amalgamaLng}">Clubgebouw (${distAmalgama} km - ~${etaAmalgama} min)</option>`;
+                targetAreas.forEach(function(areaName) {
+                    if (latestKnownAreaPoints[areaName]) {
+                        var pt = latestKnownAreaPoints[areaName];
+                        var dist = getDistanceKm(u.lat, u.lng, pt.latlng[0], pt.latlng[1]).toFixed(1);
+                        var eta = Math.round((dist / 45) * 60);
+                        vossenOptions += `<option value="${pt.latlng[0]},${pt.latlng[1]}">${areaName} (${dist} km - ~${eta} min)</option>`;
+                    }
+                });
+
+                var popupHtml = `
+                    <div style="font-size:12px; min-width:200px;">
+                        <b>🚗 ${u.name}</b><br>
+                        Status: ${statusText}<br>
+                        Nauwkeurigheid: ~${u.accuracy || '?'}m (${timeAgoText})<br>
+                        <hr style="margin:5px 0; border:0; border-top:1px solid #ccc;">
+                        <b>Kies doel & navigeer:</b><br>
+                        <select id="sel_dest_${userId}" style="width:100%; padding:4px; margin-top:4px; font-size:11px;">
+                            ${vossenOptions}
+                        </select>
+                        <button onclick="(function(){
+                            var val = document.getElementById('sel_dest_${userId}').value.split(',');
+                            window.navigateToAreaPoint(val[0], val[1]);
+                        })()" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
+                            📍 Navigeer via Google Maps
+                        </button>
+                    </div>
+                `;
+
                 if (liveUserMarkers[userId]) {
                     liveUserMarkers[userId].setLatLng([u.lat, u.lng]);
                     liveUserMarkers[userId].setIcon(icon);
                     liveUserMarkers[userId].setTooltipContent("🚗 " + u.name);
-                    liveUserMarkers[userId].getPopup().setContent(`<b>🚗 ${u.name}</b><br>Status: ${statusText}<br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
+                    liveUserMarkers[userId].getPopup().setContent(popupHtml);
                 } else {
                     var m = L.marker([u.lat, u.lng], { icon: icon });
                     m.bindTooltip("🚗 " + u.name, { permanent: true, direction: 'top', className: labelClass });
-                    m.bindPopup(`<b>🚗 ${u.name}</b><br>Status: ${statusText}<br>Nauwkeurigheid: ~${u.accuracy || '?'}m<br>Laatste update: ${timeAgoText}`);
+                    m.bindPopup(popupHtml);
                     usersLiveLayer.addLayer(m);
                     liveUserMarkers[userId] = m;
                 }
@@ -811,40 +877,7 @@
             });
         });
 
-        /* ================= VASTE GROEPEN & RD SYNC ================= */
-        var rdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
-
-        db.ref('rdPoints').on('value', function(snapshot) {
-            rdPointsLayer.clearLayers();
-            for (var a in rdPointsByArea) rdPointsByArea[a] = [];
-
-            var data = snapshot.val();
-            if (!data) {
-                updateRdRoutes();
-                return;
-            }
-
-            Object.keys(data).forEach(function(key) {
-                var p = data[key];
-                if (p && p.latlng && Array.isArray(p.latlng) && p.latlng.length === 2) {
-                    var isOscar = (p.area === "Oscar");
-                    var walkerMarker = createWalkerMarker(p.latlng, p.fullName || p.baseName || 'Punt', p.color || '#000000', p.time || '12:00', isOscar);
-                    rdPointsLayer.addLayer(walkerMarker);
-
-                    if (p.area && rdPointsByArea[p.area]) {
-                        rdPointsByArea[p.area].push({
-                            latlng: p.latlng,
-                            time: p.time,
-                            baseName: p.baseName,
-                            firebaseKey: key,
-                            marker: walkerMarker
-                        });
-                    }
-                }
-            });
-            updateRdRoutes();
-        });
-
+        /* ================= CRUD RD EN TEKENTOOLS ================= */
         db.ref('drawnItems').on('value', function(snapshot) {
             drawnItems.clearLayers();
             var data = snapshot.val();
@@ -864,25 +897,6 @@
                 }
             });
         });
-
-        function updateRdRoutes() {
-            rdRouteLayer.clearLayers();
-            for (var area in rdPointsByArea) {
-                var points = rdPointsByArea[area];
-                if (points.length < 2) continue;
-
-                points.sort(function(a, b) {
-                    return (a.time || "").localeCompare(b.time || "");
-                });
-
-                var latLngs = points.map(function(p) { return p.latlng; });
-                var lineColor = (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000");
-
-                var polyline = L.polyline(latLngs, { color: lineColor, weight: 4, className: 'route-line' });
-                polyline.bindPopup("<b>Chronologische route: " + area + "</b>");
-                rdRouteLayer.addLayer(polyline);
-            }
-        }
 
         function clearRdPoints() {
             if (!isAdmin) return;
@@ -933,12 +947,14 @@
                 baseName: name,
                 area: areaKey,
                 fullName: name + areaSuffix,
-                color: markerColor
+                color: markerColor,
+                createdTimestamp: Date.now()
             }).then(function() {
                 map.setView(latlng, 14);
             });
         }
 
+        /* ================= VASTE GROEPEN / LOCATIES ================= */
         var allLocations = [
             {name: "André de Thaye en Lido'76", area: "Golf", lat: 51.98140, lng: 5.93388},
             {name: "Clan MacCastor", area: "Foxtrot", lat: 51.80907, lng: 5.78972},
@@ -1015,6 +1031,7 @@
                 var areaColor = areaColors[loc.area] || "#3498db";
                 var isOscar = (loc.area === "Oscar");
                 var marker = createHouseMarker([loc.lat, loc.lng], loc.name + " (" + loc.area + ")", areaColor, isOscar);
+                marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:4px 8px; border-radius:3px; cursor:pointer;">📍 Navigeer via Google Maps</button>`);
                 fixedHouseLayer.addLayer(marker);
             }
         });
@@ -1056,16 +1073,8 @@
             panel.style.right = 'auto';
         }
 
-        function onMouseUp() {
-            isDragging = false;
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-        }
-        function onTouchEnd() {
-            isDragging = false;
-            document.removeEventListener('touchmove', onTouchMove);
-            document.removeEventListener('touchend', onTouchEnd);
-        }
+        function onMouseUp() { isDragging = false; document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp); }
+        function onTouchEnd() { isDragging = false; document.removeEventListener('touchmove', onTouchMove); document.removeEventListener('touchend', onTouchEnd); }
 
         function toggleVossenPanel() {
             var list = document.getElementById('vossen-list');
@@ -1094,7 +1103,7 @@
                 .then(data => {
                     if (data && data.data && data.data.length > 0) {
                         var sorted = data.data.sort((a,b) => (b.id||0) - (a.id||0));
-                        document.getElementById('notification-text').innerText = "🔔 Laatste bericht: " + (sorted[0].title || 'Geen titel');
+                        document.getElementById('notification-text').innerText = "🔔 Laatste: " + (sorted[0].title || 'Geen titel');
                         document.getElementById('notification-banner').style.display = 'flex';
                     }
                 });
