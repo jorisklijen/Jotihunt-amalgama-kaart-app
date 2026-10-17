@@ -87,12 +87,12 @@
             width: 100%; box-sizing: border-box; cursor: pointer;
         }
 
-        #map-wrapper { position: relative; flex-grow: 1; width: 100%; height: 100%; background-color: #1a252f; }
-        #map { width: 100%; height: 100%; background-color: #1a252f; }
+        #map-wrapper { position: relative; flex-grow: 1; width: 100%; height: 100%; background-color: #11171d; }
+        #map { width: 100%; height: 100%; background-color: #11171d; }
 
-        /* DARK MODE KAART FILTER */
+        /* EXTRA DONKERE AFWERKING VOOR DE DARK MODE TEGELS */
         .dark-mode-map .leaflet-tile-pane {
-            filter: brightness(0.6) invert(1) contrast(2.5) hue-rotate(200deg) saturate(0.3);
+            filter: brightness(0.85) contrast(1.15);
         }
 
         /* VOSSEN PANEEL (Standaard & Dark Mode varianten) */
@@ -512,9 +512,21 @@
 
         var map = L.map('map').setView([51.9851, 5.8987], 10);
 
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 19, attribution: 'Tiles &copy; Esri'
-        }).addTo(map);
+        // LICHTE KAARTLAAG (Esri World Street Map - geen API key nodig)
+        var lightTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: 'Tiles &copy; Esri'
+        });
+
+        // DONKERE KAARTLAAG ZONDER BEBOSSING/TERREIN (Esri Dark Gray Canvas Base + Wegen/Straatnamen - geen API key nodig)
+        var darkBaseLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: 'Tiles &copy; Esri'
+        });
+        var darkRefLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19
+        });
+        var darkLayerGroup = L.layerGroup([darkBaseLayer, darkRefLayer]);
 
         var isDarkMode = localStorage.getItem('jh_map_theme') === 'dark';
         var mapContainer = document.getElementById('map');
@@ -522,11 +534,15 @@
 
         function applyDarkMode(enabled) {
             if (enabled) {
+                if (map.hasLayer(lightTileLayer)) map.removeLayer(lightTileLayer);
+                if (!map.hasLayer(darkLayerGroup)) darkLayerGroup.addTo(map);
                 mapContainer.classList.add('dark-mode-map');
                 vossenPanel.classList.add('dark-mode-map-panel');
                 document.getElementById('btn-darkmode').innerText = "☀️ Light";
                 localStorage.setItem('jh_map_theme', 'dark');
             } else {
+                if (map.hasLayer(darkLayerGroup)) map.removeLayer(darkLayerGroup);
+                if (!map.hasLayer(lightTileLayer)) lightTileLayer.addTo(map);
                 mapContainer.classList.remove('dark-mode-map');
                 vossenPanel.classList.remove('dark-mode-map-panel');
                 document.getElementById('btn-darkmode').innerText = "🌙 Dark";
