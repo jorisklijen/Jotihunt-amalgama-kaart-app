@@ -7,7 +7,7 @@
 
     <!-- PWA Instellingen -->
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#2c3e50">
+    <meta name="theme-color" content="#1a252f">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Jotihunt">
@@ -44,7 +44,7 @@
         #auth-box input {
             width: 85%; padding: 10px; font-size: 15px; text-align: center;
             border: 1px solid #bdc3c7; border-radius: 4px; margin-bottom: 12px;
-            outline: none; box-sizing: border-box;
+            outline: none; box-sizing: border-box; background: #1a252f; color: white;
         }
         #auth-box button {
             background-color: #3498db; color: white; border: none; padding: 10px 20px;
@@ -56,7 +56,7 @@
 
         #app-container {
             display: none; width: 100%; height: 100%;
-            position: relative; flex-direction: column;
+            position: relative; flex-direction: column; background-color: #1a252f;
         }
 
         #header {
@@ -76,6 +76,8 @@
         .header-btn:hover { background-color: #2980b9; }
         #btn-fetch-latest { background-color: #e67e22; }
         #clear-rd-btn { background-color: #c0392b; }
+        #btn-darkmode { background-color: #8e44ad; }
+        #btn-darkmode:hover { background-color: #732d91; }
         #btn-logout { background-color: #7f8c8d; }
 
         #notification-banner {
@@ -85,14 +87,26 @@
             width: 100%; box-sizing: border-box; cursor: pointer;
         }
 
-        #map-wrapper { position: relative; flex-grow: 1; width: 100%; height: 100%; }
-        #map { width: 100%; height: 100%; }
+        #map-wrapper { position: relative; flex-grow: 1; width: 100%; height: 100%; background-color: #1a252f; }
+        #map { width: 100%; height: 100%; background-color: #1a252f; }
 
+        /* DARK MODE KAART FILTER */
+        .dark-mode-map .leaflet-tile-pane {
+            filter: brightness(0.6) invert(1) contrast(2.5) hue-rotate(200deg) saturate(0.3);
+        }
+
+        /* VOSSEN PANEEL (Standaard & Dark Mode varianten) */
         #vossen-status-panel {
             position: absolute; top: 15px; right: 15px; z-index: 2000;
             background: rgba(255, 255, 255, 0.95); border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.4); width: 150px; max-width: 45vw;
             overflow: hidden; font-family: Arial, sans-serif; user-select: none; touch-action: none;
+            transition: background 0.2s;
+        }
+        .dark-mode-map-panel {
+            background: rgba(26, 37, 47, 0.95) !important;
+            color: white !important;
+            border: 1px solid #34495e;
         }
         #vossen-status-header {
             background-color: #2c3e50; color: white; padding: 8px 10px; font-weight: bold;
@@ -119,13 +133,12 @@
         .route-line { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)); }
 
         .marker-label {
-            background: white; border: 1px solid #777; padding: 2px 6px;
+            background: #2c3e50; color: #ffffff; border: 1px solid #777; padding: 2px 6px;
             font-weight: bold; font-size: 11px; border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.5); display: none;
         }
         .zoom-in-to-show .marker-label { display: block; }
 
-        /* Zorgt dat labels van geïsoleerde gebruikers ook uitgezoomd zichtbaar zijn */
         .user-label-always-show { display: block !important; }
 
         .user-gps-label-active { background: #27ae60 !important; color: #ffffff !important; border: 1px solid #ffffff !important; font-weight: bold; }
@@ -138,9 +151,9 @@
         }
 
         .geofence-radius-badge {
-            background: rgba(44, 62, 80, 0.85); color: #fff; padding: 2px 6px;
+            background: rgba(44, 62, 80, 0.95); color: #fff; padding: 2px 6px;
             border-radius: 4px; font-size: 10px; font-weight: bold; white-space: nowrap;
-            border: 1px solid rgba(255,255,255,0.7); box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            border: 1px solid rgba(255,255,255,0.7); box-shadow: 0 1px 3px rgba(0,0,0,0.5);
         }
     </style>
 </head>
@@ -168,6 +181,7 @@
                 <button class="header-btn" id="btn-fetch-latest" onclick="fetchLatestArticleManual()" style="display:none;" title="Laatste melding ophalen">🔔 Laatste</button>
                 <button class="header-btn" id="btn-add-rd" onclick="addMarkerByRD()" style="display:none;">+ RD</button>
                 <button class="header-btn" id="clear-rd-btn" onclick="clearRdPoints()" style="display:none;">Wis</button>
+                <button class="header-btn" id="btn-darkmode" onclick="toggleDarkMode()" title="Donkere kaartmodus aan/uit">🌙 Dark</button>
                 <button class="header-btn" id="btn-logout" onclick="logout()" title="Uitloggen">Uitloggen</button>
                 <div><span id="api-status" style="color: #2ecc71;">●</span></div>
             </div>
@@ -330,7 +344,6 @@
             } else {
                 badge.innerText = "Hunter: " + currentUserName;
                 startBackgroundLiveTracking();
-                // Controleer kort na inloggen of Firebase nog leeg of verouderd is
                 setTimeout(function() {
                     syncJotihuntToFirebase(false);
                 }, 2500);
@@ -503,6 +516,31 @@
             maxZoom: 19, attribution: 'Tiles &copy; Esri'
         }).addTo(map);
 
+        var isDarkMode = localStorage.getItem('jh_map_theme') === 'dark';
+        var mapContainer = document.getElementById('map');
+        var vossenPanel = document.getElementById('vossen-status-panel');
+
+        function applyDarkMode(enabled) {
+            if (enabled) {
+                mapContainer.classList.add('dark-mode-map');
+                vossenPanel.classList.add('dark-mode-map-panel');
+                document.getElementById('btn-darkmode').innerText = "☀️ Light";
+                localStorage.setItem('jh_map_theme', 'dark');
+            } else {
+                mapContainer.classList.remove('dark-mode-map');
+                vossenPanel.classList.remove('dark-mode-map-panel');
+                document.getElementById('btn-darkmode').innerText = "🌙 Dark";
+                localStorage.setItem('jh_map_theme', 'light');
+            }
+        }
+
+        applyDarkMode(isDarkMode);
+
+        function toggleDarkMode() {
+            isDarkMode = !isDarkMode;
+            applyDarkMode(isDarkMode);
+        }
+
         var fixedHouseLayer = new L.FeatureGroup().addTo(map);
         var drawnItems = new L.FeatureGroup().addTo(map);
         var rdPointsLayer = new L.FeatureGroup().addTo(map);
@@ -623,7 +661,6 @@
             return marker;
         }
 
-        /* ================= BEWERKEN & VERWIJDEREN RD PUNTEN ================= */
         window.editRdPointPopup = function(key) {
             if (!isAdmin || !key) return;
             db.ref('rdPoints/' + key).once('value', function(snapshot) {
@@ -731,7 +768,6 @@
             });
         }
 
-        /* ================= VOSSEN & RD ROUTE SYNC ================= */
         var rdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
         var latestKnownAreaPoints = {};
 
@@ -806,7 +842,6 @@
                         }
                     }
 
-                    // Gewogen koershoek berekening: 60% laatste, 30% eerdere, 10% oudste
                     var totalWeight = 0;
                     var sumSin = 0;
                     var sumCos = 0;
@@ -881,7 +916,6 @@
                     rdRouteLayer.addLayer(polyline);
                 }
 
-                // Cirkel berekening
                 var lastPtMinutes = parseTimeToMinutes(lastPoint.time);
                 var isFuture = false;
                 var secondsPassed = 0;
@@ -963,16 +997,11 @@
 
         setInterval(renderRdPointsAndGeofences, 20000);
 
-        /* ================= MELDINGEN BIJ NIEUWE RD PUNTEN ================= */
         var isInitialRdLoad = true;
-
-        db.ref('rdPoints').once('value', function() {
-            isInitialRdLoad = false;
-        });
+        db.ref('rdPoints').once('value', function() { isInitialRdLoad = false; });
 
         db.ref('rdPoints').on('child_added', function(snapshot) {
             if (isInitialRdLoad) return;
-
             var p = snapshot.val();
             if (!p) return;
 
@@ -985,26 +1014,21 @@
                 var deelgebied = p.area ? " in " + p.area : "";
                 var tijdTekst = p.time ? " (" + p.time + ")" : "";
 
-                if ('vibrate' in navigator) {
-                    navigator.vibrate([300, 100, 300, 100, 300]);
-                }
+                if ('vibrate' in navigator) { navigator.vibrate([300, 100, 300, 100, 300]); }
 
                 if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
                     navigator.serviceWorker.ready.then(function(reg) {
                         reg.showNotification("🎯 Nieuw RD Punt" + deelgebied, {
                             body: puntNaam + tijdTekst + " geplaatst op de kaart!",
-                            icon: 'icon-192.png',
-                            badge: 'icon-192.png',
+                            icon: 'icon-192.png', badge: 'icon-192.png',
                             vibrate: [300, 100, 300, 100, 300],
-                            tag: 'rd-alert-' + snapshot.key,
-                            renotify: true
+                            tag: 'rd-alert-' + snapshot.key, renotify: true
                         });
                     });
                 }
             }
         });
 
-        /* ================= LIVE GEBRUIKERS & AFSTANDSPOPUP ================= */
         window.navigateToAreaPoint = function(lat, lng) {
             window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
         };
@@ -1091,7 +1115,6 @@
             updateUsersIsolationLabels();
         });
 
-        /* ================= RD TOEVOEGEN & WISSEN ================= */
         db.ref('drawnItems').on('value', function(snapshot) {
             drawnItems.clearLayers();
             var data = snapshot.val();
@@ -1169,7 +1192,6 @@
             });
         }
 
-        /* ================= VASTE GROEPEN ================= */
         var allLocations = [
             {name: "André de Thaye en Lido'76", area: "Golf", lat: 51.98140, lng: 5.93388},
             {name: "Clan MacCastor", area: "Foxtrot", lat: 51.80907, lng: 5.78972},
@@ -1253,7 +1275,6 @@
 
         checkZoomLevel();
 
-        /* ================= VOSSEN PANEEL SLEPEN & MINIMALISEREN ================= */
         var panel = document.getElementById('vossen-status-panel');
         var header = document.getElementById('vossen-status-header');
         var isDragging = false, startX, startY;
@@ -1314,33 +1335,24 @@
                 var pt = latestKnownAreaPoints[teamName];
                 map.flyTo(pt.latlng, 15, { animate: true, duration: 1.2 });
                 if (pt.marker) {
-                    setTimeout(function() {
-                        pt.marker.openPopup();
-                    }, 600);
+                    setTimeout(function() { pt.marker.openPopup(); }, 600);
                 }
             } else {
                 alert("Nog geen RD-punt bekend voor deelgebied " + teamName);
             }
         }
 
-        /* ================= STATUS NOTIFICATIE LOGICA ================= */
         var previousAreaStatuses = {};
         var isInitialAreaStatusSync = true;
 
         function getNormalizedStatusCategory(rawStatus) {
             var s = String(rawStatus || '').toLowerCase().trim();
-            
-            // 1. ROOD (Inactief / Gevangen / Verplaatsing)
-            if (s === 'inactief' || s === 'inactive' || s.includes('red') || s.includes('rood') || s.includes('gevangen') || s.includes('caught') || s.includes('jail') || s === '0' || s === 'false') {
+            if (s === 'inactief' || s === 'inactive' || s.includes('red') || s.includes('rood') || s.includes('gevangen') || s.includes('caught') || s === '0' || s === 'false') {
                 return { key: 'rood', label: 'Rood (Inactief/Gevangen)' };
-            } 
-            // 2. GROEN (Actief / Vrij / In het veld)
-            else if (s === 'actief' || s.includes('green') || s.includes('groen') || s === 'active' || s === 'field' || s === 'open' || s === 'vrij' || s === '1' || s === 'true') {
+            } else if (s === 'actief' || s.includes('green') || s.includes('groen') || s === 'active' || s === 'field' || s === 'open' || s === 'vrij' || s === '1' || s === 'true') {
                 return { key: 'groen', label: 'Groen (Actief)' };
-            } 
-            // 3. ORANJE / GEEL (Onderweg / Binnenkort inactief / Rust)
-            else if (s.includes('rust') || s.includes('orange') || s.includes('oranje') || s.includes('yellow') || s.includes('geel') || s.includes('onderweg') || s === 'pause' || s === 'resting' || s === 'sleep' || s === '2') {
-                return { key: 'geel', label: 'Oranje/Geel (Rust/Binnenkort inactief)' };
+            } else if (s.includes('rust') || s.includes('orange') || s.includes('oranje') || s.includes('yellow') || s.includes('geel') || s.includes('onderweg') || s === 'pause' || s === 'resting' || s === '2') {
+                return { key: 'geel', label: 'Oranje/Geel (Rust)' };
             }
             return { key: 'grijs', label: 'Grijs (Onbekend)' };
         }
@@ -1365,28 +1377,21 @@
                     var prevCategory = previousAreaStatuses[targetName];
                     if (prevCategory && prevCategory.key !== currentCategory.key) {
                         var notifTitle = "🦊 Statuswijziging " + targetName;
-                        var notifBody = `${targetName} is om ${timeString} veranderd naar ${currentCategory.label} (was ${prevCategory.label}).`;
+                        var notifBody = `${targetName} is om ${timeString} veranderd naar ${currentCategory.label}.`;
 
-                        if ('vibrate' in navigator) {
-                            navigator.vibrate([300, 100, 300, 100, 300]);
-                        }
+                        if ('vibrate' in navigator) { navigator.vibrate([300, 100, 300, 100, 300]); }
 
                         if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
                             navigator.serviceWorker.ready.then(function(reg) {
                                 reg.showNotification(notifTitle, {
-                                    body: notifBody,
-                                    icon: 'icon-192.png',
-                                    badge: 'icon-192.png',
-                                    vibrate: [300, 100, 300, 100, 300],
-                                    tag: 'status-alert-' + targetName,
-                                    renotify: true
+                                    body: notifBody, icon: 'icon-192.png', badge: 'icon-192.png',
+                                    vibrate: [300, 100, 300, 100, 300], tag: 'status-alert-' + targetName, renotify: true
                                 });
                             });
                         }
 
                         document.getElementById('notification-text').innerText = "🦊 " + notifBody;
                         document.getElementById('notification-banner').style.display = 'flex';
-
                         previousAreaStatuses[targetName] = currentCategory;
                     } else if (!prevCategory) {
                         previousAreaStatuses[targetName] = currentCategory;
@@ -1394,12 +1399,9 @@
                 }
             });
 
-            if (isInitialAreaStatusSync) {
-                isInitialAreaStatusSync = false;
-            }
+            if (isInitialAreaStatusSync) { isInitialAreaStatusSync = false; }
         }
 
-        /* ================= JOTIHUNT SYNC VIA FIREBASE (MET MULTI-PROXY FALLBACK) ================= */
         var lastCachedAreas = [];
         var knownArticleId = localStorage.getItem('jh_last_article_id') || null;
         var lastSyncTimeInFirebase = 0;
@@ -1433,12 +1435,9 @@
             var data = snapshot.val();
             if (!data) return;
 
-            if (data.lastSync) {
-                lastSyncTimeInFirebase = data.lastSync;
-            }
+            if (data.lastSync) { lastSyncTimeInFirebase = data.lastSync; }
 
             if (data.areas) {
-                // Ondersteun zowel Array als Object structuur vanuit Firebase
                 var areasArray = Array.isArray(data.areas) ? data.areas : Object.values(data.areas);
                 if (areasArray.length > 0) {
                     lastCachedAreas = areasArray;
@@ -1460,7 +1459,6 @@
             document.getElementById('api-status').style.color = "#2ecc71";
         });
 
-        // Probeert meerdere routes (Direct -> CorsProxy -> CodeTabs -> AllOrigins met cachebuster)
         async function fetchJotihuntEndpoint(endpoint) {
             var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
             var bustUrl = targetUrl + "?_t=" + Date.now();
@@ -1477,23 +1475,15 @@
                     var controller = new AbortController();
                     var timeoutId = setTimeout(function() { controller.abort(); }, 7000);
 
-                    var res = await fetch(routes[i], {
-                        cache: "no-store",
-                        signal: controller.signal
-                    });
+                    var res = await fetch(routes[i], { cache: "no-store", signal: controller.signal });
                     clearTimeout(timeoutId);
 
                     if (!res.ok) continue;
 
                     var json = await res.json();
-                    if (json && json.data) {
-                        return json.data;
-                    } else if (Array.isArray(json)) {
-                        return json;
-                    }
-                } catch (err) {
-                    // Probeer direct de volgende route
-                }
+                    if (json && json.data) { return json.data; }
+                    else if (Array.isArray(json)) { return json; }
+                } catch (err) {}
             }
             throw new Error("Geen enkele API-route werkte voor " + endpoint);
         }
@@ -1505,14 +1495,12 @@
             var isDataStale = (Date.now() - lastSyncTimeInFirebase) > 60000;
             var isAreasEmpty = (!lastCachedAreas || lastCachedAreas.length === 0);
 
-            // Alleen Admin pollt elke 25s, OF een hunter neemt het over als er geen Admin actief is (>60s oud)
             if (!isAdmin && !isDataStale && !isAreasEmpty && !forceManual) return;
 
             isSyncingNow = true;
             var updatePayload = { lastSync: Date.now() };
             var anySuccess = false;
 
-            // 1. Haal EERST de vossenstatussen (/areas) op
             try {
                 var areasData = await fetchJotihuntEndpoint("areas");
                 if (Array.isArray(areasData) && areasData.length > 0) {
@@ -1521,14 +1509,10 @@
                     renderVossenUIFromData();
                     anySuccess = true;
                 }
-            } catch (areaErr) {
-                console.warn("Vossenstatus ophalen mislukt:", areaErr.message);
-            }
+            } catch (areaErr) {}
 
-            // Korte pauze tussen calls voor rate-limit bescherming
             await new Promise(function(r) { setTimeout(r, 1500); });
 
-            // 2. Haal daarna de artikelen (/articles) los op
             try {
                 var artData = await fetchJotihuntEndpoint("articles");
                 if (Array.isArray(artData) && artData.length > 0) {
@@ -1536,17 +1520,13 @@
                     updatePayload.latestArticle = sorted[0];
                     anySuccess = true;
                 }
-            } catch (artErr) {
-                console.warn("Artikelen ophalen mislukt:", artErr.message);
-            }
+            } catch (artErr) {}
 
-            // 3. Schrijf resultaat naar Firebase
             if (anySuccess) {
                 try {
                     await db.ref('jotihuntSync').update(updatePayload);
                     document.getElementById('api-status').style.color = "#2ecc71";
                 } catch (fbErr) {
-                    console.warn("Firebase update fout:", fbErr);
                     document.getElementById('api-status').style.color = "#e74c3c";
                 }
             } else {
@@ -1563,7 +1543,6 @@
             });
         }
 
-        // Elke 25 seconden controleren
         setInterval(function() {
             syncJotihuntToFirebase(false);
         }, 25000);
