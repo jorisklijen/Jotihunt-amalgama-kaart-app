@@ -312,6 +312,11 @@
             document.getElementById('auth-overlay').style.display = 'none';
             document.getElementById('app-container').style.display = 'flex';
 
+            // Toestemming vragen voor notificaties
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+
             var badge = document.getElementById('user-badge');
             if (isAdmin) {
                 badge.innerText = "Beheerder (Admin)";
@@ -632,7 +637,7 @@
                                 fullName: p.fullName || p.baseName,
                                 area: p.area,
                                 color: p.color || areaColors[p.area] || "#000000",
-                                createdTimestamp: p.createdTimestamp || Date.now()
+                                createdTimestamp: p.createdTimestamp || p.createdAt || Date.now()
                             });
                         }
                     }
@@ -720,7 +725,6 @@
                 }
 
                 // ================= GEOFENCE CIRKEL (START 3M + 5,5 KM/U) =================
-                // 5,5 km/u = 5500m / 3600s = 1.527777 m/s
                 var lastPtMinutes = parseTimeToMinutes(lastPoint.time);
                 var secondsPassed = 0;
 
@@ -728,12 +732,11 @@
                     var currentTotalSeconds = (now.getHours() * 3600) + (now.getMinutes() * 60) + now.getSeconds();
                     var pointSeconds = lastPtMinutes * 60;
                     secondsPassed = currentTotalSeconds - pointSeconds;
-                    if (secondsPassed < 0) secondsPassed += 86400; // over middernacht
+                    if (secondsPassed < 0) secondsPassed += 86400;
                 } else if (lastPoint.createdTimestamp) {
                     secondsPassed = Math.max(0, Math.floor((Date.now() - lastPoint.createdTimestamp) / 1000));
                 }
 
-                // Begint op exact 3 meter en groeit realtime
                 var currentRadiusMeters = Math.max(3, Math.round(3 + (secondsPassed * (5500 / 3600))));
                 var areaColor = areaColors[area] || "#e74c3c";
 
@@ -748,7 +751,6 @@
                 });
                 geofenceLayer.addLayer(circle);
 
-                // Badge met de radius
                 var badgeIcon = L.divIcon({
                     className: 'geofence-badge-wrapper',
                     html: `<div class="geofence-radius-badge" style="border-color:${areaColor};">🎯 ${area}: ${currentRadiusMeters >= 1000 ? (currentRadiusMeters/1000).toFixed(1) + ' km' : currentRadiusMeters + ' m'}</div>`,
@@ -758,7 +760,6 @@
                 var badgeMarker = L.marker(lastPoint.latlng, { icon: badgeIcon, interactive: false });
                 geofenceLayer.addLayer(badgeMarker);
 
-                // Twee richtingspijlen (120 graden gradenboog)
                 if (bearingDeg !== null) {
                     [-60, 60].forEach(function(offsetAngle) {
                         var arrowAngle = (bearingDeg + offsetAngle + 360) % 360;
@@ -787,8 +788,50 @@
             }
         }
 
-        // Cirkel elke 20 seconden laten bijwerken
         setInterval(renderRdPointsAndGeofences, 20000);
+
+        /* ================= MELDINGEN BIJ NIEUWE RD PUNTEN ================= */
+        var isInitialRdLoad = true;
+
+        db.ref('rdPoints').once('value', function() {
+            isInitialRdLoad = false;
+        });
+
+        db.ref('rdPoints').on('child_added', function(snapshot) {
+            if (isInitialRdLoad) return;
+
+            var p = snapshot.val();
+            if (!p) return;
+
+            var now = Date.now();
+            var itemTime = p.createdAt || p.createdTimestamp || now;
+            var isRecent = (now - itemTime < 15 * 60 * 1000);
+
+            if (isRecent) {
+                var puntNaam = p.fullName || p.baseName || "Nieuw punt";
+                var deelgebied = p.area ? " in " + p.area : "";
+                var tijdTekst = p.time ? " (" + p.time + ")" : "";
+
+                // Trillen op toestel (standaard meldingspatroon)
+                if ('vibrate' in navigator) {
+                    navigator.vibrate([300, 100, 300, 100, 300]);
+                }
+
+                // Systeemnotificatie via Service Worker met standaardsignaal
+                if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+                    navigator.serviceWorker.ready.then(function(reg) {
+                        reg.showNotification("🎯 Nieuw RD Punt" + deelgebied, {
+                            body: puntNaam + tijdTekst + " geplaatst op de kaart!",
+                            icon: 'icon-192.png',
+                            badge: 'icon-192.png',
+                            vibrate: [300, 100, 300, 100, 300],
+                            tag: 'rd-alert-' + snapshot.key,
+                            renotify: true
+                        });
+                    });
+                }
+            }
+        });
 
         /* ================= LIVE GEBRUIKERS & AFSTANDSPOPUP ================= */
         window.navigateToAreaPoint = function(lat, lng) {
@@ -942,6 +985,7 @@
                 area: areaKey,
                 fullName: name + areaSuffix,
                 color: markerColor,
+                createdAt: Date.now(),
                 createdTimestamp: Date.now()
             }).then(function() {
                 map.setView(latlng, 14);
@@ -1115,7 +1159,6 @@
             document.getElementById('vossen-list').innerHTML = html;
         }
 
-        // IEDEREEN luistert live naar Firebase (geen CORS, geen ratelimits)
         db.ref('jotihuntSync').on('value', function(snapshot) {
             var data = snapshot.val();
             if (!data) return;
@@ -1138,7 +1181,6 @@
             document.getElementById('api-status').style.color = "#2ecc71";
         });
 
-        // Alleen Beheerder (Admin) haalt data op via proxy
         async function syncJotihuntToFirebase() {
             if (!isAdmin) return;
 
