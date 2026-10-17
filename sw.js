@@ -1,24 +1,63 @@
-self.addEventListener('install', function(e) {
-  self.skipWaiting();
+const CACHE_NAME = 'jotihunt-amalgama-v2';
+
+self.addEventListener('install', function(event) {
+    self.skipWaiting();
 });
 
-self.addEventListener('activate', function(e) {
-  e.waitUntil(clients.claim());
+self.addEventListener('activate', function(event) {
+    event.waitUntil(
+        caches.keys().then(function(cacheNames) {
+            return Promise.all(
+                cacheNames.map(function(cacheName) {
+                    if (cacheName !== CACHE_NAME) {
+                        return caches.delete(cacheName);
+                    }
+                })
+            );
+        }).then(function() {
+            return self.clients.claim();
+        })
+    );
 });
 
-self.addEventListener('fetch', function(e) {
-  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+self.addEventListener('fetch', function(event) {
+    const url = event.request.url;
+
+    // Laat API calls, proxies en Firebase ALTIJD rechtstreeks via het netwerk lopen zonder SW-cache
+    if (
+        url.includes('jotihunt.nl') ||
+        url.includes('allorigins.win') ||
+        url.includes('corsproxy.io') ||
+        url.includes('codetabs.com') ||
+        url.includes('firebaseio.com') ||
+        url.includes('firebasedatabase.app')
+    ) {
+        event.respondWith(fetch(event.request));
+        return;
+    }
+
+    // Voor overige bestanden: eerst netwerk proberen, bij offline terugvallen op cache
+    event.respondWith(
+        fetch(event.request).catch(function() {
+            return caches.match(event.request);
+        })
+    );
 });
 
-// Zorgt dat bij het aantikken van de melding de app naar voren komt
+// Zorgt dat tikken op een melding op de telefoon de app naar voren haalt
 self.addEventListener('notificationclick', function(event) {
-  event.notification.close();
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
-      if (clientList.length > 0) {
-        return clientList[0].focus();
-      }
-      return clients.openWindow('./index.html');
-    })
-  );
+    event.notification.close();
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+            for (var i = 0; i < clientList.length; i++) {
+                var client = clientList[i];
+                if ('focus' in client) {
+                    return client.focus();
+                }
+            }
+            if (clients.openWindow) {
+                return clients.openWindow('./index.html');
+            }
+        })
+    );
 });
