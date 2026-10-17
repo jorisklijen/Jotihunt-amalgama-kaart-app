@@ -647,15 +647,18 @@
             var marker = L.marker(latlng, { icon: customIcon });
             marker.bindTooltip(labelText, { permanent: true, direction: 'right', className: 'marker-label' });
 
-            var popupContent = `<div style="font-size:12px; min-width:160px;">
+            var popupContent = `<div style="font-size:12px; min-width:180px;">
                 <b>${name}</b><br>
                 <span>Tijd: <b>${timeStr}</b></span><br>
                 ${extraInfo ? `<span>Snelheid: <b>${extraInfo}</b></span><br>` : ''}
+                <button onclick="window.navigateToAreaPoint(${latlng[0]}, ${latlng[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
+                    📍 Navigeer naar dit punt
+                </button>
                 ${(isAdmin && firebaseKey) ? `
-                    <hr style="margin:5px 0; border:0; border-top:1px solid #ccc;">
-                    <div style="display:flex; gap:5px; margin-top:5px;">
-                        <button onclick="window.editRdPointPopup('${firebaseKey}')" style="background:#f39c12; color:white; border:none; padding:4px 8px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">✏️ Bewerk</button>
-                        <button onclick="window.deleteRdPointPopup('${firebaseKey}')" style="background:#e74c3c; color:white; border:none; padding:4px 8px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">🗑️ Wis</button>
+                    <hr style="margin:6px 0; border:0; border-top:1px solid #ccc;">
+                    <div style="display:flex; gap:5px; margin-top:4px;">
+                        <button onclick="window.editRdPointPopup('${firebaseKey}')" style="background:#f39c12; color:white; border:none; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">✏️ Bewerk</button>
+                        <button onclick="window.deleteRdPointPopup('${firebaseKey}')" style="background:#e74c3c; color:white; border:none; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">🗑️ Wis</button>
                     </div>
                 ` : ''}
             </div>`;
@@ -730,7 +733,6 @@
                 });
 
                 var lastPoint = points[points.length - 1];
-                latestKnownAreaPoints[area] = lastPoint;
 
                 var calculatedSpeedKmh = null;
                 var speedText = "";
@@ -782,7 +784,13 @@
                     var extra = isLatest && speedText ? speedText : "";
                     var marker = createWalkerMarker(pt.latlng, pt.fullName || pt.baseName, pt.color, pt.time, opacity, extra, isOscar, pt.key);
                     rdPointsLayer.addLayer(marker);
+
+                    if (isLatest) {
+                        lastPoint.marker = marker;
+                    }
                 });
+
+                latestKnownAreaPoints[area] = lastPoint;
 
                 if (points.length >= 2) {
                     var latLngs = points.map(function(p) { return p.latlng; });
@@ -946,12 +954,13 @@
                 var etaAmalgama = Math.round((distAmalgama / 45) * 60);
 
                 var vossenOptions = `<option value="${amalgamaLat},${amalgamaLng}">Clubgebouw (${distAmalgama} km - ~${etaAmalgama} min)</option>`;
+                
                 targetAreas.forEach(function(areaName) {
                     if (latestKnownAreaPoints[areaName]) {
                         var pt = latestKnownAreaPoints[areaName];
                         var dist = getDistanceKm(u.lat, u.lng, pt.latlng[0], pt.latlng[1]).toFixed(1);
                         var eta = Math.round((dist / 45) * 60);
-                        vossenOptions += `<option value="${pt.latlng[0]},${pt.latlng[1]}">${areaName} (${dist} km - ~${eta} min)</option>`;
+                        vossenOptions += `<option value="${pt.latlng[0]},${pt.latlng[1]}">🎯 Laatste RD: ${areaName} (${dist} km - ~${eta} min)</option>`;
                     }
                 });
 
@@ -1214,18 +1223,39 @@
             renderVossenUIFromData();
         }
 
+        // Dubbelklik op vossennaam zoomt direct in naar het meest recente RD-punt
+        function zoomToLatestAreaPoint(teamName) {
+            if (latestKnownAreaPoints[teamName] && latestKnownAreaPoints[teamName].latlng) {
+                var pt = latestKnownAreaPoints[teamName];
+                map.flyTo(pt.latlng, 15, { animate: true, duration: 1.2 });
+                if (pt.marker) {
+                    setTimeout(function() {
+                        pt.marker.openPopup();
+                    }, 600);
+                }
+            } else {
+                alert("Nog geen RD-punt bekend voor deelgebied " + teamName);
+            }
+        }
+
         /* ================= STATUS NOTIFICATIE LOGICA ================= */
         var previousAreaStatuses = {};
         var isInitialAreaStatusSync = true;
 
         function getNormalizedStatusCategory(rawStatus) {
-            var s = (rawStatus || '').toLowerCase();
-            if (s === 'inactief' || s.includes('red') || s.includes('gevangen') || s.includes('caught') || s.includes('jail')) {
-                return { key: 'rood', label: 'Rood (Gevangen)' };
-            } else if (s.includes('actief') || s === 'active' || s === 'field') {
+            var s = String(rawStatus || '').toLowerCase().trim();
+            
+            // 1. ROOD (Inactief / Gevangen / Verplaatsing)
+            if (s === 'inactief' || s.includes('red') || s.includes('rood') || s.includes('gevangen') || s.includes('caught') || s.includes('jail') || s === '0' || s === 'false') {
+                return { key: 'rood', label: 'Rood (Inactief/Gevangen)' };
+            } 
+            // 2. GROEN (Actief / Vrij / In het veld)
+            else if (s === 'actief' || s.includes('green') || s.includes('groen') || s === 'active' || s === 'field' || s === 'open' || s === 'vrij' || s === '1' || s === 'true') {
                 return { key: 'groen', label: 'Groen (Actief)' };
-            } else if (s.includes('rust') || s === 'pause' || s === 'resting') {
-                return { key: 'geel', label: 'Geel/Oranje (Rust)' };
+            } 
+            // 3. ORANJE / GEEL (Onderweg / Binnenkort inactief / Rust)
+            else if (s.includes('rust') || s.includes('orange') || s.includes('oranje') || s.includes('yellow') || s.includes('geel') || s.includes('onderweg') || s === 'pause' || s === 'resting' || s === 'sleep' || s === '2') {
+                return { key: 'geel', label: 'Oranje/Geel (Rust/Binnenkort inactief)' };
             }
             return { key: 'grijs', label: 'Grijs (Onbekend)' };
         }
@@ -1241,7 +1271,8 @@
                     return (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase());
                 });
 
-                var currentCategory = getNormalizedStatusCategory(area ? area.status : '');
+                var raw = area ? (area.status || area.state || area.status_text || area.status_id || '') : '';
+                var currentCategory = getNormalizedStatusCategory(raw);
 
                 if (isInitialAreaStatusSync) {
                     previousAreaStatuses[targetName] = currentCategory;
@@ -1294,18 +1325,20 @@
                 var area = lastCachedAreas.find(function(a) {
                     return (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase());
                 });
-                var rawStatus = area ? (area.status || '').toLowerCase() : 'vervangen';
-                var cls = 'status-vervangen';
                 
-                if (rawStatus === 'inactief' || rawStatus.includes('red') || rawStatus.includes('gevangen') || rawStatus.includes('caught')) {
+                var raw = area ? (area.status || area.state || area.status_text || area.status_id || '') : '';
+                var cat = getNormalizedStatusCategory(raw);
+                var cls = 'status-vervangen';
+
+                if (cat.key === 'rood') {
                     cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
-                } else if (rawStatus.includes('actief') || rawStatus === 'active') {
+                } else if (cat.key === 'groen') {
                     cls = 'status-actief';
-                } else if (rawStatus.includes('rust') || rawStatus === 'pause') {
+                } else if (cat.key === 'geel') {
                     cls = 'status-rust';
                 }
 
-                html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')">${targetName}</div>`;
+                html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')" ondblclick="zoomToLatestAreaPoint('${targetName}')" title="Klik: knipperen aan/uit | Dubbelklik: zoom naar laatste RD punt">${targetName}</div>`;
             });
             document.getElementById('vossen-list').innerHTML = html;
         }
