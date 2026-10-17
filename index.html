@@ -326,10 +326,14 @@
                 document.getElementById('btn-add-rd').style.display = 'inline-block';
                 document.getElementById('clear-rd-btn').style.display = 'inline-block';
                 setupDrawTools();
-                syncJotihuntToFirebase();
+                syncJotihuntToFirebase(true);
             } else {
                 badge.innerText = "Hunter: " + currentUserName;
                 startBackgroundLiveTracking();
+                // Controleer kort na inloggen of Firebase nog leeg of verouderd is
+                setTimeout(function() {
+                    syncJotihuntToFirebase(false);
+                }, 2500);
             }
 
             keepScreenAwake();
@@ -505,7 +509,7 @@
         var rdRouteLayer = new L.FeatureGroup().addTo(map);
         var usersLiveLayer = new L.FeatureGroup().addTo(map);
         var geofenceLayer = new L.FeatureGroup().addTo(map);
-        var compassRoseLayer = new L.FeatureGroup(); // Bevat de kompas-icoontjes op de rand
+        var compassRoseLayer = new L.FeatureGroup();
         var liveUserMarkers = {};
         var cachedUsersData = {};
 
@@ -519,7 +523,6 @@
                 var currentU = cachedUsersData[uId];
                 if (!currentU || !currentU.lat || !currentU.lng) return;
 
-                // Bereken afstand tot dichtstbijzijnde andere gebruiker
                 var minDistanceKm = Infinity;
                 userIds.forEach(function(otherId) {
                     if (otherId === uId) return;
@@ -531,7 +534,6 @@
                     }
                 });
 
-                // Is geïsoleerd als er > 500m (0.5 km) tussen zit of als er maar 1 gebruiker is
                 var isIsolated = (userIds.length <= 1) || (minDistanceKm > 0.5);
 
                 var tooltip = m.getTooltip();
@@ -810,7 +812,6 @@
                     var sumCos = 0;
                     var numPoints = points.length;
 
-                    // 60% voor laatste segment
                     if (numPoints >= 2) {
                         var pA = points[numPoints - 2];
                         var pB = points[numPoints - 1];
@@ -820,7 +821,6 @@
                         totalWeight += 0.60;
                     }
 
-                    // 30% voor het segment daarvoor
                     if (numPoints >= 3) {
                         var pA2 = points[numPoints - 3];
                         var pB2 = points[numPoints - 2];
@@ -830,7 +830,6 @@
                         totalWeight += 0.30;
                     }
 
-                    // 10% voor het segment daar weer voor
                     if (numPoints >= 4) {
                         var pA3 = points[numPoints - 4];
                         var pB3 = points[numPoints - 3];
@@ -1332,7 +1331,7 @@
             var s = String(rawStatus || '').toLowerCase().trim();
             
             // 1. ROOD (Inactief / Gevangen / Verplaatsing)
-            if (s === 'inactief' || s.includes('red') || s.includes('rood') || s.includes('gevangen') || s.includes('caught') || s.includes('jail') || s === '0' || s === 'false') {
+            if (s === 'inactief' || s === 'inactive' || s.includes('red') || s.includes('rood') || s.includes('gevangen') || s.includes('caught') || s.includes('jail') || s === '0' || s === 'false') {
                 return { key: 'rood', label: 'Rood (Inactief/Gevangen)' };
             } 
             // 2. GROEN (Actief / Vrij / In het veld)
@@ -1400,9 +1399,10 @@
             }
         }
 
-        /* ================= JOTIHUNT SYNC VIA FIREBASE ================= */
+        /* ================= JOTIHUNT SYNC VIA FIREBASE (MET MULTI-PROXY FALLBACK) ================= */
         var lastCachedAreas = [];
         var knownArticleId = localStorage.getItem('jh_last_article_id') || null;
+        var lastSyncTimeInFirebase = 0;
 
         function renderVossenUIFromData() {
             if (!lastCachedAreas || lastCachedAreas.length === 0) return;
@@ -1433,10 +1433,18 @@
             var data = snapshot.val();
             if (!data) return;
 
-            if (data.areas && Array.isArray(data.areas)) {
-                lastCachedAreas = data.areas;
-                renderVossenUIFromData();
-                handleAreaStatusNotifications(data.areas);
+            if (data.lastSync) {
+                lastSyncTimeInFirebase = data.lastSync;
+            }
+
+            if (data.areas) {
+                // Ondersteun zowel Array als Object structuur vanuit Firebase
+                var areasArray = Array.isArray(data.areas) ? data.areas : Object.values(data.areas);
+                if (areasArray.length > 0) {
+                    lastCachedAreas = areasArray;
+                    renderVossenUIFromData();
+                    handleAreaStatusNotifications(areasArray);
+                }
             }
 
             if (data.latestArticle && data.latestArticle.title) {
@@ -1452,50 +1460,112 @@
             document.getElementById('api-status').style.color = "#2ecc71";
         });
 
-        async function syncJotihuntToFirebase() {
-            if (!isAdmin) return;
+        // Probeert meerdere routes (Direct -> CorsProxy -> CodeTabs -> AllOrigins met cachebuster)
+        async function fetchJotihuntEndpoint(endpoint) {
+            var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
+            var bustUrl = targetUrl + "?_t=" + Date.now();
 
-            var proxyUrl = "https://api.allorigins.win/raw?url=";
+            var routes = [
+                targetUrl,
+                "https://corsproxy.io/?" + encodeURIComponent(targetUrl),
+                "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl),
+                "https://api.allorigins.win/raw?url=" + encodeURIComponent(bustUrl)
+            ];
 
-            try {
-                var artRes = await fetch(proxyUrl + encodeURIComponent("https://jotihunt.nl/api/2.0/articles"));
-                var artData = await artRes.json();
-                var latestArticle = null;
-                if (artData && artData.data && artData.data.length > 0) {
-                    var sorted = artData.data.sort(function(a, b) { return (b.id || 0) - (a.id || 0); });
-                    latestArticle = sorted[0];
+            for (var i = 0; i < routes.length; i++) {
+                try {
+                    var controller = new AbortController();
+                    var timeoutId = setTimeout(function() { controller.abort(); }, 7000);
+
+                    var res = await fetch(routes[i], {
+                        cache: "no-store",
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+
+                    if (!res.ok) continue;
+
+                    var json = await res.json();
+                    if (json && json.data) {
+                        return json.data;
+                    } else if (Array.isArray(json)) {
+                        return json;
+                    }
+                } catch (err) {
+                    // Probeer direct de volgende route
                 }
+            }
+            throw new Error("Geen enkele API-route werkte voor " + endpoint);
+        }
 
-                await new Promise(r => setTimeout(r, 2000));
+        var isSyncingNow = false;
+        async function syncJotihuntToFirebase(forceManual = false) {
+            if (isSyncingNow) return;
 
-                var areaRes = await fetch(proxyUrl + encodeURIComponent("https://jotihunt.nl/api/2.0/areas"));
-                var areaData = await areaRes.json();
-                var areas = (areaData && areaData.data) ? areaData.data : [];
+            var isDataStale = (Date.now() - lastSyncTimeInFirebase) > 60000;
+            var isAreasEmpty = (!lastCachedAreas || lastCachedAreas.length === 0);
 
-                await db.ref('jotihuntSync').update({
-                    latestArticle: latestArticle,
-                    areas: areas,
-                    lastSync: Date.now()
-                });
+            // Alleen Admin pollt elke 25s, OF een hunter neemt het over als er geen Admin actief is (>60s oud)
+            if (!isAdmin && !isDataStale && !isAreasEmpty && !forceManual) return;
 
-                document.getElementById('api-status').style.color = "#2ecc71";
-            } catch (err) {
-                console.warn("Sync mislukt:", err);
+            isSyncingNow = true;
+            var updatePayload = { lastSync: Date.now() };
+            var anySuccess = false;
+
+            // 1. Haal EERST de vossenstatussen (/areas) op
+            try {
+                var areasData = await fetchJotihuntEndpoint("areas");
+                if (Array.isArray(areasData) && areasData.length > 0) {
+                    updatePayload.areas = areasData;
+                    lastCachedAreas = areasData;
+                    renderVossenUIFromData();
+                    anySuccess = true;
+                }
+            } catch (areaErr) {
+                console.warn("Vossenstatus ophalen mislukt:", areaErr.message);
+            }
+
+            // Korte pauze tussen calls voor rate-limit bescherming
+            await new Promise(function(r) { setTimeout(r, 1500); });
+
+            // 2. Haal daarna de artikelen (/articles) los op
+            try {
+                var artData = await fetchJotihuntEndpoint("articles");
+                if (Array.isArray(artData) && artData.length > 0) {
+                    var sorted = artData.sort(function(a, b) { return (b.id || 0) - (a.id || 0); });
+                    updatePayload.latestArticle = sorted[0];
+                    anySuccess = true;
+                }
+            } catch (artErr) {
+                console.warn("Artikelen ophalen mislukt:", artErr.message);
+            }
+
+            // 3. Schrijf resultaat naar Firebase
+            if (anySuccess) {
+                try {
+                    await db.ref('jotihuntSync').update(updatePayload);
+                    document.getElementById('api-status').style.color = "#2ecc71";
+                } catch (fbErr) {
+                    console.warn("Firebase update fout:", fbErr);
+                    document.getElementById('api-status').style.color = "#e74c3c";
+                }
+            } else {
                 document.getElementById('api-status').style.color = "#e74c3c";
             }
+
+            isSyncingNow = false;
         }
 
         function fetchLatestArticleManual() {
-            syncJotihuntToFirebase().then(function() {
+            syncJotihuntToFirebase(true).then(function() {
                 var art = document.getElementById('notification-text').innerText;
                 if (art) document.getElementById('notification-banner').style.display = 'flex';
             });
         }
 
+        // Elke 25 seconden controleren
         setInterval(function() {
-            if (isAdmin) {
-                syncJotihuntToFirebase();
-            }
+            syncJotihuntToFirebase(false);
         }, 25000);
     </script>
 </body>
