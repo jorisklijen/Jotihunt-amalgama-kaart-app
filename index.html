@@ -95,6 +95,30 @@
             filter: brightness(0.85) contrast(1.15);
         }
 
+        /* DONKERE INFO-KAARTJES (POPUPS) OP DE KAART */
+        .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+            background-color: #2c3e50 !important;
+            color: #ffffff !important;
+            border: 1px solid #4a627a;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.6) !important;
+        }
+        .leaflet-popup-close-button {
+            color: #bdc3c7 !important;
+        }
+        .leaflet-popup-close-button:hover {
+            color: #ffffff !important;
+        }
+        .leaflet-popup-content select {
+            background-color: #1a252f;
+            color: #ffffff;
+            border: 1px solid #4a627a;
+            border-radius: 3px;
+            outline: none;
+        }
+        .leaflet-popup-content hr {
+            border-top: 1px solid #4a627a !important;
+        }
+
         /* VOSSEN PANEEL (Standaard & Dark Mode varianten) */
         #vossen-status-panel {
             position: absolute; top: 15px; right: 15px; z-index: 2000;
@@ -728,6 +752,16 @@
             }
         };
 
+        /* ================= INACTIEVE GEBRUIKER HANDMATIG VERWIJDEREN (ADMIN) ================= */
+        window.removeInactiveUser = function(userId, userName) {
+            if (!isAdmin || !userId) return;
+            if (confirm("Wil je inactieve gebruiker '" + userName + "' van de kaart halen?\n(Zodra deze persoon weer online komt, verschijnt hij/zij direct weer op de kaart).")) {
+                db.ref('liveUsers/' + userId).remove().then(function() {
+                    map.closePopup();
+                });
+            }
+        };
+
         function createWalkerMarker(latlng, name, color, timeStr, opacity, extraInfo, isOscar = false, firebaseKey = null) {
             var strokeColor = isOscar ? "#003399" : "#000000";
             var walkerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30" fill="${color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1.5}" style="opacity: ${opacity};" filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.4))">
@@ -754,7 +788,7 @@
                     📍 Navigeer naar dit punt
                 </button>
                 ${(isAdmin && firebaseKey) ? `
-                    <hr style="margin:6px 0; border:0; border-top:1px solid #ccc;">
+                    <hr style="margin:6px 0; border:0; border-top:1px solid #4a627a;">
                     <div style="display:flex; gap:5px; margin-top:4px;">
                         <button onclick="window.editRdPointPopup('${firebaseKey}')" style="background:#f39c12; color:white; border:none; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">✏️ Bewerk</button>
                         <button onclick="window.deleteRdPointPopup('${firebaseKey}')" style="background:#e74c3c; color:white; border:none; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">🗑️ Wis</button>
@@ -1088,12 +1122,14 @@
                     }
                 });
 
+                var safeUserName = (u.name || "Gebruiker").replace(/'/g, "\\'");
+
                 var popupHtml = `
                     <div style="font-size:12px; min-width:200px;">
                         <b>🚗 ${u.name}</b><br>
                         Status: ${statusText}<br>
                         Nauwkeurigheid: ~${u.accuracy || '?'}m (${timeAgoText})<br>
-                        <hr style="margin:5px 0; border:0; border-top:1px solid #ccc;">
+                        <hr style="margin:5px 0; border:0; border-top:1px solid #4a627a;">
                         <b>Kies doel & navigeer:</b><br>
                         <select id="sel_dest_${userId}" style="width:100%; padding:4px; margin-top:4px; font-size:11px;">
                             ${vossenOptions}
@@ -1104,6 +1140,11 @@
                         })()" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
                             📍 Navigeer via Google Maps
                         </button>
+                        ${(isAdmin && !isActive) ? `
+                            <button onclick="window.removeInactiveUser('${userId}', '${safeUserName}')" style="background:#c0392b; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
+                                🗑️ Verberg inactieve gebruiker
+                            </button>
+                        ` : ''}
                     </div>
                 `;
 
@@ -1111,6 +1152,10 @@
                     liveUserMarkers[userId].setLatLng([u.lat, u.lng]);
                     liveUserMarkers[userId].setIcon(icon);
                     liveUserMarkers[userId].setTooltipContent("🚗 " + u.name);
+                    var tooltipEl = liveUserMarkers[userId].getTooltip();
+                    if (tooltipEl && tooltipEl._container) {
+                        tooltipEl._container.className = 'leaflet-tooltip leaflet-zoom-animated ' + labelClass;
+                    }
                     liveUserMarkers[userId].getPopup().setContent(popupHtml);
                 } else {
                     var m = L.marker([u.lat, u.lng], { icon: icon });
@@ -1284,7 +1329,7 @@
                 var areaColor = areaColors[loc.area] || "#3498db";
                 var isOscar = (loc.area === "Oscar");
                 var marker = createHouseMarker([loc.lat, loc.lng], loc.name + " (" + loc.area + ")", areaColor, isOscar);
-                marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:4px 8px; border-radius:3px; cursor:pointer;">📍 Navigeer via Google Maps</button>`);
+                marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>`);
                 fixedHouseLayer.addLayer(marker);
             }
         });
