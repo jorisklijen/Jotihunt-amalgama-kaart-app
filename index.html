@@ -312,7 +312,7 @@
             document.getElementById('auth-overlay').style.display = 'none';
             document.getElementById('app-container').style.display = 'flex';
 
-            // Toestemming vragen voor notificaties
+            // Eenmalig toestemming vragen voor notificaties
             if ('Notification' in window && Notification.permission === 'default') {
                 Notification.requestPermission();
             }
@@ -692,7 +692,6 @@
                     bearingDeg = getBearing(prevP.latlng[0], prevP.latlng[1], lastPoint.latlng[0], lastPoint.latlng[1]);
                 }
 
-                // Teken punten met vervaging
                 points.forEach(function(pt, idx) {
                     var isLatest = (idx === points.length - 1);
                     var isOscar = (pt.area === "Oscar");
@@ -715,7 +714,6 @@
                     rdPointsLayer.addLayer(marker);
                 });
 
-                // Chronologische lijn
                 if (points.length >= 2) {
                     var latLngs = points.map(function(p) { return p.latlng; });
                     var lineColor = (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000");
@@ -724,7 +722,6 @@
                     rdRouteLayer.addLayer(polyline);
                 }
 
-                // ================= GEOFENCE CIRKEL (START 3M + 5,5 KM/U) =================
                 var lastPtMinutes = parseTimeToMinutes(lastPoint.time);
                 var secondsPassed = 0;
 
@@ -812,12 +809,10 @@
                 var deelgebied = p.area ? " in " + p.area : "";
                 var tijdTekst = p.time ? " (" + p.time + ")" : "";
 
-                // Trillen op toestel (standaard meldingspatroon)
                 if ('vibrate' in navigator) {
                     navigator.vibrate([300, 100, 300, 100, 300]);
                 }
 
-                // Systeemnotificatie via Service Worker met standaardsignaal
                 if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
                     navigator.serviceWorker.ready.then(function(reg) {
                         reg.showNotification("🎯 Nieuw RD Punt" + deelgebied, {
@@ -1132,6 +1127,75 @@
             renderVossenUIFromData();
         }
 
+        /* ================= STATUS NOTIFICATIE LOGICA ================= */
+        var previousAreaStatuses = {};
+        var isInitialAreaStatusSync = true;
+
+        function getNormalizedStatusCategory(rawStatus) {
+            var s = (rawStatus || '').toLowerCase();
+            if (s === 'inactief' || s.includes('red') || s.includes('gevangen') || s.includes('caught') || s.includes('jail')) {
+                return { key: 'rood', label: 'Rood (Gevangen)' };
+            } else if (s.includes('actief') || s === 'active' || s === 'field') {
+                return { key: 'groen', label: 'Groen (Actief)' };
+            } else if (s.includes('rust') || s === 'pause' || s === 'resting') {
+                return { key: 'geel', label: 'Geel/Oranje (Rust)' };
+            }
+            return { key: 'grijs', label: 'Grijs (Onbekend)' };
+        }
+
+        function handleAreaStatusNotifications(areas) {
+            if (!areas || !Array.isArray(areas)) return;
+
+            var now = new Date();
+            var timeString = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
+
+            targetAreas.forEach(function(targetName) {
+                var area = areas.find(function(a) {
+                    return (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase());
+                });
+
+                var currentCategory = getNormalizedStatusCategory(area ? area.status : '');
+
+                if (isInitialAreaStatusSync) {
+                    previousAreaStatuses[targetName] = currentCategory;
+                } else {
+                    var prevCategory = previousAreaStatuses[targetName];
+                    if (prevCategory && prevCategory.key !== currentCategory.key) {
+                        var notifTitle = "🦊 Statuswijziging " + targetName;
+                        var notifBody = `${targetName} is om ${timeString} veranderd naar ${currentCategory.label} (was ${prevCategory.label}).`;
+
+                        if ('vibrate' in navigator) {
+                            navigator.vibrate([300, 100, 300, 100, 300]);
+                        }
+
+                        if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+                            navigator.serviceWorker.ready.then(function(reg) {
+                                reg.showNotification(notifTitle, {
+                                    body: notifBody,
+                                    icon: 'icon-192.png',
+                                    badge: 'icon-192.png',
+                                    vibrate: [300, 100, 300, 100, 300],
+                                    tag: 'status-alert-' + targetName,
+                                    renotify: true
+                                });
+                            });
+                        }
+
+                        document.getElementById('notification-text').innerText = "🦊 " + notifBody;
+                        document.getElementById('notification-banner').style.display = 'flex';
+
+                        previousAreaStatuses[targetName] = currentCategory;
+                    } else if (!prevCategory) {
+                        previousAreaStatuses[targetName] = currentCategory;
+                    }
+                }
+            });
+
+            if (isInitialAreaStatusSync) {
+                isInitialAreaStatusSync = false;
+            }
+        }
+
         /* ================= JOTIHUNT SYNC VIA FIREBASE ================= */
         var lastCachedAreas = [];
         var knownArticleId = localStorage.getItem('jh_last_article_id') || null;
@@ -1166,6 +1230,7 @@
             if (data.areas && Array.isArray(data.areas)) {
                 lastCachedAreas = data.areas;
                 renderVossenUIFromData();
+                handleAreaStatusNotifications(data.areas);
             }
 
             if (data.latestArticle && data.latestArticle.title) {
