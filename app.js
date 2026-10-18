@@ -1240,7 +1240,7 @@ async function syncJotihuntToFirebase(forceManual = false) {
 
                 return {
                     name: naam,
-                    area: parseTargetArea(gebruikFilter(gebiedRaw)),
+                    area: parseTargetArea(gebiedRaw), 
                     lat: latVal,
                     lng: lngVal
                 };
