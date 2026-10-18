@@ -1238,38 +1238,7 @@ async function syncJotihuntToFirebase(forceManual = false) {
 
     await new Promise(function(r) { setTimeout(r, 1000); });
 
-    // 2. Haal deelnemende clubgebouwen (subscriptions) op via API en sla op in Firebase
-    try {
-        var subsData = await fetchJotihuntEndpoint("subscriptions");
-        if (Array.isArray(subsData) && subsData.length > 0) {
-            var mappedSubs = subsData.map(function(item) {
-                var naam = item.name || item.groupName || item.title || item.group || "Onbekend";
-                var gebiedRaw = item.area || item.deelgebied || item.region || "";
-                var latVal = parseFloat(item.lat || item.latitude || (item.location && item.location.lat) || 0);
-                var lngVal = parseFloat(item.lng || item.longitude || (item.location && item.location.lng) || 0);
-
-                return {
-                    name: naam,
-                    area: parseTargetArea(gebiedRaw),
-                    lat: latVal,
-                    lng: lngVal
-                };
-            }).filter(function(loc) {
-                return !isNaN(loc.lat) && !isNaN(loc.lng) && loc.lat !== 0 && loc.lng !== 0;
-            });
-
-            updatePayload.subscriptions = mappedSubs;
-            allLocations = mappedSubs;
-            renderFixedHouses();
-            anySuccess = true;
-        }
-    } catch (subsErr) {
-        console.warn("Fout bij ophalen subscriptions:", subsErr);
-    }
-
-    await new Promise(function(r) { setTimeout(r, 1000); });
-
-    // 3. Haal artikelen/meldingen op
+    // 2. Haal artikelen/meldingen op
     try {
         var artData = await fetchJotihuntEndpoint("articles");
         if (Array.isArray(artData) && artData.length > 0) {
