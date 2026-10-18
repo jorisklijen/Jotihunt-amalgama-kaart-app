@@ -424,9 +424,20 @@ function setupDrawTools() {
     map.addControl(drawControl);
 }
 
-/* --- 8. CLUBGEBOUWEN DATA & BEZOCHT STATUS (Dynamisch via API) --- */
-var allLocations = []; // Wordt dynamisch gevuld vanuit Firebase / API
+/* --- 8. CLUBGEBOUWEN DATA & BEZOCHT STATUS (Dynamisch via JSON) --- */
+var allLocations = []; // Wordt automatisch ingeladen uit clubs.json
 var houseVisitedStatus = {};
+
+// Laad de clubgebouwen in bij het opstarten
+fetch('clubs.json')
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        allLocations = data;
+        renderFixedHouses();
+    })
+    .catch(function(err) {
+        console.warn("Kon clubs.json niet laden:", err);
+    });
 
 // Luister naar wijzigingen in de bezochte huisjes vanuit Firebase
 db.ref('houseVisited').on('value', function(snapshot) {
