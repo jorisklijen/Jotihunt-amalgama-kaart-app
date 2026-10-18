@@ -1232,14 +1232,21 @@ async function syncJotihuntToFirebase(forceManual = false) {
         var subsData = await fetchJotihuntEndpoint("subscriptions");
         if (Array.isArray(subsData) && subsData.length > 0) {
             var mappedSubs = subsData.map(function(item) {
+                // Vang verschillende mogelijke veldnamen uit de API op
+                var naam = item.name || item.groupName || item.title || item.group || "Onbekend";
+                var gebiedRaw = item.area || item.deelgebied || item.region || "";
+                var latVal = parseFloat(item.lat || item.latitude || (item.location && item.location.lat) || 0);
+                var lngVal = parseFloat(item.lng || item.longitude || (item.location && item.location.lng) || 0);
+
                 return {
-                    name: item.name || item.groupName || item.title || "Onbekend",
-                    area: parseTargetArea(item.area || item.deelgebied || ""),
-                    lat: parseFloat(item.lat || item.latitude || 0),
-                    lng: parseFloat(item.lng || item.longitude || 0)
+                    name: naam,
+                    area: parseTargetArea(gebruikFilter(gebiedRaw)),
+                    lat: latVal,
+                    lng: lngVal
                 };
             }).filter(function(loc) {
-                return !isNaN(loc.lat) && !isNaN(loc.lng) && loc.lat !== 0;
+                // Controleer of coördinaten geldig zijn
+                return !isNaN(loc.lat) && !isNaN(loc.lng) && loc.lat !== 0 && loc.lng !== 0;
             });
 
             updatePayload.subscriptions = mappedSubs;
@@ -1247,7 +1254,9 @@ async function syncJotihuntToFirebase(forceManual = false) {
             renderFixedHouses();
             anySuccess = true;
         }
-    } catch (subsErr) {}
+    } catch (subsErr) {
+        console.warn("Fout bij ophalen subscriptions:", subsErr);
+    }
 
     await new Promise(function(r) { setTimeout(r, 1000); });
 
