@@ -682,23 +682,164 @@
             map.addControl(drawControl);
         }
 
-        function createHouseMarker(latlng, name, color, isOscar = false) {
-            var strokeColor = isOscar ? "#003399" : "#000000";
-            var houseSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" fill="${color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1}" filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.4))">
-                <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
-            </svg>`;
+        // --- CLUBGEBOUWEN / HUISJES DATA ---
+        var allLocations = [
+            {name: "André de Thaye en Lido'76", area: "Golf", lat: 51.98140, lng: 5.93388},
+            {name: "Clan MacCastor", area: "Foxtrot", lat: 51.80907, lng: 5.78972},
+            {name: "De cløns van Gænderålde", area: "Hotel", lat: 51.93800, lng: 6.34731},
+            {name: "De Geuzen Arnhem", area: "Golf", lat: 51.98767, lng: 5.87628},
+            {name: "De Markesteen", area: "Foxtrot", lat: 52.01599, lng: 5.98433},
+            {name: "Dunbroch Phox Hunters", area: "Echo", lat: 52.18424, lng: 6.00510},
+            {name: "Graaf Jan uit Ulft", area: "Hotel", lat: 51.88203, lng: 6.38702},
+            {name: "Graaf Otto Groep Lochem", area: "Echo", lat: 52.14480, lng: 6.39406},
+            {name: "Graaf van Gelre", area: "Alpha", lat: 51.87767, lng: 5.27135},
+            {name: "Gustaaf Adolf Groep", area: "Charlie", lat: 52.40853, lng: 5.86434},
+            {name: "Hélène H. Wilkensgroep", area: "Echo", lat: 52.18216, lng: 6.13891},
+            {name: "IJsselgroep", area: "Echo", lat: 52.19979, lng: 6.21497},
+            {name: "Irmin-Taweb", area: "Charlie", lat: 52.31551, lng: 5.62016},
+            {name: "Isala scouting Doesburg", area: "Golf", lat: 52.01701, lng: 6.14665},
+            {name: "Jonkheer Schimmel", area: "Alpha", lat: 51.96863, lng: 5.56088},
+            {name: "KaLiG", area: "Foxtrot", lat: 51.99591, lng: 5.90046},
+            {name: "Karmijngroep Winssen", area: "Delta", lat: 51.88144, lng: 5.70039},
+            {name: "Klaas Kittengroep", area: "Alpha", lat: 51.95646, lng: 5.43775},
+            {name: "Langenberg", area: "Alpha", lat: 52.04014, lng: 5.69080},
+            {name: "OPV-Schoonoord", area: "Golf", lat: 51.99301, lng: 5.82053},
+            {name: "Oscar Team", area: "Oscar", lat: 51.98000, lng: 5.91000},
+            {name: "Pieter Maritz Ede", area: "Bravo", lat: 52.05388, lng: 5.66194},
+            {name: "Ragay Redoz", area: "Charlie", lat: 52.32655, lng: 5.63416},
+            {name: "Rhedense Pioniers", area: "Golf", lat: 52.00073, lng: 6.02037},
+            {name: "Roothaangroep", area: "Golf", lat: 51.94942, lng: 6.32098},
+            {name: "Schutgraaf", area: "Foxtrot", lat: 51.96619, lng: 5.86970},
+            {name: "Scouting Aerendheem", area: "Hotel", lat: 52.00436, lng: 5.94782},
+            {name: "Scouting Alexandergroep", area: "Charlie", lat: 52.28674, lng: 5.59458},
+            {name: "Scouting Amalgama", area: "Delta", lat: 51.83915, lng: 5.78562},
+            {name: "Scouting Bemmel", area: "Bravo", lat: 51.88725, lng: 5.90545},
+            {name: "Scouting Bennekom", area: "Alpha", lat: 52.01002, lng: 5.68705},
+            {name: "Scouting Beuningen '76", area: "Foxtrot", lat: 51.85364, lng: 5.78151},
+            {name: "Scouting Dannenburcht", area: "Foxtrot", lat: 51.93568, lng: 5.94224},
+            {name: "Scouting de Paulus Dreumel", area: "Delta", lat: 51.84863, lng: 5.43237},
+            {name: "Scouting de Trijsberg", area: "Charlie", lat: 52.45693, lng: 6.04763},
+            {name: "Scouting Didam", area: "Hotel", lat: 51.93851, lng: 6.13217},
+            {name: "Scouting Dieren", area: "Golf", lat: 52.05408, lng: 6.07722},
+            {name: "Scouting Duiven", area: "Hotel", lat: 51.94418, lng: 6.03232},
+            {name: "Scouting Elburg", area: "Charlie", lat: 52.45980, lng: 5.82108},
+            {name: "Scouting Elst", area: "Bravo", lat: 51.90596, lng: 5.84306},
+            {name: "Scouting Grave & Boxmeer", area: "Delta", lat: 51.7553426, lng: 5.7327390},
+            {name: "Scouting Groessen en Vrienden", area: "Hotel", lat: 51.93190, lng: 6.03235},
+            {name: "Scouting Hamaland", area: "Golf", lat: 51.97656, lng: 6.26739},
+            {name: "Scouting Jan Hilgers", area: "Bravo", lat: 52.04174, lng: 5.61968},
+            {name: "Scouting JJB", area: "Echo", lat: 52.19653, lng: 5.92280},
+            {name: "Scouting Karel de Stoute", area: "Foxtrot", lat: 51.80182, lng: 5.81792},
+            {name: "Scouting Keizer Karel Groep 1 Nijmegen", area: "Foxtrot", lat: 51.82515, lng: 5.89007},
+            {name: "Scouting Kon-Tiki Putten", area: "Charlie", lat: 52.24450, lng: 5.63984},
+            {name: "Scouting Lunteren", area: "Bravo", lat: 52.09151, lng: 5.65095},
+            {name: "Scouting Maas en Waal", area: "Delta", lat: 51.88209, lng: 5.61597},
+            {name: "Scouting Nunspeet", area: "Charlie", lat: 52.37624, lng: 5.80665},
+            {name: "Scouting Paul Kruger", area: "Foxtrot", lat: 51.82580, lng: 5.89091},
+            {name: "Scouting Phoenix Tiel", area: "Alpha", lat: 51.89986, lng: 5.42646},
+            {name: "Scouting Saksenheerd", area: "Hotel", lat: 51.87433, lng: 6.46377},
+            {name: "Scouting Scherpenzeel e.o.", area: "Bravo", lat: 52.08604, lng: 5.48727},
+            {name: "Scouting St. Franciscus", area: "Delta", lat: 51.80570, lng: 5.74512},
+            {name: "Scouting Titus Brandsma", area: "Echo", lat: 52.25059, lng: 6.21258},
+            {name: "Scouting woezik", area: "Delta", lat: 51.82514, lng: 5.71740},
+            {name: "Scouting Zetten", area: "Bravo", lat: 51.93252, lng: 5.70937},
+            {name: "Sint Stanislaus", area: "Alpha", lat: 51.95987, lng: 5.21670},
+            {name: "St. Christoforus-Lichtdraagsters", area: "Hotel", lat: 51.99607, lng: 5.93160},
+            {name: "Subliem Hunting Team", area: "Hotel", lat: 51.91568, lng: 6.06611},
+            {name: "Sw3lbp", area: "Echo", lat: 52.22603, lng: 5.94263},
+            {name: "Tarcisius en Nijkerk", area: "Bravo", lat: 52.05133, lng: 5.67847},
+            {name: "The Bravest", area: "Delta", lat: 51.85915, lng: 5.81721},
+            {name: "Ugchelse Woudlopers gr2", area: "Echo", lat: 52.18143, lng: 5.94203},
+            {name: "Velpse Woudlopers en de Olmen", area: "Foxtrot", lat: 52.00825, lng: 5.97931},
+            {name: "Verbraak Margriet Groep", area: "Charlie", lat: 52.32477, lng: 5.63560}
+        ];
 
-            var customIcon = L.divIcon({
-                className: 'custom-house-pin',
-                html: houseSvg,
-                iconSize: [28, 28],
-                iconAnchor: [14, 14],
-                popupAnchor: [0, -14]
+        // Firebase Sync voor bezochte huisjes
+        var houseVisitedStatus = {};
+        db.ref('houseVisited').on('value', function(snapshot) {
+            houseVisitedStatus = snapshot.val() || {};
+            renderFixedHouses();
+        });
+
+        window.toggleHouseVisited = function(houseName) {
+            if (!isAdmin) return;
+            var current = !!houseVisitedStatus[houseName];
+            var newState = !current;
+            
+            var updates = {};
+            updates[houseName.replace(/[.#$[\]]/g, '_')] = newState;
+            db.ref('houseVisited').update(updates).then(function() {
+                checkAreaRoundCompletion();
             });
+        };
 
-            var marker = L.marker(latlng, { icon: customIcon });
-            marker.bindTooltip(name, { permanent: true, direction: 'right', className: 'marker-label' });
-            return marker;
+        function checkAreaRoundCompletion() {
+            targetAreas.forEach(function(areaName) {
+                var areaHouses = allLocations.filter(function(l) { return l.area === areaName; });
+                if (areaHouses.length === 0) return;
+
+                var allVisited = areaHouses.every(function(h) {
+                    var safeKey = h.name.replace(/[.#$[\]]/g, '_');
+                    return !!houseVisitedStatus[safeKey];
+                });
+
+                if (allVisited) {
+                    var resetUpdates = {};
+                    areaHouses.forEach(function(h) {
+                        var safeKey = h.name.replace(/[.#$[\]]/g, '_');
+                        resetUpdates[safeKey] = null;
+                    });
+                    db.ref('houseVisited').update(resetUpdates).then(function() {
+                        alert("🎉 Volledige ronde voltooid voor deelgebied " + areaName + "! Alle huisjes zijn weer op 'niet bezocht' gezet.");
+                    });
+                }
+            });
+        }
+
+        var houseMarkersMap = {};
+
+        function renderFixedHouses() {
+            fixedHouseLayer.clearLayers();
+            houseMarkersMap = {};
+
+            allLocations.forEach(function(loc) {
+                if (targetAreas.includes(loc.area)) {
+                    var areaColor = areaColors[loc.area] || "#3498db";
+                    var isOscar = (loc.area === "Oscar");
+                    var safeKey = loc.name.replace(/[.#$[\]]/g, '_');
+                    var isVisited = !!houseVisitedStatus[safeKey];
+                    var opacity = isVisited ? 0.5 : 1.0;
+
+                    var houseSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" fill="${areaColor}" stroke="${isOscar ? "#003399" : "#000000"}" stroke-width="${isOscar ? 2 : 1}" style="opacity: ${opacity};" filter="drop-shadow(0px 2px 3px rgba(0,0,0,0.4))">
+                        <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
+                    </svg>`;
+
+                    var customIcon = L.divIcon({
+                        className: 'custom-house-pin',
+                        html: houseSvg,
+                        iconSize: [28, 28],
+                        iconAnchor: [14, 14],
+                        popupAnchor: [0, -14]
+                    });
+
+                    var marker = L.marker([loc.lat, loc.lng], { icon: customIcon });
+                    marker.bindTooltip(loc.name + " (" + loc.area + ")", { permanent: true, direction: 'right', className: 'marker-label' });
+                    
+                    var visitedBtnHtml = '';
+                    if (isAdmin) {
+                        if (isVisited) {
+                            visitedBtnHtml = `<button onclick="window.toggleHouseVisited('${loc.name.replace(/'/g, "\\'")}')" style="margin-top:6px; background:#e67e22; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">↩️ Zet op niet bezocht</button>`;
+                        } else {
+                            visitedBtnHtml = `<button onclick="window.toggleHouseVisited('${loc.name.replace(/'/g, "\\'")}')" style="margin-top:6px; background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">✔️ Markeer als bezocht</button>`;
+                        }
+                    }
+
+                    marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22;">Bezocht</span>' : '<span style="color:#2ecc71;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${visitedBtnHtml}`);
+                    
+                    fixedHouseLayer.addLayer(marker);
+                    houseMarkersMap[loc.name] = marker;
+                }
+            });
         }
 
         window.editRdPointPopup = function(key) {
@@ -752,10 +893,9 @@
             }
         };
 
-        /* ================= INACTIEVE GEBRUIKER HANDMATIG VERWIJDEREN (ADMIN) ================= */
         window.removeInactiveUser = function(userId, userName) {
             if (!isAdmin || !userId) return;
-            if (confirm("Wil je inactieve gebruiker '" + userName + "' van de kaart halen?\n(Zodra deze persoon weer online komt, verschijnt hij/zij direct weer op de kaart).")) {
+            if (confirm("Wil je inactieve gebruiker '" + userName + "' van de kaart halen?")) {
                 db.ref('liveUsers/' + userId).remove().then(function() {
                     map.closePopup();
                 });
@@ -892,36 +1032,52 @@
                         }
                     }
 
-                    var totalWeight = 0;
+                    // --- VERBETERDE 120° VOORUITBLIK ---
                     var sumSin = 0;
                     var sumCos = 0;
-                    var numPoints = points.length;
+                    var totalWeight = 0;
 
-                    if (numPoints >= 2) {
-                        var pA = points[numPoints - 2];
-                        var pB = points[numPoints - 1];
+                    // 1. 40% gewicht op basis van de afstand tussen het laatste RD punt en degene daarvoor
+                    if (points.length >= 2) {
+                        var pA = points[points.length - 2];
+                        var pB = points[points.length - 1];
                         var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
-                        sumSin += 0.60 * Math.sin(b1);
-                        sumCos += 0.60 * Math.cos(b1);
-                        totalWeight += 0.60;
+                        sumSin += 0.40 * Math.sin(b1);
+                        sumCos += 0.40 * Math.cos(b1);
+                        totalWeight += 0.40;
                     }
 
-                    if (numPoints >= 3) {
-                        var pA2 = points[numPoints - 3];
-                        var pB2 = points[numPoints - 2];
+                    // 2. 10% gewicht voor het een-na-laatste punt en de daarvoor (tweede en derde laatste)
+                    if (points.length >= 3) {
+                        var pA2 = points[points.length - 3];
+                        var pB2 = points[points.length - 2];
                         var b2 = getBearing(pA2.latlng[0], pA2.latlng[1], pB2.latlng[0], pB2.latlng[1]) * Math.PI / 180;
-                        sumSin += 0.30 * Math.sin(b2);
-                        sumCos += 0.30 * Math.cos(b2);
-                        totalWeight += 0.30;
+                        sumSin += 0.10 * Math.sin(b2);
+                        sumCos += 0.10 * Math.cos(b2);
+                        totalWeight += 0.10;
                     }
 
-                    if (numPoints >= 4) {
-                        var pA3 = points[numPoints - 4];
-                        var pB3 = points[numPoints - 3];
-                        var b3 = getBearing(pA3.latlng[0], pA3.latlng[1], pB3.latlng[0], pB3.latlng[1]) * Math.PI / 180;
-                        sumSin += 0.10 * Math.sin(b3);
-                        sumCos += 0.10 * Math.cos(b3);
-                        totalWeight += 0.10;
+                    // 3. 40% op basis van het dichtstbijzijnde clubgebouw uit hetzelfde deelgebied dat nog niet bezocht is
+                    var areaHouses = allLocations.filter(function(l) { return l.area === area; });
+                    var unvisitedHouses = areaHouses.filter(function(h) {
+                        var safeKey = h.name.replace(/[.#$[\]]/g, '_');
+                        return !houseVisitedStatus[safeKey];
+                    });
+                    if (unvisitedHouses.length === 0) {
+                        unvisitedHouses = areaHouses; // Fallback als alles bezocht is
+                    }
+
+                    if (unvisitedHouses.length > 0) {
+                        var nearestHouse = unvisitedHouses.reduce(function(prev, curr) {
+                            var dPrev = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], prev.lat, prev.lng);
+                            var dCurr = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], curr.lat, curr.lng);
+                            return dCurr < dPrev ? curr : prev;
+                        });
+
+                        var bHouse = getBearing(lastPoint.latlng[0], lastPoint.latlng[1], nearestHouse.lat, nearestHouse.lng) * Math.PI / 180;
+                        sumSin += 0.40 * Math.sin(bHouse);
+                        sumCos += 0.40 * Math.cos(bHouse);
+                        totalWeight += 0.40;
                     }
 
                     if (totalWeight > 0) {
@@ -1252,87 +1408,6 @@
                 map.setView(latlng, 14);
             });
         }
-
-        var allLocations = [
-            {name: "André de Thaye en Lido'76", area: "Golf", lat: 51.98140, lng: 5.93388},
-            {name: "Clan MacCastor", area: "Foxtrot", lat: 51.80907, lng: 5.78972},
-            {name: "De cløns van Gænderålde", area: "Hotel", lat: 51.93800, lng: 6.34731},
-            {name: "De Geuzen Arnhem", area: "Golf", lat: 51.98767, lng: 5.87628},
-            {name: "De Markesteen", area: "Foxtrot", lat: 52.01599, lng: 5.98433},
-            {name: "Dunbroch Phox Hunters", area: "Echo", lat: 52.18424, lng: 6.00510},
-            {name: "Graaf Jan uit Ulft", area: "Hotel", lat: 51.88203, lng: 6.38702},
-            {name: "Graaf Otto Groep Lochem", area: "Echo", lat: 52.14480, lng: 6.39406},
-            {name: "Graaf van Gelre", area: "Alpha", lat: 51.87767, lng: 5.27135},
-            {name: "Gustaaf Adolf Groep", area: "Charlie", lat: 52.40853, lng: 5.86434},
-            {name: "Hélène H. Wilkensgroep", area: "Echo", lat: 52.18216, lng: 6.13891},
-            {name: "IJsselgroep", area: "Echo", lat: 52.19979, lng: 6.21497},
-            {name: "Irmin-Taweb", area: "Charlie", lat: 52.31551, lng: 5.62016},
-            {name: "Isala scouting Doesburg", area: "Golf", lat: 52.01701, lng: 6.14665},
-            {name: "Jonkheer Schimmel", area: "Alpha", lat: 51.96863, lng: 5.56088},
-            {name: "KaLiG", area: "Foxtrot", lat: 51.99591, lng: 5.90046},
-            {name: "Karmijngroep Winssen", area: "Delta", lat: 51.88144, lng: 5.70039},
-            {name: "Klaas Kittengroep", area: "Alpha", lat: 51.95646, lng: 5.43775},
-            {name: "Langenberg", area: "Alpha", lat: 52.04014, lng: 5.69080},
-            {name: "OPV-Schoonoord", area: "Golf", lat: 51.99301, lng: 5.82053},
-            {name: "Oscar Team", area: "Oscar", lat: 51.98000, lng: 5.91000},
-            {name: "Pieter Maritz Ede", area: "Bravo", lat: 52.05388, lng: 5.66194},
-            {name: "Ragay Redoz", area: "Charlie", lat: 52.32655, lng: 5.63416},
-            {name: "Rhedense Pioniers", area: "Golf", lat: 52.00073, lng: 6.02037},
-            {name: "Roothaangroep", area: "Golf", lat: 51.94942, lng: 6.32098},
-            {name: "Schutgraaf", area: "Foxtrot", lat: 51.96619, lng: 5.86970},
-            {name: "Scouting Aerendheem", area: "Hotel", lat: 52.00436, lng: 5.94782},
-            {name: "Scouting Alexandergroep", area: "Charlie", lat: 52.28674, lng: 5.59458},
-            {name: "Scouting Amalgama", area: "Delta", lat: 51.83915, lng: 5.78562},
-            {name: "Scouting Bemmel", area: "Bravo", lat: 51.88725, lng: 5.90545},
-            {name: "Scouting Bennekom", area: "Alpha", lat: 52.01002, lng: 5.68705},
-            {name: "Scouting Beuningen '76", area: "Foxtrot", lat: 51.85364, lng: 5.78151},
-            {name: "Scouting Dannenburcht", area: "Foxtrot", lat: 51.93568, lng: 5.94224},
-            {name: "Scouting de Paulus Dreumel", area: "Delta", lat: 51.84863, lng: 5.43237},
-            {name: "Scouting de Trijsberg", area: "Charlie", lat: 52.45693, lng: 6.04763},
-            {name: "Scouting Didam", area: "Hotel", lat: 51.93851, lng: 6.13217},
-            {name: "Scouting Dieren", area: "Golf", lat: 52.05408, lng: 6.07722},
-            {name: "Scouting Duiven", area: "Hotel", lat: 51.94418, lng: 6.03232},
-            {name: "Scouting Elburg", area: "Charlie", lat: 52.45980, lng: 5.82108},
-            {name: "Scouting Elst", area: "Bravo", lat: 51.90596, lng: 5.84306},
-            {name: "Scouting Grave & Boxmeer", area: "Delta", lat: 51.7553426, lng: 5.7327390},
-            {name: "Scouting Groessen en Vrienden", area: "Hotel", lat: 51.93190, lng: 6.03235},
-            {name: "Scouting Hamaland", area: "Golf", lat: 51.97656, lng: 6.26739},
-            {name: "Scouting Jan Hilgers", area: "Bravo", lat: 52.04174, lng: 5.61968},
-            {name: "Scouting JJB", area: "Echo", lat: 52.19653, lng: 5.92280},
-            {name: "Scouting Karel de Stoute", area: "Foxtrot", lat: 51.80182, lng: 5.81792},
-            {name: "Scouting Keizer Karel Groep 1 Nijmegen", area: "Foxtrot", lat: 51.82515, lng: 5.89007},
-            {name: "Scouting Kon-Tiki Putten", area: "Charlie", lat: 52.24450, lng: 5.63984},
-            {name: "Scouting Lunteren", area: "Bravo", lat: 52.09151, lng: 5.65095},
-            {name: "Scouting Maas en Waal", area: "Delta", lat: 51.88209, lng: 5.61597},
-            {name: "Scouting Nunspeet", area: "Charlie", lat: 52.37624, lng: 5.80665},
-            {name: "Scouting Paul Kruger", area: "Foxtrot", lat: 51.82580, lng: 5.89091},
-            {name: "Scouting Phoenix Tiel", area: "Alpha", lat: 51.89986, lng: 5.42646},
-            {name: "Scouting Saksenheerd", area: "Hotel", lat: 51.87433, lng: 6.46377},
-            {name: "Scouting Scherpenzeel e.o.", area: "Bravo", lat: 52.08604, lng: 5.48727},
-            {name: "Scouting St. Franciscus", area: "Delta", lat: 51.80570, lng: 5.74512},
-            {name: "Scouting Titus Brandsma", area: "Echo", lat: 52.25059, lng: 6.21258},
-            {name: "Scouting woezik", area: "Delta", lat: 51.82514, lng: 5.71740},
-            {name: "Scouting Zetten", area: "Bravo", lat: 51.93252, lng: 5.70937},
-            {name: "Sint Stanislaus", area: "Alpha", lat: 51.95987, lng: 5.21670},
-            {name: "St. Christoforus-Lichtdraagsters", area: "Hotel", lat: 51.99607, lng: 5.93160},
-            {name: "Subliem Hunting Team", area: "Hotel", lat: 51.91568, lng: 6.06611},
-            {name: "Sw3lbp", area: "Echo", lat: 52.22603, lng: 5.94263},
-            {name: "Tarcisius en Nijkerk", area: "Bravo", lat: 52.05133, lng: 5.67847},
-            {name: "The Bravest", area: "Delta", lat: 51.85915, lng: 5.81721},
-            {name: "Ugchelse Woudlopers gr2", area: "Echo", lat: 52.18143, lng: 5.94203},
-            {name: "Velpse Woudlopers en de Olmen", area: "Foxtrot", lat: 52.00825, lng: 5.97931},
-            {name: "Verbraak Margriet Groep", area: "Charlie", lat: 52.32477, lng: 5.63560}
-        ];
-
-        allLocations.forEach(function(loc) {
-            if (targetAreas.includes(loc.area)) {
-                var areaColor = areaColors[loc.area] || "#3498db";
-                var isOscar = (loc.area === "Oscar");
-                var marker = createHouseMarker([loc.lat, loc.lng], loc.name + " (" + loc.area + ")", areaColor, isOscar);
-                marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>`);
-                fixedHouseLayer.addLayer(marker);
-            }
-        });
 
         checkZoomLevel();
 
