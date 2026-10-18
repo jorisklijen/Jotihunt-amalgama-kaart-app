@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jotihunt-amalgama-v2';
+const CACHE_NAME = 'jotihunt-amalgama-v3';
 
 self.addEventListener('install', function(event) {
     self.skipWaiting();
@@ -23,7 +23,7 @@ self.addEventListener('activate', function(event) {
 self.addEventListener('fetch', function(event) {
     const url = event.request.url;
 
-    // Laat API calls, proxies en Firebase ALTIJD rechtstreeks via het netwerk lopen zonder SW-cache
+    // Laat API calls, proxies en Firebase ALTIJD rechtstreeks via het netwerk lopen
     if (
         url.includes('jotihunt.nl') ||
         url.includes('allorigins.win') ||
@@ -32,7 +32,15 @@ self.addEventListener('fetch', function(event) {
         url.includes('firebaseio.com') ||
         url.includes('firebasedatabase.app')
     ) {
-        event.respondWith(fetch(event.request));
+        event.respondWith(
+            fetch(event.request).catch(function(err) {
+                // Vang netwerkfouten netjes op zonder dat de service worker crasht
+                return new Response(JSON.stringify({ error: "Netwerkfout of geblokkeerd" }), {
+                    status: 503,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            })
+        );
         return;
     }
 

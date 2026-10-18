@@ -1134,7 +1134,7 @@ function renderVossenUIFromData() {
     document.getElementById('vossen-list').innerHTML = html;
 }
 
-// Luister real-time naar alle gesyncte data vanuit Firebase (inclusief dynamische subscriptions!)
+// Luister real-time naar alle gesyncte data vanuit Firebase (inclusief dynamische subscriptions)
 db.ref('jotihuntSync').on('value', function(snapshot) {
     var data = snapshot.val();
     if (!data) return;
@@ -1178,15 +1178,14 @@ async function fetchJotihuntEndpoint(endpoint) {
 
     var routes = [
         targetUrl,
-        "https://corsproxy.io/?" + encodeURIComponent(targetUrl),
-        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl),
-        "https://api.allorigins.win/raw?url=" + encodeURIComponent(bustUrl)
+        "https://api.allorigins.win/raw?url=" + encodeURIComponent(bustUrl),
+        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl)
     ];
 
     for (var i = 0; i < routes.length; i++) {
         try {
             var controller = new AbortController();
-            var timeoutId = setTimeout(function() { controller.abort(); }, 7000);
+            var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
 
             var res = await fetch(routes[i], { cache: "no-store", signal: controller.signal });
             clearTimeout(timeoutId);
@@ -1196,6 +1195,7 @@ async function fetchJotihuntEndpoint(endpoint) {
             var json = await res.json();
             if (json && json.data) { return json.data; }
             else if (Array.isArray(json)) { return json; }
+            else if (json && typeof json === 'object') { return json; }
         } catch (err) {}
     }
     throw new Error("Geen enkele API-route werkte voor " + endpoint);
@@ -1232,7 +1232,6 @@ async function syncJotihuntToFirebase(forceManual = false) {
         var subsData = await fetchJotihuntEndpoint("subscriptions");
         if (Array.isArray(subsData) && subsData.length > 0) {
             var mappedSubs = subsData.map(function(item) {
-                // Vang verschillende mogelijke veldnamen uit de API op
                 var naam = item.name || item.groupName || item.title || item.group || "Onbekend";
                 var gebiedRaw = item.area || item.deelgebied || item.region || "";
                 var latVal = parseFloat(item.lat || item.latitude || (item.location && item.location.lat) || 0);
@@ -1240,12 +1239,11 @@ async function syncJotihuntToFirebase(forceManual = false) {
 
                 return {
                     name: naam,
-                    area: parseTargetArea(gebiedRaw), 
+                    area: parseTargetArea(gebiedRaw),
                     lat: latVal,
                     lng: lngVal
                 };
             }).filter(function(loc) {
-                // Controleer of coördinaten geldig zijn
                 return !isNaN(loc.lat) && !isNaN(loc.lng) && loc.lat !== 0 && loc.lng !== 0;
             });
 
