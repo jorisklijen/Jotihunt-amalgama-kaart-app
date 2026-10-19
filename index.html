@@ -15,12 +15,8 @@
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     
-    <!-- Externe Leaflet CSS bibliotheken voor de kaart en tekenwerktuigen -->
+    <!-- Externe Leaflet CSS bibliotheek voor de kaart -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-    
-    <!-- Proj4js bibliotheek voor conversie van Rijksdriehoekmeting (RD) coördinaten naar GPS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 
     <!-- Koppeling naar het externe stijlenbestand -->
     <link rel="stylesheet" href="style.css">
@@ -47,9 +43,9 @@
                 <div id="user-badge">Niet ingelogd</div>
             </div>
             <div class="header-right">
-                <button class="header-btn" id="btn-fetch-latest" onclick="fetchLatestArticleManual()" style="display:none;" title="Laatste melding ophalen">🔔 Laatste</button>
-                <button class="header-btn" id="btn-add-rd" onclick="addMarkerByRD()" style="display:none;">+ RD</button>
-                <button class="header-btn" id="clear-rd-btn" onclick="clearRdPoints()" style="display:none;">Wis</button>
+                <button class="header-btn" id="btn-fetch-latest" onclick="if(window.fetchLatestArticleManual) fetchLatestArticleManual()" style="display:none;" title="Laatste melding ophalen">🔔 Laatste</button>
+                <button class="header-btn" id="btn-add-rd" onclick="if(window.addMarkerByRD) addMarkerByRD()" style="display:none;">+ RD</button>
+                <button class="header-btn" id="clear-rd-btn" onclick="if(window.clearRdPoints) clearRdPoints()" style="display:none;">Wis</button>
                 <button class="header-btn" id="btn-darkmode" onclick="toggleDarkMode()" title="Donkere kaartmodus aan/uit">🌙 Dark</button>
                 <button class="header-btn" id="btn-logout" onclick="logout()" title="Uitloggen">Uitloggen</button>
                 <div><span id="api-status" style="color: #2ecc71;">●</span></div>
@@ -87,13 +83,15 @@
         }
     </script>
 
-    <!-- Externe JavaScript Bibliotheken (Leaflet & Firebase Compat v10) -->
+    <!-- Externe Basis Bibliotheken (Alleen Leaflet & Firebase Compat v10) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
-    <!-- Koppeling naar het externe logica-bestand -->
-    <script src="app.js"></script>
+    <!-- Modulaire App Scripts (Hunter + Basis) -->
+    <script src="config.js"></script>
+    <script src="map-viewer.js"></script>
+    <script src="auth-gps.js"></script>
+    <!-- Let op: admin-engine.js, proj4.js en leaflet.draw.js worden automatisch ingeladen zodra een Admin inlogt! -->
 </body>
 </html>

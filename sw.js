@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jotihunt-amalgama-v3';
+const CACHE_NAME = 'jotihunt-amalgama-v4';
 
 self.addEventListener('install', function(event) {
     self.skipWaiting();
@@ -26,17 +26,17 @@ self.addEventListener('fetch', function(event) {
     // Laat alle externe API calls, proxies en Firebase volledig met rust in de Service Worker
     if (
         url.includes('jotihunt.nl') ||
+        url.includes('workers.dev') ||
         url.includes('allorigins.win') ||
         url.includes('corsproxy.io') ||
         url.includes('codetabs.com') ||
-        url.includes('thingproxy.freeboard.io') ||
         url.includes('firebaseio.com') ||
         url.includes('firebasedatabase.app')
     ) {
-        return; // Negeer in SW; laat de browser dit rechtstreeks afhandelen
+        return;
     }
 
-    // Voor overige (eigen) bestanden: eerst netwerk proberen, bij offline terugvallen op cache
+    // Voor eigen bestanden: eerst netwerk proberen, bij offline terugvallen op cache
     event.respondWith(
         fetch(event.request).catch(function() {
             return caches.match(event.request);
@@ -44,7 +44,6 @@ self.addEventListener('fetch', function(event) {
     );
 });
 
-// Zorgt dat tikken op een melding op de telefoon de app naar voren haalt
 self.addEventListener('notificationclick', function(event) {
     event.notification.close();
     event.waitUntil(
