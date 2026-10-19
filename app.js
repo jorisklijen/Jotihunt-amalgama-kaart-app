@@ -425,10 +425,10 @@ function setupDrawTools() {
 }
 
 /* --- 8. CLUBGEBOUWEN DATA & BEZOCHT STATUS (Dynamisch via JSON) --- */
-var allLocations = []; // Wordt automatisch ingeladen uit clubs.json
+var allLocations = []; 
 var houseVisitedStatus = {};
 
-// Laad de clubgebouwen in bij het opstarten
+// Laad de clubgebouwen in vanuit clubs.json bij het opstarten
 fetch('clubs.json')
     .then(function(response) { return response.json(); })
     .then(function(data) {
@@ -439,7 +439,6 @@ fetch('clubs.json')
         console.warn("Kon clubs.json niet laden:", err);
     });
 
-// Luister naar wijzigingen in de bezochte huisjes vanuit Firebase
 db.ref('houseVisited').on('value', function(snapshot) {
     houseVisitedStatus = snapshot.val() || {};
     renderFixedHouses();
@@ -480,11 +479,8 @@ function checkAreaRoundCompletion() {
     });
 }
 
-var houseMarkersMap = {};
-
 function renderFixedHouses() {
     fixedHouseLayer.clearLayers();
-    houseMarkersMap = {};
 
     if (!allLocations || allLocations.length === 0) return;
 
@@ -520,7 +516,6 @@ function renderFixedHouses() {
             marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22;">Bezocht</span>' : '<span style="color:#2ecc71;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${visitedBtnHtml}`);
             
             fixedHouseLayer.addLayer(marker);
-            houseMarkersMap[loc.name] = marker;
         }
     });
 }
@@ -1055,7 +1050,7 @@ function zoomToLatestAreaPoint(teamName) {
     }
 }
 
-/* --- 13. JOTIHUNT API SYNC & REALTIME FIREBASE LUISTERAAR --- */
+/* --- 13. JOTIHUNT API SYNC & NOTIFICATIES --- */
 var previousAreaStatuses = {};
 var isInitialAreaStatusSync = true;
 
@@ -1145,21 +1140,11 @@ function renderVossenUIFromData() {
     document.getElementById('vossen-list').innerHTML = html;
 }
 
-// Luister real-time naar alle gesyncte data vanuit Firebase (inclusief dynamische subscriptions)
 db.ref('jotihuntSync').on('value', function(snapshot) {
     var data = snapshot.val();
     if (!data) return;
 
     if (data.lastSync) { lastSyncTimeInFirebase = data.lastSync; }
-
-    // Ontvang clubgebouwen / subscriptions via Firebase
-    if (data.subscriptions) {
-        var subsArray = Array.isArray(data.subscriptions) ? data.subscriptions : Object.values(data.subscriptions);
-        if (subsArray.length > 0) {
-            allLocations = subsArray;
-            renderFixedHouses();
-        }
-    }
 
     if (data.areas) {
         var areasArray = Array.isArray(data.areas) ? data.areas : Object.values(data.areas);
