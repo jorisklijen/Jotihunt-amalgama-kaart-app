@@ -1170,12 +1170,13 @@ db.ref('jotihuntSync').on('value', function(snapshot) {
 
 async function fetchJotihuntEndpoint(endpoint) {
     var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
-    var bustUrl = targetUrl + "?_t=" + Date.now();
 
+    // Lijst met proxies: probeer eerst Cloudflare, daarna betrouwbare alternatieven
     var routes = [
-        targetUrl,
-        "https://api.allorigins.win/raw?url=" + encodeURIComponent(bustUrl),
-        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl)
+        {
+            url: "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl) + "&disableCache=" + Date.now(),
+            wrapped: true
+        }
     ];
 
     for (var i = 0; i < routes.length; i++) {
@@ -1183,16 +1184,26 @@ async function fetchJotihuntEndpoint(endpoint) {
             var controller = new AbortController();
             var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
 
-            var res = await fetch(routes[i], { cache: "no-store", signal: controller.signal });
+            var res = await fetch(routes[i].url, { cache: "no-store", signal: controller.signal });
             clearTimeout(timeoutId);
 
             if (!res.ok) continue;
 
             var json = await res.json();
+
+            // AllOrigins wikkelt het resultaat in een 'contents' string
+            if (routes[i].wrapped) {
+                if (!json || !json.contents) continue;
+                if (typeof json.contents === 'string' && json.contents.trim().startsWith('<')) continue;
+                json = JSON.parse(json.contents);
+            }
+
             if (json && json.data) { return json.data; }
             else if (Array.isArray(json)) { return json; }
             else if (json && typeof json === 'object') { return json; }
-        } catch (err) {}
+        } catch (err) {
+            // Ga geruisloos door naar de volgende route in de lijst
+        }
     }
     throw new Error("Geen enkele API-route werkte voor " + endpoint);
 }
