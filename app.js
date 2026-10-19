@@ -1169,10 +1169,20 @@ db.ref('jotihuntSync').on('value', function(snapshot) {
 });
 
 async function fetchJotihuntEndpoint(endpoint) {
+    // We remove the ?_t= parameter as the Jotihunt API rejects unknown parameters,
+    // which caused the 500 internal server error with the allorigins proxy.
     var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
 
-    // Lijst met proxies: probeer eerst Cloudflare, daarna betrouwbare alternatieven
+    // List of proxies: first try your Cloudflare worker, then reliable alternatives
     var routes = [
+        {
+            url: "https://jotihunt-proxy.joriskleijn2000.workers.dev/?url=" + encodeURIComponent(targetUrl),
+            wrapped: false
+        },
+        {
+            url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl),
+            wrapped: false
+        },
         {
             url: "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl) + "&disableCache=" + Date.now(),
             wrapped: true
@@ -1191,7 +1201,7 @@ async function fetchJotihuntEndpoint(endpoint) {
 
             var json = await res.json();
 
-            // AllOrigins wikkelt het resultaat in een 'contents' string
+            // AllOrigins wraps the result in a 'contents' string
             if (routes[i].wrapped) {
                 if (!json || !json.contents) continue;
                 if (typeof json.contents === 'string' && json.contents.trim().startsWith('<')) continue;
@@ -1202,11 +1212,10 @@ async function fetchJotihuntEndpoint(endpoint) {
             else if (Array.isArray(json)) { return json; }
             else if (json && typeof json === 'object') { return json; }
         } catch (err) {
-            // Ga geruisloos door naar de volgende route in de lijst
+            // Silently proceed to the next route in the list if the current one fails
         }
     }
     throw new Error("Geen enkele API-route werkte voor " + endpoint);
-}
 
 var isSyncingNow = false;
 async function syncJotihuntToFirebase(forceManual = false) {
