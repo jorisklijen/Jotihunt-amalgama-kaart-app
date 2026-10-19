@@ -424,11 +424,11 @@ function setupDrawTools() {
     map.addControl(drawControl);
 }
 
-/* --- 8. CLUBGEBOUWEN DATA & BEZOCHT STATUS (Dynamisch via JSON) --- */
+/* --- 8. CLUBGEBOUWEN DATA & BEZOCHT STATUS (Dynamisch via clubs.json) --- */
 var allLocations = []; 
 var houseVisitedStatus = {};
 
-// Laad de clubgebouwen in vanuit clubs.json bij het opstarten
+// Laad de clubgebouwen in vanuit clubs.json
 fetch('clubs.json')
     .then(function(response) { return response.json(); })
     .then(function(data) {
@@ -1170,48 +1170,29 @@ db.ref('jotihuntSync').on('value', function(snapshot) {
 
 async function fetchJotihuntEndpoint(endpoint) {
     var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
+    var bustUrl = targetUrl + "?_t=" + Date.now();
 
-    // Route 1 is jouw eigen Cloudflare Worker!
     var routes = [
-        {
-            url: "https://jotihunt-proxy.joriskleijn2000.workers.dev/?url=" + encodeURIComponent(targetUrl),
-            wrapped: false
-        },
-        {
-            url: "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl) + "&disableCache=" + Date.now(),
-            wrapped: true
-        },
-        {
-            url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl),
-            wrapped: false
-        }
+        targetUrl,
+        "https://api.allorigins.win/raw?url=" + encodeURIComponent(bustUrl),
+        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl)
     ];
 
     for (var i = 0; i < routes.length; i++) {
         try {
             var controller = new AbortController();
-            var timeoutId = setTimeout(function() { controller.abort(); }, 6000);
+            var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
 
-            var res = await fetch(routes[i].url, { cache: "no-store", signal: controller.signal });
+            var res = await fetch(routes[i], { cache: "no-store", signal: controller.signal });
             clearTimeout(timeoutId);
 
             if (!res.ok) continue;
 
             var json = await res.json();
-
-            // AllOrigins pakt uit via contents, jouw Cloudflare worker levert direct schone JSON
-            if (routes[i].wrapped) {
-                if (!json || !json.contents) continue;
-                if (typeof json.contents === 'string' && json.contents.trim().startsWith('<')) continue;
-                json = JSON.parse(json.contents);
-            }
-
             if (json && json.data) { return json.data; }
             else if (Array.isArray(json)) { return json; }
             else if (json && typeof json === 'object') { return json; }
-        } catch (err) {
-            // Mocht een route falen, probeer dan geruisloos de volgende route
-        }
+        } catch (err) {}
     }
     throw new Error("Geen enkele API-route werkte voor " + endpoint);
 }
@@ -1226,7 +1207,7 @@ async function syncJotihuntToFirebase(forceManual = false) {
     if (!isAdmin && !isDataStale && !isAreasEmpty && !forceManual) return;
 
     isSyncingNow = true;
-    var updatePayload = { lastSync: Date.Now ? Date.Now() : Date.now() };
+    var updatePayload = { lastSync: Date.now() };
     var anySuccess = false;
 
     // 1. Haal vossen/deelgebieden op
