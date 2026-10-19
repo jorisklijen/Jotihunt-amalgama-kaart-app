@@ -23,28 +23,20 @@ self.addEventListener('activate', function(event) {
 self.addEventListener('fetch', function(event) {
     const url = event.request.url;
 
-    // Laat API calls, proxies en Firebase ALTIJD rechtstreeks via het netwerk lopen
+    // Laat alle externe API calls, proxies en Firebase volledig met rust in de Service Worker
     if (
         url.includes('jotihunt.nl') ||
         url.includes('allorigins.win') ||
         url.includes('corsproxy.io') ||
         url.includes('codetabs.com') ||
+        url.includes('thingproxy.freeboard.io') ||
         url.includes('firebaseio.com') ||
         url.includes('firebasedatabase.app')
     ) {
-        event.respondWith(
-            fetch(event.request).catch(function(err) {
-                // Vang netwerkfouten netjes op zonder dat de service worker crasht
-                return new Response(JSON.stringify({ error: "Netwerkfout of geblokkeerd" }), {
-                    status: 503,
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            })
-        );
-        return;
+        return; // Negeer in SW; laat de browser dit rechtstreeks afhandelen
     }
 
-    // Voor overige bestanden: eerst netwerk proberen, bij offline terugvallen op cache
+    // Voor overige (eigen) bestanden: eerst netwerk proberen, bij offline terugvallen op cache
     event.respondWith(
         fetch(event.request).catch(function() {
             return caches.match(event.request);

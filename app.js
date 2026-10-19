@@ -1172,27 +1172,46 @@ async function fetchJotihuntEndpoint(endpoint) {
     var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
     var bustUrl = targetUrl + "?_t=" + Date.now();
 
+    // Gebruik uitsluitend CORS-vriendelijke proxy-routes (geen directe targetUrl om rode CORS-errors te voorkomen)
     var routes = [
-        targetUrl,
-        "https://api.allorigins.win/raw?url=" + encodeURIComponent(bustUrl),
-        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl)
+        {
+            url: "https://api.allorigins.win/get?url=" + encodeURIComponent(bustUrl),
+            wrapped: true // AllOrigins '/get' verpakt de response veilig in een JSON-object met 'contents'
+        },
+        {
+            url: "https://corsproxy.io/?" + encodeURIComponent(targetUrl),
+            wrapped: false
+        },
+        {
+            url: "https://thingproxy.freeboard.io/fetch/" + targetUrl,
+            wrapped: false
+        }
     ];
 
     for (var i = 0; i < routes.length; i++) {
         try {
             var controller = new AbortController();
-            var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
+            var timeoutId = setTimeout(function() { controller.abort(); }, 6000);
 
-            var res = await fetch(routes[i], { cache: "no-store", signal: controller.signal });
+            var res = await fetch(routes[i].url, { cache: "no-store", signal: controller.signal });
             clearTimeout(timeoutId);
 
             if (!res.ok) continue;
 
             var json = await res.json();
+
+            // Als we AllOrigins '/get' gebruiken, pakken we de string in 'contents' uit
+            if (routes[i].wrapped) {
+                if (!json || !json.contents) continue;
+                json = JSON.parse(json.contents);
+            }
+
             if (json && json.data) { return json.data; }
             else if (Array.isArray(json)) { return json; }
             else if (json && typeof json === 'object') { return json; }
-        } catch (err) {}
+        } catch (err) {
+            // Ga bij een timeout of fout geruisloos door naar de volgende proxy
+        }
     }
     throw new Error("Geen enkele API-route werkte voor " + endpoint);
 }
