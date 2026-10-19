@@ -97,6 +97,94 @@ var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180))
     L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(compassRoseLayer);
 });
 
+/* --- 450M TEGENHUNT CIRKEL PER CLUBGEBOUW --- */
+var houseMarkersMap = {};
+var houseRadiusCircles = {};
+
+function buildHousePopupHtml(loc) {
+    var safeKey = loc.name.replace(/[.#$[\]]/g, '_');
+    var isVisited = !!houseVisitedStatus[safeKey];
+    var hasActiveRadius = !!houseRadiusCircles[safeKey];
+    var escapedName = loc.name.replace(/'/g, "\\'");
+
+    var visitedBtnHtml = '';
+    if (isAdmin) {
+        if (isVisited) {
+            visitedBtnHtml = `<button onclick="window.toggleHouseVisited('${escapedName}')" style="margin-top:6px; background:#e67e22; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">↩️ Zet op niet bezocht</button>`;
+        } else {
+            visitedBtnHtml = `<button onclick="window.toggleHouseVisited('${escapedName}')" style="margin-top:6px; background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">✔️ Markeer als bezocht</button>`;
+        }
+    }
+
+    var radiusBtnText = hasActiveRadius ? "🚫 Verberg 450m Tegenhunt Cirkel" : "🎯 Toon 450m Tegenhunt Cirkel";
+    var radiusBtnBg = hasActiveRadius ? "#c0392b" : "#8e44ad";
+    var radiusBtnHtml = `<button onclick="window.toggleHouseRadius('${escapedName}', ${loc.lat}, ${loc.lng})" style="margin-top:6px; background:${radiusBtnBg}; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">${radiusBtnText}</button>`;
+
+    return `<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22;">Bezocht</span>' : '<span style="color:#2ecc71;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${radiusBtnHtml}${visitedBtnHtml}`;
+}
+
+window.toggleHouseRadius = function (houseName, lat, lng) {
+    var safeKey = houseName.replace(/[.#$[\]]/g, '_');
+
+    if (houseRadiusCircles[safeKey]) {
+        map.removeLayer(houseRadiusCircles[safeKey]);
+        delete houseRadiusCircles[safeKey];
+    } else {
+        var circle = L.circle([lat, lng], {
+            radius: 450,
+            color: '#9b59b6',
+            weight: 2,
+            dashArray: '5, 5',
+            fillColor: '#9b59b6',
+            fillOpacity: 0.15
+        }).addTo(map);
+
+        circle.bindTooltip("450m Tegenhunt: " + houseName, { direction: 'top' });
+        houseRadiusCircles[safeKey] = circle;
+    }
+
+    // Update direct de popup-inhoud van dit specifieke huisje zodat de knoptekst mee verandert
+    var locObj = allLocations.find(function (l) { return l.name === houseName; });
+    if (locObj && houseMarkersMap[houseName]) {
+        houseMarkersMap[houseName].setPopupContent(buildHousePopupHtml(locObj));
+        houseMarkersMap[houseName].openPopup();
+    }
+};
+
+function renderFixedHouses() {
+    fixedHouseLayer.clearLayers();
+    houseMarkersMap = {};
+
+    if (!allLocations || allLocations.length === 0) return;
+
+    allLocations.forEach(function (loc) {
+        if (targetAreas.includes(loc.area)) {
+            var areaColor = areaColors[loc.area] || "#3498db";
+            var isOscar = (loc.area === "Oscar");
+            var safeKey = loc.name.replace(/[.#$[\]]/g, '_');
+            var isVisited = !!houseVisitedStatus[safeKey];
+            var opacity = isVisited ? 0.5 : 1.0;
+
+            var houseSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" fill="${areaColor}" stroke="${isOscar ? "#003399" : "#000000"}" stroke-width="${isOscar ? 2 : 1}" style="opacity: ${opacity};">
+                <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
+            </svg>`;
+
+            var customIcon = L.divIcon({
+                className: 'custom-house-pin', html: houseSvg,
+                iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -14]
+            });
+
+            var marker = L.marker([loc.lat, loc.lng], { icon: customIcon });
+            marker.bindTooltip(loc.name + " (" + loc.area + ")", { permanent: false, direction: 'right', className: 'marker-label' });
+
+            marker.bindPopup(buildHousePopupHtml(loc));
+
+            fixedHouseLayer.addLayer(marker);
+            houseMarkersMap[loc.name] = marker;
+        }
+    });
+}
+
 /* --- CLUBGEBOUWEN (clubs.json) & BEZOCHT-STATUS --- */
 fetch('clubs.json')
     .then(function (response) { return response.json(); })
@@ -118,57 +206,6 @@ db.ref('houseVisited').on('value', function (snapshot) {
         window.calculateAndPublishMapState();
     }
 });
-
-var houseMarkersMap = {}; // Zorg dat deze globaal bovenaan staat of behouden blijft
-
-function renderFixedHouses() {
-    fixedHouseLayer.clearLayers();
-    houseMarkersMap = {};
-
-    if (!allLocations || allLocations.length === 0) return;
-
-    allLocations.forEach(function(loc) {
-        if (targetAreas.includes(loc.area)) {
-            var areaColor = areaColors[loc.area] || "#3498db";
-            var isOscar = (loc.area === "Oscar");
-            var safeKey = loc.name.replace(/[.#$[\]]/g, '_');
-            var isVisited = !!houseVisitedStatus[safeKey];
-            var opacity = isVisited ? 0.5 : 1.0;
-            var hasActiveRadius = !!houseRadiusCircles[safeKey];
-
-            var houseSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" fill="${areaColor}" stroke="${isOscar ? "#003399" : "#000000"}" stroke-width="${isOscar ? 2 : 1}" style="opacity: ${opacity};">
-                <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
-            </svg>`;
-
-            var customIcon = L.divIcon({
-                className: 'custom-house-pin', html: houseSvg,
-                iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -14]
-            });
-
-            var marker = L.marker([loc.lat, loc.lng], { icon: customIcon });
-            marker.bindTooltip(loc.name + " (" + loc.area + ")", { permanent: false, direction: 'right', className: 'marker-label' });
-
-            var visitedBtnHtml = '';
-            if (isAdmin) {
-                if (isVisited) {
-                    visitedBtnHtml = `<button onclick="window.toggleHouseVisited('${loc.name.replace(/'/g, "\\'")}')" style="margin-top:6px; background:#e67e22; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">↩️ Zet op niet bezocht</button>`;
-                } else {
-                    visitedBtnHtml = `<button onclick="window.toggleHouseVisited('${loc.name.replace(/'/g, "\\'")}')" style="margin-top:6px; background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">✔️ Markeer als bezocht</button>`;
-                }
-            }
-
-            // Knop om de 450m tegenhunt-cirkel aan/uit te zetten
-            var radiusBtnText = hasActiveRadius ? "🚫 Verberg 450m Tegenhunt Cirkel" : "🎯 Toon 450m Tegenhunt Cirkel";
-            var radiusBtnBg = hasActiveRadius ? "#c0392b" : "#8e44ad";
-            var radiusBtnHtml = `<button onclick="window.toggleHouseRadius('${loc.name.replace(/'/g, "\\'")}', ${loc.lat}, ${loc.lng})" style="margin-top:6px; background:${radiusBtnBg}; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">${radiusBtnText}</button>`;
-
-            marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22;">Bezocht</span>' : '<span style="color:#2ecc71;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${radiusBtnHtml}${visitedBtnHtml}`);
-            
-            fixedHouseLayer.addLayer(marker);
-            houseMarkersMap[loc.name] = marker;
-        }
-    });
-}
 
 /* --- WEERGAVE VAN VOORBEREKENDE KAARTDATA ('computedMapState') --- */
 var activeGeofenceCircles = {};
@@ -464,7 +501,7 @@ db.ref('liveUsers').on('value', function (snapshot) {
     });
 });
 
-/* --- VOSSEN PANEEL SLEPEN & STATUS LUIStERAAR --- */
+/* --- VOSSEN PANEEL SLEPEN & STATUS LUISTERAAR --- */
 var panel = document.getElementById('vossen-status-panel');
 var header = document.getElementById('vossen-status-header');
 var isDragging = false, startX, startY;
