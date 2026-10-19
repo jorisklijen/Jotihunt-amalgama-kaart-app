@@ -88,7 +88,7 @@ var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180))
     { label: 'Z', lat: amalgamaLat - latOffset, lng: amalgamaLng },
     { label: 'O', lat: amalgamaLat, lng: amalgamaLng + lngOffset },
     { label: 'W', lat: amalgamaLat, lng: amalgamaLng - lngOffset }
-].forEach(function(dir) {
+].forEach(function (dir) {
     var icon = L.divIcon({
         className: 'compass-icon-wrapper',
         html: `<div class="compass-label">${dir.label}</div>`,
@@ -99,19 +99,19 @@ var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180))
 
 /* --- CLUBGEBOUWEN (clubs.json) & BEZOCHT-STATUS --- */
 fetch('clubs.json')
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
+    .then(function (response) { return response.json(); })
+    .then(function (data) {
         allLocations = data;
         renderFixedHouses();
         if (isAdmin && typeof window.calculateAndPublishMapState === 'function') {
             window.calculateAndPublishMapState();
         }
     })
-    .catch(function(err) {
+    .catch(function (err) {
         console.warn("Kon clubs.json niet laden:", err);
     });
 
-db.ref('houseVisited').on('value', function(snapshot) {
+db.ref('houseVisited').on('value', function (snapshot) {
     houseVisitedStatus = snapshot.val() || {};
     renderFixedHouses();
     if (isAdmin && typeof window.calculateAndPublishMapState === 'function') {
@@ -119,8 +119,12 @@ db.ref('houseVisited').on('value', function(snapshot) {
     }
 });
 
+var houseMarkersMap = {}; // Zorg dat deze globaal bovenaan staat of behouden blijft
+
 function renderFixedHouses() {
     fixedHouseLayer.clearLayers();
+    houseMarkersMap = {};
+
     if (!allLocations || allLocations.length === 0) return;
 
     allLocations.forEach(function(loc) {
@@ -130,6 +134,7 @@ function renderFixedHouses() {
             var safeKey = loc.name.replace(/[.#$[\]]/g, '_');
             var isVisited = !!houseVisitedStatus[safeKey];
             var opacity = isVisited ? 0.5 : 1.0;
+            var hasActiveRadius = !!houseRadiusCircles[safeKey];
 
             var houseSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" fill="${areaColor}" stroke="${isOscar ? "#003399" : "#000000"}" stroke-width="${isOscar ? 2 : 1}" style="opacity: ${opacity};">
                 <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
@@ -152,8 +157,15 @@ function renderFixedHouses() {
                 }
             }
 
-            marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22;">Bezocht</span>' : '<span style="color:#2ecc71;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${visitedBtnHtml}`);
+            // Knop om de 450m tegenhunt-cirkel aan/uit te zetten
+            var radiusBtnText = hasActiveRadius ? "🚫 Verberg 450m Tegenhunt Cirkel" : "🎯 Toon 450m Tegenhunt Cirkel";
+            var radiusBtnBg = hasActiveRadius ? "#c0392b" : "#8e44ad";
+            var radiusBtnHtml = `<button onclick="window.toggleHouseRadius('${loc.name.replace(/'/g, "\\'")}', ${loc.lat}, ${loc.lng})" style="margin-top:6px; background:${radiusBtnBg}; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">${radiusBtnText}</button>`;
+
+            marker.bindPopup(`<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22;">Bezocht</span>' : '<span style="color:#2ecc71;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${radiusBtnHtml}${visitedBtnHtml}`);
+            
             fixedHouseLayer.addLayer(marker);
+            houseMarkersMap[loc.name] = marker;
         }
     });
 }
@@ -199,7 +211,7 @@ function createWalkerMarker(pt) {
 }
 
 // Luister naar de door Admin voorberekende kaartstatus
-db.ref('computedMapState').on('value', function(snapshot) {
+db.ref('computedMapState').on('value', function (snapshot) {
     var state = snapshot.val();
     renderComputedMapState(state);
 });
@@ -212,7 +224,7 @@ function renderComputedMapState(state) {
     var areasData = (state && state.areas) ? state.areas : {};
 
     // Verwijder geofences van deelgebieden die gewist zijn
-    Object.keys(activeGeofenceCircles).forEach(function(area) {
+    Object.keys(activeGeofenceCircles).forEach(function (area) {
         if (!areasData[area]) {
             geofenceLayer.removeLayer(activeGeofenceCircles[area]);
             delete activeGeofenceCircles[area];
@@ -221,18 +233,18 @@ function renderComputedMapState(state) {
                 delete activeGeofenceBadges[area];
             }
             if (activeGeofenceArrows[area]) {
-                activeGeofenceArrows[area].forEach(function(l) { geofenceLayer.removeLayer(l); });
+                activeGeofenceArrows[area].forEach(function (l) { geofenceLayer.removeLayer(l); });
                 delete activeGeofenceArrows[area];
             }
         }
     });
 
-    Object.keys(areasData).forEach(function(area) {
+    Object.keys(areasData).forEach(function (area) {
         var areaObj = areasData[area];
         if (!areaObj || !areaObj.points || areaObj.points.length === 0) return;
 
         // 1. Teken voorberekende RD-punten
-        areaObj.points.forEach(function(pt) {
+        areaObj.points.forEach(function (pt) {
             var marker = createWalkerMarker(pt);
             rdPointsLayer.addLayer(marker);
             if (pt.isLatest) {
@@ -288,12 +300,12 @@ function renderComputedMapState(state) {
 
             // Oude pijlen van dit gebied vervangen door de nieuw berekende pijlen
             if (activeGeofenceArrows[area]) {
-                activeGeofenceArrows[area].forEach(function(l) { geofenceLayer.removeLayer(l); });
+                activeGeofenceArrows[area].forEach(function (l) { geofenceLayer.removeLayer(l); });
             }
             activeGeofenceArrows[area] = [];
 
             if (gf.arrows && Array.isArray(gf.arrows)) {
-                gf.arrows.forEach(function(arr) {
+                gf.arrows.forEach(function (arr) {
                     var arrowLine = L.polyline([gf.center, arr.endCoord], {
                         color: gf.color, weight: 2.5, dashArray: '4, 4', opacity: 0.85, interactive: false
                     });
@@ -317,9 +329,9 @@ function renderComputedMapState(state) {
 
 /* --- PUSHMELDING BIJ NIEUW GEPLAATST RD-PUNT --- */
 var isInitialRdLoad = true;
-db.ref('rdPoints').once('value', function() { isInitialRdLoad = false; });
+db.ref('rdPoints').once('value', function () { isInitialRdLoad = false; });
 
-db.ref('rdPoints').on('child_added', function(snapshot) {
+db.ref('rdPoints').on('child_added', function (snapshot) {
     if (isInitialRdLoad) return;
     var p = snapshot.val();
     if (!p) return;
@@ -334,7 +346,7 @@ db.ref('rdPoints').on('child_added', function(snapshot) {
         if ('vibrate' in navigator) { navigator.vibrate([300, 100, 300, 100, 300]); }
 
         if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
-            navigator.serviceWorker.ready.then(function(reg) {
+            navigator.serviceWorker.ready.then(function (reg) {
                 reg.showNotification("🎯 Nieuw RD Punt" + deelgebied, {
                     body: puntNaam + tijdTekst + " geplaatst op de kaart!",
                     icon: 'icon-192.png', badge: 'icon-192.png',
@@ -362,7 +374,7 @@ function createUserIcon(isActive) {
     });
 }
 
-db.ref('liveUsers').on('value', function(snapshot) {
+db.ref('liveUsers').on('value', function (snapshot) {
     var users = snapshot.val();
     var now = Date.now();
 
@@ -375,7 +387,7 @@ db.ref('liveUsers').on('value', function(snapshot) {
 
     cachedUsersData = users;
 
-    Object.keys(users).forEach(function(userId) {
+    Object.keys(users).forEach(function (userId) {
         var u = users[userId];
         if (!u || !u.lat || !u.lng) return;
 
@@ -392,7 +404,7 @@ db.ref('liveUsers').on('value', function(snapshot) {
 
         var vossenOptions = `<option value="${amalgamaLat},${amalgamaLng}">Clubgebouw (${distAmalgama} km - ~${etaAmalgama} min)</option>`;
 
-        targetAreas.forEach(function(areaName) {
+        targetAreas.forEach(function (areaName) {
             if (latestKnownAreaPoints[areaName]) {
                 var pt = latestKnownAreaPoints[areaName];
                 var dist = getDistanceKm(u.lat, u.lng, pt.latlng[0], pt.latlng[1]).toFixed(1);
@@ -444,7 +456,7 @@ db.ref('liveUsers').on('value', function(snapshot) {
         }
     });
 
-    Object.keys(liveUserMarkers).forEach(function(userId) {
+    Object.keys(liveUserMarkers).forEach(function (userId) {
         if (!users[userId]) {
             usersLiveLayer.removeLayer(liveUserMarkers[userId]);
             delete liveUserMarkers[userId];
@@ -457,7 +469,7 @@ var panel = document.getElementById('vossen-status-panel');
 var header = document.getElementById('vossen-status-header');
 var isDragging = false, startX, startY;
 
-header.addEventListener('mousedown', function(e) {
+header.addEventListener('mousedown', function (e) {
     if (e.target.tagName === 'BUTTON') return;
     isDragging = true;
     startX = e.clientX - panel.offsetLeft;
@@ -466,7 +478,7 @@ header.addEventListener('mousedown', function(e) {
     document.addEventListener('mouseup', onMouseUp);
 });
 
-header.addEventListener('touchstart', function(e) {
+header.addEventListener('touchstart', function (e) {
     if (e.target.tagName === 'BUTTON') return;
     isDragging = true;
     var touch = e.touches[0];
@@ -511,7 +523,7 @@ function zoomToLatestAreaPoint(teamName) {
     if (latestKnownAreaPoints[teamName] && latestKnownAreaPoints[teamName].latlng) {
         var pt = latestKnownAreaPoints[teamName];
         map.flyTo(pt.latlng, 15, { animate: true, duration: 1.2 });
-        if (pt.marker) { setTimeout(function() { pt.marker.openPopup(); }, 600); }
+        if (pt.marker) { setTimeout(function () { pt.marker.openPopup(); }, 600); }
     } else {
         alert("Nog geen RD-punt bekend voor deelgebied " + teamName);
     }
@@ -520,8 +532,8 @@ function zoomToLatestAreaPoint(teamName) {
 function renderVossenUIFromData() {
     if (!lastCachedAreas || lastCachedAreas.length === 0) return;
     var html = '';
-    targetAreas.forEach(function(targetName) {
-        var area = lastCachedAreas.find(function(a) {
+    targetAreas.forEach(function (targetName) {
+        var area = lastCachedAreas.find(function (a) {
             return (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase());
         });
 
@@ -553,8 +565,8 @@ function handleAreaStatusNotifications(areas) {
     var now = new Date();
     var timeString = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
 
-    targetAreas.forEach(function(targetName) {
-        var area = areas.find(function(a) {
+    targetAreas.forEach(function (targetName) {
+        var area = areas.find(function (a) {
             return (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase());
         });
 
@@ -572,7 +584,7 @@ function handleAreaStatusNotifications(areas) {
                 if ('vibrate' in navigator) { navigator.vibrate([300, 100, 300, 100, 300]); }
 
                 if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
-                    navigator.serviceWorker.ready.then(function(reg) {
+                    navigator.serviceWorker.ready.then(function (reg) {
                         reg.showNotification(notifTitle, {
                             body: notifBody, icon: 'icon-192.png', badge: 'icon-192.png',
                             vibrate: [300, 100, 300, 100, 300], tag: 'status-alert-' + targetName, renotify: true
@@ -592,7 +604,7 @@ function handleAreaStatusNotifications(areas) {
     if (isInitialAreaStatusSync) { isInitialAreaStatusSync = false; }
 }
 
-db.ref('jotihuntSync').on('value', function(snapshot) {
+db.ref('jotihuntSync').on('value', function (snapshot) {
     var data = snapshot.val();
     if (!data) return;
 
