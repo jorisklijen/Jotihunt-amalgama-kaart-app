@@ -179,18 +179,18 @@ function sendCurrentLocation() {
         console.warn("GPS fout:", err.message);
     }, {
         enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 10000
+        maximumAge: 10000,
+        timeout: 15000
     });
 }
 
 function startBackgroundLiveTracking() {
     sendCurrentLocation();
     if (intervalTimer) clearInterval(intervalTimer);
-    intervalTimer = setInterval(sendCurrentLocation, 20000);
+    intervalTimer = setInterval(sendCurrentLocation, 30000);
 
     try {
-        var blob = new Blob(["setInterval(function() { postMessage('tick'); }, 20000);"], { type: "text/javascript" });
+        var blob = new Blob(["setInterval(function() { postMessage('tick'); }, 30000);"], { type: "text/javascript" });
         workerTimer = new Worker(URL.createObjectURL(blob));
         workerTimer.onmessage = function() { sendCurrentLocation(); };
     } catch (e) {
@@ -424,11 +424,11 @@ function setupDrawTools() {
     map.addControl(drawControl);
 }
 
-/* --- 8. CLUBGEBOUWEN DATA & BEZOCHT STATUS (Dynamisch via clubs.json) --- */
+/* --- 8. CLUBGEBOUWEN DATA & BEZOCHT STATUS (clubs.json) --- */
 var allLocations = []; 
 var houseVisitedStatus = {};
 
-// Laad de clubgebouwen in vanuit clubs.json
+// Laad clubgebouwen rechtstreeks in vanuit het lokale JSON-bestand
 fetch('clubs.json')
     .then(function(response) { return response.json(); })
     .then(function(data) {
@@ -809,7 +809,7 @@ function renderRdPointsAndGeofences() {
         }
     }
 }
-setInterval(renderRdPointsAndGeofences, 20000);
+setInterval(renderRdPointsAndGeofences, 30000);
 
 var isInitialRdLoad = true;
 db.ref('rdPoints').once('value', function() { isInitialRdLoad = false; });
@@ -1169,11 +1169,8 @@ db.ref('jotihuntSync').on('value', function(snapshot) {
 });
 
 async function fetchJotihuntEndpoint(endpoint) {
-    // We remove the ?_t= parameter as the Jotihunt API rejects unknown parameters,
-    // which caused the 500 internal server error with the allorigins proxy.
     var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
 
-    // List of proxies: first try your Cloudflare worker, then reliable alternatives
     var routes = [
         {
             url: "https://jotihunt-proxy.joriskleijn2000.workers.dev/?url=" + encodeURIComponent(targetUrl),
@@ -1201,7 +1198,6 @@ async function fetchJotihuntEndpoint(endpoint) {
 
             var json = await res.json();
 
-            // AllOrigins wraps the result in a 'contents' string
             if (routes[i].wrapped) {
                 if (!json || !json.contents) continue;
                 if (typeof json.contents === 'string' && json.contents.trim().startsWith('<')) continue;
@@ -1211,11 +1207,10 @@ async function fetchJotihuntEndpoint(endpoint) {
             if (json && json.data) { return json.data; }
             else if (Array.isArray(json)) { return json; }
             else if (json && typeof json === 'object') { return json; }
-        } catch (err) {
-            // Silently proceed to the next route in the list if the current one fails
-        }
+        } catch (err) {}
     }
     throw new Error("Geen enkele API-route werkte voor " + endpoint);
+}
 
 var isSyncingNow = false;
 async function syncJotihuntToFirebase(forceManual = false) {
@@ -1276,4 +1271,4 @@ function fetchLatestArticleManual() {
 
 setInterval(function() {
     syncJotihuntToFirebase(false);
-}, 25000);
+}, 45000);
