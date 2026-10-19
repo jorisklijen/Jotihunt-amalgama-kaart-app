@@ -41,10 +41,8 @@ var radiusMeters = 450;
 var allLocations = [];
 var houseVisitedStatus = {};
 var latestKnownAreaPoints = {};
-var lastCachedAreas = [];
-var disabledBlinks = {};
 
-/* Hulpfunctie: Hemelsbrede afstand in km (voor navigatie-afstand in popups) */
+/* Hulpfunctie: Hemelsbrede afstand in km (voor navigatie-afstand in popups en snelheidsberekening) */
 function getDistanceKm(lat1, lon1, lat2, lon2) {
     var R = 6371;
     var dLat = (lat2 - lat1) * Math.PI / 180;
@@ -55,24 +53,6 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
-/* Hulpfunctie: Vertaal ruwe API-status naar uniforme kleurcategorie */
-function getNormalizedStatusCategory(rawStatus) {
-    var s = String(rawStatus || '').toLowerCase().trim();
-    if (s === 'inactief' || s === 'inactive' || s.includes('red') || s.includes('rood') || s.includes('gevangen') || s.includes('caught') || s === '0' || s === 'false') {
-        return { key: 'rood', label: 'Rood (Inactief/Gevangen)' };
-    } else if (s === 'actief' || s.includes('green') || s.includes('groen') || s === 'active' || s === 'field' || s === 'open' || s === 'vrij' || s === '1' || s === 'true') {
-        return { key: 'groen', label: 'Groen (Actief)' };
-    } else if (s.includes('rust') || s.includes('orange') || s.includes('oranje') || s.includes('yellow') || s.includes('geel') || s.includes('onderweg') || s === 'pause' || s === 'resting' || s === '2') {
-        return { key: 'geel', label: 'Oranje/Geel (Rust)' };
-    }
-    return { key: 'grijs', label: 'Grijs (Onbekend)' };
-}
-
-function openJotihuntSite() { window.open('https://jotihunt.nl/', '_blank'); }
-function dismissNotification(e) {
-    e.stopPropagation();
-    document.getElementById('notification-banner').style.display = 'none';
-}
 window.navigateToAreaPoint = function(lat, lng) {
     window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
 };

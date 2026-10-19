@@ -120,7 +120,6 @@ function initApp() {
     var badge = document.getElementById('user-badge');
     if (isAdmin) {
         badge.innerText = "Beheerder (Admin)";
-        document.getElementById('btn-fetch-latest').style.display = 'inline-block';
         document.getElementById('btn-add-rd').style.display = 'inline-block';
         document.getElementById('clear-rd-btn').style.display = 'inline-block';
         loadAdminDependencies().catch(function(err) {

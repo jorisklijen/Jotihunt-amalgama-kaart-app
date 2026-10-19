@@ -21,21 +21,18 @@ var darkLayerGroup = L.layerGroup([darkBaseLayer, darkRefLayer]);
 
 var isDarkMode = localStorage.getItem('jh_map_theme') === 'dark';
 var mapContainer = document.getElementById('map');
-var vossenPanel = document.getElementById('vossen-status-panel');
 
 function applyDarkMode(enabled) {
     if (enabled) {
         if (map.hasLayer(lightTileLayer)) map.removeLayer(lightTileLayer);
         if (!map.hasLayer(darkLayerGroup)) darkLayerGroup.addTo(map);
         mapContainer.classList.add('dark-mode-map');
-        vossenPanel.classList.add('dark-mode-map-panel');
         document.getElementById('btn-darkmode').innerText = "☀️ Light";
         localStorage.setItem('jh_map_theme', 'dark');
     } else {
         if (map.hasLayer(darkLayerGroup)) map.removeLayer(darkLayerGroup);
         if (!map.hasLayer(lightTileLayer)) lightTileLayer.addTo(map);
         mapContainer.classList.remove('dark-mode-map');
-        vossenPanel.classList.remove('dark-mode-map-panel');
         document.getElementById('btn-darkmode').innerText = "🌙 Dark";
         localStorage.setItem('jh_map_theme', 'light');
     }
@@ -143,7 +140,6 @@ window.toggleHouseRadius = function (houseName, lat, lng) {
         houseRadiusCircles[safeKey] = circle;
     }
 
-    // Update direct de popup-inhoud van dit specifieke huisje zodat de knoptekst mee verandert
     var locObj = allLocations.find(function (l) { return l.name === houseName; });
     if (locObj && houseMarkersMap[houseName]) {
         houseMarkersMap[houseName].setPopupContent(buildHousePopupHtml(locObj));
@@ -317,7 +313,6 @@ function renderComputedMapState(state) {
         if (areaObj.geofence) {
             var gf = areaObj.geofence;
 
-            // Update bestaande cirkel of maak een nieuwe aan
             if (activeGeofenceCircles[area]) {
                 activeGeofenceCircles[area].setLatLng(gf.center);
                 activeGeofenceCircles[area].setRadius(gf.radiusMeters);
@@ -330,7 +325,6 @@ function renderComputedMapState(state) {
                 activeGeofenceCircles[area] = circle;
             }
 
-            // Update bestaande badge of maak een nieuwe aan
             var badgeIcon = L.divIcon({
                 className: 'geofence-badge-wrapper',
                 html: `<div class="geofence-radius-badge" style="border-color:${gf.color};">${gf.badgeText}</div>`,
@@ -345,7 +339,6 @@ function renderComputedMapState(state) {
                 activeGeofenceBadges[area] = badgeMarker;
             }
 
-            // Oude pijlen van dit gebied vervangen door de nieuw berekende pijlen
             if (activeGeofenceArrows[area]) {
                 activeGeofenceArrows[area].forEach(function (l) { geofenceLayer.removeLayer(l); });
             }
@@ -509,170 +502,4 @@ db.ref('liveUsers').on('value', function (snapshot) {
             delete liveUserMarkers[userId];
         }
     });
-});
-
-/* --- VOSSEN PANEEL SLEPEN & STATUS LUISTERAAR --- */
-var panel = document.getElementById('vossen-status-panel');
-var header = document.getElementById('vossen-status-header');
-var isDragging = false, startX, startY;
-
-header.addEventListener('mousedown', function (e) {
-    if (e.target.tagName === 'BUTTON') return;
-    isDragging = true;
-    startX = e.clientX - panel.offsetLeft;
-    startY = e.clientY - panel.offsetTop;
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-});
-
-header.addEventListener('touchstart', function (e) {
-    if (e.target.tagName === 'BUTTON') return;
-    isDragging = true;
-    var touch = e.touches[0];
-    startX = touch.clientX - panel.offsetLeft;
-    startY = touch.clientY - panel.offsetTop;
-    document.addEventListener('touchmove', onTouchMove);
-    document.addEventListener('touchend', onTouchEnd);
-});
-
-function onMouseMove(e) { if (isDragging) movePanel(e.clientX, e.clientY); }
-function onTouchMove(e) { if (isDragging) movePanel(e.touches[0].clientX, e.touches[0].clientY); }
-
-function movePanel(clientX, clientY) {
-    var newX = Math.max(0, Math.min(clientX - startX, window.innerWidth - panel.offsetWidth));
-    var newY = Math.max(0, Math.min(clientY - startY, document.getElementById('map-wrapper').clientHeight - panel.offsetHeight));
-    panel.style.left = newX + 'px';
-    panel.style.top = newY + 'px';
-    panel.style.right = 'auto';
-}
-
-function onMouseUp() { isDragging = false; document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp); }
-function onTouchEnd() { isDragging = false; document.removeEventListener('touchmove', onTouchMove); document.removeEventListener('touchend', onTouchEnd); }
-
-function toggleVossenPanel() {
-    var list = document.getElementById('vossen-list');
-    var btn = document.getElementById('minimize-btn');
-    if (list.style.display === 'none') {
-        list.style.display = 'block';
-        btn.innerText = '-';
-    } else {
-        list.style.display = 'none';
-        btn.innerText = '+';
-    }
-}
-
-function toggleBlink(teamName) {
-    disabledBlinks[teamName] = !disabledBlinks[teamName];
-    renderVossenUIFromData();
-}
-
-function zoomToLatestAreaPoint(teamName) {
-    if (latestKnownAreaPoints[teamName] && latestKnownAreaPoints[teamName].latlng) {
-        var pt = latestKnownAreaPoints[teamName];
-        map.flyTo(pt.latlng, 15, { animate: true, duration: 1.2 });
-        if (pt.marker) { setTimeout(function () { pt.marker.openPopup(); }, 600); }
-    } else {
-        alert("Nog geen RD-punt bekend voor deelgebied " + teamName);
-    }
-}
-
-function renderVossenUIFromData() {
-    if (!lastCachedAreas || lastCachedAreas.length === 0) return;
-    var html = '';
-    targetAreas.forEach(function (targetName) {
-        var area = lastCachedAreas.find(function (a) {
-            return (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase());
-        });
-
-        var raw = area ? (area.status || area.state || area.status_text || area.status_id || '') : '';
-        var cat = getNormalizedStatusCategory(raw);
-        var cls = 'status-vervangen';
-
-        if (cat.key === 'rood') {
-            cls = 'status-gevangen' + (disabledBlinks[targetName] ? '' : ' knipperen');
-        } else if (cat.key === 'groen') {
-            cls = 'status-actief';
-        } else if (cat.key === 'geel') {
-            cls = 'status-rust';
-        }
-
-        html += `<div class="vogel-status-item ${cls}" onclick="toggleBlink('${targetName}')" ondblclick="zoomToLatestAreaPoint('${targetName}')" title="Klik: knipperen aan/uit | Dubbelklik: zoom naar laatste RD punt">${targetName}</div>`;
-    });
-    document.getElementById('vossen-list').innerHTML = html;
-}
-
-/* Luister naar Vossenstatus & Artikelen vanuit Firebase */
-var previousAreaStatuses = {};
-var isInitialAreaStatusSync = true;
-var knownArticleId = localStorage.getItem('jh_last_article_id') || null;
-
-function handleAreaStatusNotifications(areas) {
-    if (!areas || !Array.isArray(areas)) return;
-
-    var now = new Date();
-    var timeString = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
-
-    targetAreas.forEach(function (targetName) {
-        var area = areas.find(function (a) {
-            return (a.name || a.title || '').toLowerCase().includes(targetName.toLowerCase());
-        });
-
-        var raw = area ? (area.status || area.state || area.status_text || area.status_id || '') : '';
-        var currentCategory = getNormalizedStatusCategory(raw);
-
-        if (isInitialAreaStatusSync) {
-            previousAreaStatuses[targetName] = currentCategory;
-        } else {
-            var prevCategory = previousAreaStatuses[targetName];
-            if (prevCategory && prevCategory.key !== currentCategory.key) {
-                var notifTitle = "🦊 Statuswijziging " + targetName;
-                var notifBody = `${targetName} is om ${timeString} veranderd naar ${currentCategory.label}.`;
-
-                if ('vibrate' in navigator) { navigator.vibrate([300, 100, 300, 100, 300]); }
-
-                if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
-                    navigator.serviceWorker.ready.then(function (reg) {
-                        reg.showNotification(notifTitle, {
-                            body: notifBody, icon: 'icon-192.png', badge: 'icon-192.png',
-                            vibrate: [300, 100, 300, 100, 300], tag: 'status-alert-' + targetName, renotify: true
-                        });
-                    });
-                }
-
-                document.getElementById('notification-text').innerText = "🦊 " + notifBody;
-                document.getElementById('notification-banner').style.display = 'flex';
-                previousAreaStatuses[targetName] = currentCategory;
-            } else if (!prevCategory) {
-                previousAreaStatuses[targetName] = currentCategory;
-            }
-        }
-    });
-
-    if (isInitialAreaStatusSync) { isInitialAreaStatusSync = false; }
-}
-
-db.ref('jotihuntSync').on('value', function (snapshot) {
-    var data = snapshot.val();
-    if (!data) return;
-
-    if (data.areas) {
-        var areasArray = Array.isArray(data.areas) ? data.areas : Object.values(data.areas);
-        if (areasArray.length > 0) {
-            lastCachedAreas = areasArray;
-            renderVossenUIFromData();
-            handleAreaStatusNotifications(areasArray);
-        }
-    }
-
-    if (data.latestArticle && data.latestArticle.title) {
-        var art = data.latestArticle;
-        if (!knownArticleId || knownArticleId !== String(art.id)) {
-            knownArticleId = String(art.id);
-            localStorage.setItem('jh_last_article_id', knownArticleId);
-            document.getElementById('notification-text').innerText = "🔔 Nieuw: " + art.title;
-            document.getElementById('notification-banner').style.display = 'flex';
-        }
-    }
-
-    document.getElementById('api-status').style.color = "#2ecc71";
 });

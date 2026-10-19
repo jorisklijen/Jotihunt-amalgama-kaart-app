@@ -43,33 +43,15 @@
                 <div id="user-badge">Niet ingelogd</div>
             </div>
             <div class="header-right">
-                <button class="header-btn" id="btn-fetch-latest" onclick="if(window.fetchLatestArticleManual) fetchLatestArticleManual()" style="display:none;" title="Laatste melding ophalen">🔔 Laatste</button>
                 <button class="header-btn" id="btn-add-rd" onclick="if(window.addMarkerByRD) addMarkerByRD()" style="display:none;">+ RD</button>
                 <button class="header-btn" id="clear-rd-btn" onclick="if(window.clearRdPoints) clearRdPoints()" style="display:none;">Wis</button>
                 <button class="header-btn" id="btn-darkmode" onclick="toggleDarkMode()" title="Donkere kaartmodus aan/uit">🌙 Dark</button>
                 <button class="header-btn" id="btn-logout" onclick="logout()" title="Uitloggen">Uitloggen</button>
-                <div><span id="api-status" style="color: #2ecc71;">●</span></div>
             </div>
-        </div>
-
-        <!-- Meldingenbanner voor vossenstatuswijzigingen of nieuwe artikelen -->
-        <div id="notification-banner" onclick="openJotihuntSite()">
-            <span id="notification-text">🔔 Nieuw bericht!</span>
-            <button onclick="dismissNotification(event)" style="background: white; color: #e74c3c; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-weight: bold;">✕</button>
         </div>
         
-        <!-- Kaartomgeving met vossenpaneel en Leaflet kaart -->
+        <!-- Kaartomgeving -->
         <div id="map-wrapper">
-            <div id="vossen-status-panel">
-                <div id="vossen-status-header">
-                    <span id="vossen-title">Vossen</span>
-                    <button id="minimize-btn" onclick="toggleVossenPanel()" title="Minimaliseren">-</button>
-                </div>
-                <div id="vossen-list">
-                    <div class="vogel-status-item">Laden...</div>
-                </div>
-            </div>
-
             <div id="map"></div>
         </div>
     </div>

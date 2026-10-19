@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jotihunt-amalgama-v4';
+const CACHE_NAME = 'jotihunt-amalgama-v6';
 
 self.addEventListener('install', function(event) {
     self.skipWaiting();
@@ -23,15 +23,12 @@ self.addEventListener('activate', function(event) {
 self.addEventListener('fetch', function(event) {
     const url = event.request.url;
 
-    // Laat alle externe API calls, proxies en Firebase volledig met rust in de Service Worker
+    // Laat Firebase en PDOK/OSM adres-geocoding volledig buiten de Service Worker cache
     if (
-        url.includes('jotihunt.nl') ||
-        url.includes('workers.dev') ||
-        url.includes('allorigins.win') ||
-        url.includes('corsproxy.io') ||
-        url.includes('codetabs.com') ||
         url.includes('firebaseio.com') ||
-        url.includes('firebasedatabase.app')
+        url.includes('firebasedatabase.app') ||
+        url.includes('api.pdok.nl') ||
+        url.includes('nominatim.openstreetmap.org')
     ) {
         return;
     }
