@@ -288,10 +288,6 @@ function parseCoordInput(coordInput) {
     }
 }
 
-// Oude regel:
-// var map = L.map('map').setView([51.9851, 5.8987], 10);
-
-// Nieuwe regel:
 var map = L.map('map', {
     preferCanvas: true
 }).setView([51.9851, 5.8987], 10);
@@ -508,7 +504,9 @@ function renderFixedHouses() {
             });
 
             var marker = L.marker([loc.lat, loc.lng], { icon: customIcon });
-            marker.bindTooltip(loc.name + " (" + loc.area + ")", { permanent: true, direction: 'right', className: 'marker-label' });
+            
+            // permanent: false zorgt dat het grijze label alleen bij hoveren verschijnt
+            marker.bindTooltip(loc.name + " (" + loc.area + ")", { permanent: false, direction: 'right', className: 'marker-label' });
             
             var visitedBtnHtml = '';
             if (isAdmin) {
@@ -585,7 +583,9 @@ function createWalkerMarker(latlng, name, color, timeStr, opacity, extraInfo, is
 
     var labelText = name + " (" + timeStr + ")" + (extraInfo ? " • " + extraInfo : "");
     var marker = L.marker(latlng, { icon: customIcon });
-    marker.bindTooltip(labelText, { permanent: true, direction: 'right', className: 'marker-label' });
+    
+    // permanent: false zorgt dat het grijze label alleen bij hoveren verschijnt
+    marker.bindTooltip(labelText, { permanent: false, direction: 'right', className: 'marker-label' });
 
     var popupContent = `<div style="font-size:12px; min-width:180px;">
         <b>${name}</b><br>
