@@ -288,7 +288,13 @@ function parseCoordInput(coordInput) {
     }
 }
 
-var map = L.map('map').setView([51.9851, 5.8987], 10);
+// Oude regel:
+// var map = L.map('map').setView([51.9851, 5.8987], 10);
+
+// Nieuwe regel:
+var map = L.map('map', {
+    preferCanvas: true
+}).setView([51.9851, 5.8987], 10);
 
 var lightTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 19, attribution: 'Tiles &copy; Esri'
