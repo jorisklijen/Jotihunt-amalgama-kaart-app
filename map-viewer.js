@@ -117,7 +117,7 @@ function buildHousePopupHtml(loc) {
     var radiusBtnBg = hasActiveRadius ? "#c0392b" : "#8e44ad";
     var radiusBtnHtml = `<button onclick="window.toggleHouseRadius('${escapedName}', ${loc.lat}, ${loc.lng})" style="margin-top:6px; background:${radiusBtnBg}; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">${radiusBtnText}</button>`;
 
-    return `<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22;">Bezocht</span>' : '<span style="color:#2ecc71;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${radiusBtnHtml}${visitedBtnHtml}`;
+    return `<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22; font-weight:bold;">Bezocht</span>' : '<span style="color:#2ecc71; font-weight:bold;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${radiusBtnHtml}${visitedBtnHtml}`;
 }
 
 window.toggleHouseRadius = function (houseName, lat, lng) {
@@ -207,6 +207,8 @@ db.ref('houseVisited').on('value', function (snapshot) {
 var activeGeofenceCircles = {};
 var activeGeofenceBadges = {};
 var activeGeofenceArrows = {};
+var activeEstimatedRoutes = {};
+var activeIntersectionDots = {};
 
 function createWalkerMarker(pt) {
     var isOscar = (pt.area === "Oscar");
@@ -228,7 +230,7 @@ function createWalkerMarker(pt) {
     var popupContent = `<div style="font-size:12px; min-width:190px;">
         <b>${pt.name}</b><br>
         ${pt.time ? `<span>Tijd: <b>${pt.time}</b></span><br>` : ''}
-        ${pt.extraInfo ? `<span>Loopsnelheid: <b style="color:#27ae60;">${pt.extraInfo}</b></span><br>` : ''}
+        ${pt.extraInfo ? `<span>Loopsnelheid: <b style="color:#2ecc71;">${pt.extraInfo}</b></span><br>` : ''}
         <button onclick="window.navigateToAreaPoint(${pt.latlng[0]}, ${pt.latlng[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
             📍 Navigeer naar dit punt
         </button>
@@ -266,7 +268,7 @@ function renderComputedMapState(state) {
         });
     }
 
-    // Verwijder geofences van deelgebieden die gewist zijn
+    // Verwijder geofences, geschatte routes en snijpunten van deelgebieden die gewist zijn
     Object.keys(activeGeofenceCircles).forEach(function (area) {
         if (!areasData[area]) {
             geofenceLayer.removeLayer(activeGeofenceCircles[area]);
@@ -278,6 +280,14 @@ function renderComputedMapState(state) {
             if (activeGeofenceArrows[area]) {
                 activeGeofenceArrows[area].forEach(function (l) { geofenceLayer.removeLayer(l); });
                 delete activeGeofenceArrows[area];
+            }
+            if (activeEstimatedRoutes[area]) {
+                geofenceLayer.removeLayer(activeEstimatedRoutes[area]);
+                delete activeEstimatedRoutes[area];
+            }
+            if (activeIntersectionDots[area]) {
+                geofenceLayer.removeLayer(activeIntersectionDots[area]);
+                delete activeIntersectionDots[area];
             }
         }
     });
@@ -298,7 +308,7 @@ function renderComputedMapState(state) {
             }
         });
 
-        // 2. Teken voorberekende routelijn
+        // 2. Teken voorberekende chronologische routelijn tussen RD-punten
         if (areaObj.routeCoords && areaObj.routeCoords.length >= 2) {
             var polyline = L.polyline(areaObj.routeCoords, {
                 color: areaObj.lineColor || areaColors[area] || "#000000",
@@ -309,7 +319,7 @@ function renderComputedMapState(state) {
             rdRouteLayer.addLayer(polyline);
         }
 
-        // 3. Teken of update voorberekende Geofence & Pijlen (zonder flikkering!)
+        // 3. Teken of update voorberekende Geofence, Pijlen, Geschatte Looproute & Snijpunt
         if (areaObj.geofence) {
             var gf = areaObj.geofence;
 
@@ -362,6 +372,60 @@ function renderComputedMapState(state) {
                     geofenceLayer.addLayer(tipMarker);
                     activeGeofenceArrows[area].push(tipMarker);
                 });
+            }
+
+            // 4. Teken geschatte wandelroute naar dichtstbijzijnde onbezochte clubgebouw (Stippellijn)
+            if (activeEstimatedRoutes[area]) {
+                geofenceLayer.removeLayer(activeEstimatedRoutes[area]);
+                delete activeEstimatedRoutes[area];
+            }
+            if (gf.estimatedWalkRoute && Array.isArray(gf.estimatedWalkRoute) && gf.estimatedWalkRoute.length >= 2) {
+                var walkLine = L.polyline(gf.estimatedWalkRoute, {
+                    color: gf.color,
+                    weight: 3,
+                    dashArray: '3, 8',
+                    opacity: 0.9,
+                    className: 'estimated-walk-line'
+                });
+                var targetHouseLabel = gf.estimatedTargetHouse ? ` richting <b>${gf.estimatedTargetHouse}</b>` : '';
+                walkLine.bindPopup(`<b>🥾 Geschatte looproute (${area})</b><br>Dichtstbijzijnde onbezochte locatie${targetHouseLabel}`);
+                geofenceLayer.addLayer(walkLine);
+                activeEstimatedRoutes[area] = walkLine;
+            }
+
+            // 5. Teken klein maar zichtbaar puntje waar de geschatte looproute en de groeiende cirkel elkaar ontmoeten
+            if (activeIntersectionDots[area]) {
+                geofenceLayer.removeLayer(activeIntersectionDots[area]);
+                delete activeIntersectionDots[area];
+            }
+            if (gf.intersectionPoint && Array.isArray(gf.intersectionPoint) && gf.intersectionPoint.length === 2) {
+                var dotHtml = `<div class="fox-intersection-dot" style="background-color: ${gf.color};"></div>`;
+                var dotIcon = L.divIcon({
+                    className: 'fox-intersection-wrapper',
+                    html: dotHtml,
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7],
+                    popupAnchor: [0, -7]
+                });
+                var dotMarker = L.marker(gf.intersectionPoint, { icon: dotIcon });
+                var targetName = gf.estimatedTargetHouse || "dichtstbijzijnde locatie";
+                dotMarker.bindTooltip(`🦊 Verwachte positie ${area} (route → ${targetName})`, {
+                    permanent: false,
+                    direction: 'top',
+                    className: 'marker-label'
+                });
+                dotMarker.bindPopup(`
+                    <div style="font-size:12px; min-width:185px;">
+                        <b>🦊 Verwachte Vos-positie (${area})</b><br>
+                        Kruispunt looproute & cirkelrand<br>
+                        Doel: <b>${targetName}</b><br>
+                        <button onclick="window.navigateToAreaPoint(${gf.intersectionPoint[0]}, ${gf.intersectionPoint[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
+                            📍 Navigeer naar dit kruispunt
+                        </button>
+                    </div>
+                `);
+                geofenceLayer.addLayer(dotMarker);
+                activeIntersectionDots[area] = dotMarker;
             }
         }
     });

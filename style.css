@@ -111,7 +111,8 @@ html, body {
 .custom-house-pin,
 .custom-walker-pin,
 .custom-rd-pin,
-.custom-car-pin {
+.custom-car-pin,
+.fox-intersection-wrapper {
     background: none !important;
     border: none !important;
     contain: layout style paint;
@@ -123,6 +124,17 @@ html, body {
 .custom-car-pin svg {
     display: block;
     filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+    transform: translateZ(0);
+}
+
+/* Zichtbaar voorspellingspuntje waar de geschatte looproute en de cirkel elkaar kruisen */
+.fox-intersection-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2.5px solid #ffffff;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.85);
+    cursor: pointer;
     transform: translateZ(0);
 }
 
@@ -186,22 +198,49 @@ html, body {
     text-align: center;
 }
 
-/* --- 5. LEAFLET POPUP STYLING --- */
+/* --- 5. LEAFLET POPUP STYLING (IN APP-THEMA: DONKERBLAUW / GRIJS) --- */
 .leaflet-popup-content-wrapper {
-    border-radius: 6px;
-    padding: 1px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    background-color: #2c3e50 !important;
+    color: #ecf0f1 !important;
+    border: 1px solid #4a6278 !important;
+    border-radius: 8px !important;
+    padding: 2px !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5) !important;
+}
+
+.leaflet-popup-tip {
+    background-color: #2c3e50 !important;
+    border: 1px solid #4a6278 !important;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+    color: #bdc3c7 !important;
+    font-size: 18px !important;
+    padding: 4px 6px 0 0 !important;
+}
+
+.leaflet-container a.leaflet-popup-close-button:hover {
+    color: #ffffff !important;
 }
 
 .leaflet-popup-content {
     font-size: 0.8rem;
-    line-height: 1.35;
+    line-height: 1.4;
     margin: 10px 12px;
+    color: #ecf0f1 !important;
 }
 
 .leaflet-popup-content b {
-    color: #2c3e50;
+    color: #ffffff !important;
     font-size: 0.88rem;
+}
+
+.leaflet-popup-content select {
+    background-color: #34495e !important;
+    color: #ecf0f1 !important;
+    border: 1px solid #4a6278 !important;
+    border-radius: 4px;
+    outline: none;
 }
 
 .leaflet-popup-content button {
@@ -231,12 +270,14 @@ html, body {
 }
 
 #auth-box {
-    background: #ffffff;
+    background: #2c3e50;
+    color: #ecf0f1;
+    border: 1px solid #4a6278;
     border-radius: 8px;
     padding: 24px;
     width: 90%;
     max-width: 320px;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -245,19 +286,25 @@ html, body {
 
 #auth-box h2 {
     font-size: 1.2rem;
-    color: #2c3e50;
+    color: #ffffff;
     margin-bottom: 4px;
 }
 
 #auth-box input {
     width: 100%;
     padding: 10px;
-    border: 1px solid #bdc3c7;
+    border: 1px solid #4a6278;
+    background-color: #34495e;
+    color: #ffffff;
     border-radius: 5px;
     font-size: 1rem;
     text-align: center;
     outline: none;
     transition: border-color 0.2s ease;
+}
+
+#auth-box input::placeholder {
+    color: #95a5a6;
 }
 
 #auth-box input:focus {
@@ -282,7 +329,7 @@ html, body {
 
 #auth-error {
     display: none;
-    color: #e74c3c;
+    color: #ff7675;
     font-size: 0.8rem;
     font-weight: 600;
 }

@@ -6,12 +6,17 @@
    - Gekleurde Dropdown (Hint / Hunt / Anders) waarbij 'Anders' geen gebied/tijd heeft
    - Slimme Loopsnelheid: Negeert verplaatsingen > 7 km/u, weegt laatste segment
      voor 50% en overige geldige segmenten voor 50% (Hunt -> fallback Hint -> 6.5 km/u)
+   - Geschatte Wandelroute (stippellijn) naar dichtstbijzijnde onbezochte locatie
+     + Exacte snijpunt-marker op de groeiende cirkelrand.
    - Zwevend, versleepbaar & minimaliseerbaar Admin-paneel voor X uur max cirkelgroei.
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
 var rawOtherPoints = []; // Voor punten met type "Anders" (zonder deelgebied en tijdstip)
 var currentEditingRdKey = null;
+
+/* Cache voor opgehaalde wandelroutes zodat we niet elke 30s onnodig API-calls doen */
+var walkingRouteCache = {};
 
 /* Instellingen voor snelheidsberekening & cirkelgroei (gesynchroniseerd met Firebase) */
 var adminSettings = {
@@ -56,7 +61,7 @@ function evaluateMasterRole() {
     }
 }
 
-/* --- 1. WISKUNDE, RICHTINGSVECTOREN, RD-CONVERSIE & GEOCODING --- */
+/* --- 1. WISKUNDE, RICHTINGSVECTOREN, ROUTE-INTERSECTIE & GEOCODING --- */
 function getBearing(lat1, lon1, lat2, lon2) {
     var y = Math.sin((lon2 - lon1) * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
     var x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
@@ -77,6 +82,93 @@ function getDestinationLatLng(lat, lng, distMeters, bearingDeg) {
                  Math.cos(distRatio) - Math.sin(latRad) * Math.sin(endLat));
 
     return [endLat * 180 / Math.PI, endLng * 180 / Math.PI];
+}
+
+/* Haalt de geschatte looproute (over echte wegen/wandelpaden) op tussen laatste RD-punt en het doel-clubhuis */
+async function getEstimatedWalkingRoute(startLatLng, endLatLng) {
+    var cacheKey = `${startLatLng[0].toFixed(5)},${startLatLng[1].toFixed(5)}_${endLatLng[0].toFixed(5)},${endLatLng[1].toFixed(5)}`;
+    if (walkingRouteCache[cacheKey]) {
+        return walkingRouteCache[cacheKey];
+    }
+
+    var endpoints = [
+        `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${startLatLng[1]},${startLatLng[0]};${endLatLng[1]},${endLatLng[0]}?overview=full&geometries=geojson`,
+        `https://router.project-osrm.org/route/v1/foot/${startLatLng[1]},${startLatLng[0]};${endLatLng[1]},${endLatLng[0]}?overview=full&geometries=geojson`
+    ];
+
+    for (var i = 0; i < endpoints.length; i++) {
+        try {
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 4500);
+            var res = await fetch(endpoints[i], { signal: controller.signal });
+            clearTimeout(timeoutId);
+
+            if (res.ok) {
+                var data = await res.json();
+                if (data && data.routes && data.routes.length > 0 && data.routes[0].geometry && data.routes[0].geometry.coordinates) {
+                    var coords = data.routes[0].geometry.coordinates.map(function(c) {
+                        return [
+                            Math.round(c[1] * 100000) / 100000,
+                            Math.round(c[0] * 100000) / 100000
+                        ];
+                    });
+                    // Beperk het aantal punten tot max ~120 voor een lichte Firebase-sync
+                    if (coords.length > 120) {
+                        var step = Math.ceil(coords.length / 120);
+                        var simplified = [];
+                        for (var j = 0; j < coords.length; j += step) {
+                            simplified.push(coords[j]);
+                        }
+                        var lastOriginal = coords[coords.length - 1];
+                        var lastSimp = simplified[simplified.length - 1];
+                        if (lastSimp[0] !== lastOriginal[0] || lastSimp[1] !== lastOriginal[1]) {
+                            simplified.push(lastOriginal);
+                        }
+                        coords = simplified;
+                    }
+                    walkingRouteCache[cacheKey] = coords;
+                    return coords;
+                }
+            }
+        } catch (err) {
+            // Probeer volgende routing-server of val terug op directe lijn
+        }
+    }
+
+    // Fallback als de route-server onbereikbaar is: rechte lijn tussen start en clubgebouw
+    return [startLatLng, endLatLng];
+}
+
+/* Berekent het exacte snijpunt waar de geschatte looproute en de rand van de groeiende cirkel elkaar ontmoeten */
+function findRouteCircleIntersection(centerLatLng, radiusMeters, routeCoords) {
+    if (!routeCoords || routeCoords.length < 2 || radiusMeters <= 0) return null;
+
+    var cLat = centerLatLng[0];
+    var cLng = centerLatLng[1];
+
+    for (var i = 0; i < routeCoords.length - 1; i++) {
+        var p1 = routeCoords[i];
+        var p2 = routeCoords[i + 1];
+
+        var d1 = getDistanceKm(cLat, cLng, p1[0], p1[1]) * 1000;
+        var d2 = getDistanceKm(cLat, cLng, p2[0], p2[1]) * 1000;
+
+        // Controleer of dit routedeel van binnen de cirkel naar buiten de cirkel kruist
+        if ((d1 <= radiusMeters && d2 >= radiusMeters) || (d1 >= radiusMeters && d2 <= radiusMeters)) {
+            if (Math.abs(d2 - d1) < 0.001) {
+                return [p1[0], p1[1]];
+            }
+            var ratio = (radiusMeters - d1) / (d2 - d1);
+            ratio = Math.max(0, Math.min(1, ratio));
+            var interLat = p1[0] + ratio * (p2[0] - p1[0]);
+            var interLng = p1[1] + ratio * (p2[1] - p1[1]);
+            return [
+                Math.round(interLat * 100000) / 100000,
+                Math.round(interLng * 100000) / 100000
+            ];
+        }
+    }
+    return null;
 }
 
 function parseTargetArea(input) {
@@ -122,7 +214,7 @@ function parseCoordInput(coordInput) {
     }
 }
 
-/* Zet RD, GPS óf een gekopieerd adres (bijv. "Ernest Hemingwaystraat 73, 6836 TK Arnhem") om naar [lat, lng] */
+/* Zet RD, GPS óf een gekopieerd adres om naar [lat, lng] */
 async function resolveLocationInput(rawInput) {
     if (!rawInput || !rawInput.trim()) return null;
 
@@ -197,7 +289,6 @@ function getPointTimestampMs(pt) {
 }
 
 /* --- 2. SLIMME SNELHEIDSBEREKENING (MAX 7 KM/U FILTER & 50/50 WEGING) --- */
-/* Berekent de geldige snelheidssegmenten (<= 7.0 km/u) uit een chronologische lijst van punten */
 function getValidSpeedSegments(pts) {
     var maxAllowedKmh = Number(adminSettings.maxWalkingSpeedKmh) || 7.0;
     var segments = [];
@@ -214,7 +305,6 @@ function getValidSpeedSegments(pts) {
         var hours = (t2 - t1) / 3600000;
         if (hours > 0) {
             var kmh = distKm / hours;
-            // Negeer dit segment als de benodigde snelheid hoger is dan 7 km/u (bijv. vervoer per auto)
             if (kmh <= maxAllowedKmh && kmh > 0) {
                 segments.push(kmh);
             }
@@ -223,7 +313,6 @@ function getValidSpeedSegments(pts) {
     return segments;
 }
 
-/* Berekent het gewogen gemiddelde: 50% laatste geldige segment + 50% gemiddelde van alle eerdere geldige segmenten */
 function computeWeightedSpeedFromSegments(segments) {
     if (!segments || segments.length === 0) return null;
     if (segments.length === 1) {
@@ -237,11 +326,9 @@ function computeWeightedSpeedFromSegments(segments) {
     return (0.50 * lastSegSpeed) + (0.50 * avgPrev);
 }
 
-/* Hoofdfunctie voor loopsnelheid van een deelgebied */
 function calculateAreaWalkingSpeed(areaPoints) {
     var defaultKmh = Number(adminSettings.defaultSpeedKmh) || 6.5;
 
-    // Stap 1: Kijk eerst uitsluitend naar de 'Hunt' punten
     var huntPoints = areaPoints.filter(function(p) {
         return (p.pointType || p.baseName) === "Hunt";
     });
@@ -257,7 +344,6 @@ function calculateAreaWalkingSpeed(areaPoints) {
         };
     }
 
-    // Stap 2: Fallback naar 'Hunt' + 'Hint' punten als er geen geldige Hunt-segmenten (<= 7 km/u) zijn
     var huntAndHintPoints = areaPoints.filter(function(p) {
         var t = p.pointType || p.baseName || "Hint";
         return t === "Hunt" || t === "Hint";
@@ -274,7 +360,6 @@ function calculateAreaWalkingSpeed(areaPoints) {
         };
     }
 
-    // Stap 3: Echt helemaal geen bruikbare Hunt of Hint segmenten -> Standaard 6,5 km/u
     return {
         speedKmh: defaultKmh,
         speedText: `~${defaultKmh} km/u (Standaard)`
@@ -282,169 +367,214 @@ function calculateAreaWalkingSpeed(areaPoints) {
 }
 
 /* --- 3. CENTRALE BEREKENING & PUBLICATIE NAAR FIREBASE --- */
-window.calculateAndPublishMapState = function(forceManual = false) {
+var isCalculatingMapState = false;
+
+window.calculateAndPublishMapState = async function(forceManual = false) {
     if (!isAdmin) return;
     if (!isMasterAdmin && !forceManual) return;
+    if (isCalculatingMapState && !forceManual) return;
 
-    var nowMs = Date.now();
-    var computedAreas = {};
-    var maxGrowthHours = Number(adminSettings.maxCircleGrowthHours);
-    if (isNaN(maxGrowthHours) || maxGrowthHours <= 0) maxGrowthHours = 3;
-    var maxGrowthSeconds = maxGrowthHours * 3600;
+    isCalculatingMapState = true;
 
-    for (var area in rawRdPointsByArea) {
-        var points = rawRdPointsByArea[area].slice();
-        if (points.length === 0) continue;
+    try {
+        var nowMs = Date.now();
+        var computedAreas = {};
+        var maxGrowthHours = Number(adminSettings.maxCircleGrowthHours);
+        if (isNaN(maxGrowthHours) || maxGrowthHours <= 0) maxGrowthHours = 3;
+        var maxGrowthSeconds = maxGrowthHours * 3600;
 
-        points.sort(function(a, b) {
-            return getPointTimestampMs(a) - getPointTimestampMs(b);
-        });
-        var lastPoint = points[points.length - 1];
+        for (var area in rawRdPointsByArea) {
+            var points = rawRdPointsByArea[area].slice();
+            if (points.length === 0) continue;
 
-        // Bereken de loopsnelheid (met 7 km/u filter en 50/50 weging)
-        var speedResult = calculateAreaWalkingSpeed(points);
-        var calculatedSpeedKmh = speedResult.speedKmh;
-        var speedText = speedResult.speedText;
+            points.sort(function(a, b) {
+                return getPointTimestampMs(a) - getPointTimestampMs(b);
+            });
+            var lastPoint = points[points.length - 1];
 
-        var bearingDeg = null;
-        if (points.length >= 2) {
-            var sumSin = 0, sumCos = 0, totalWeight = 0;
-            var pA = points[points.length - 2];
-            var pB = points[points.length - 1];
-            var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
-            sumSin += 0.40 * Math.sin(b1); sumCos += 0.40 * Math.cos(b1); totalWeight += 0.40;
+            var speedResult = calculateAreaWalkingSpeed(points);
+            var calculatedSpeedKmh = speedResult.speedKmh;
+            var speedText = speedResult.speedText;
 
-            if (points.length >= 3) {
-                var pA2 = points[points.length - 3];
-                var pB2 = points[points.length - 2];
-                var b2 = getBearing(pA2.latlng[0], pA2.latlng[1], pB2.latlng[0], pB2.latlng[1]) * Math.PI / 180;
-                sumSin += 0.10 * Math.sin(b2); sumCos += 0.10 * Math.cos(b2); totalWeight += 0.10;
-            }
-
+            // Zoek alle nog NIET bezochte deelnemende locaties in dit deelgebied
             var areaHouses = allLocations.filter(function(l) { return l.area === area; });
             var unvisitedHouses = areaHouses.filter(function(h) {
                 var safeKey = h.name.replace(/[.#$[\]]/g, '_');
                 return !houseVisitedStatus[safeKey];
             });
-            if (unvisitedHouses.length === 0) { unvisitedHouses = areaHouses; }
 
+            // Dichtstbijzijnde onbezochte locatie bepalen
+            var nearestUnvisitedHouse = null;
             if (unvisitedHouses.length > 0) {
-                var nearestHouse = unvisitedHouses.reduce(function(prev, curr) {
+                nearestUnvisitedHouse = unvisitedHouses.reduce(function(prev, curr) {
                     var dPrev = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], prev.lat, prev.lng);
                     var dCurr = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], curr.lat, curr.lng);
                     return dCurr < dPrev ? curr : prev;
                 });
-                var bHouse = getBearing(lastPoint.latlng[0], lastPoint.latlng[1], nearestHouse.lat, nearestHouse.lng) * Math.PI / 180;
-                sumSin += 0.40 * Math.sin(bHouse); sumCos += 0.40 * Math.cos(bHouse); totalWeight += 0.40;
             }
 
-            if (totalWeight > 0) {
-                var avgRad = Math.atan2(sumSin / totalWeight, sumCos / totalWeight);
-                bearingDeg = ((avgRad * 180 / Math.PI) + 360) % 360;
+            // Bereken de bestaande richtingshoek (gradenhoek voor de pijlen)
+            var bearingDeg = null;
+            if (points.length >= 2) {
+                var sumSin = 0, sumCos = 0, totalWeight = 0;
+                var pA = points[points.length - 2];
+                var pB = points[points.length - 1];
+                var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
+                sumSin += 0.40 * Math.sin(b1); sumCos += 0.40 * Math.cos(b1); totalWeight += 0.40;
+
+                if (points.length >= 3) {
+                    var pA2 = points[points.length - 3];
+                    var pB2 = points[points.length - 2];
+                    var b2 = getBearing(pA2.latlng[0], pA2.latlng[1], pB2.latlng[0], pB2.latlng[1]) * Math.PI / 180;
+                    sumSin += 0.10 * Math.sin(b2); sumCos += 0.10 * Math.cos(b2); totalWeight += 0.10;
+                }
+
+                var houseForBearing = nearestUnvisitedHouse;
+                if (!houseForBearing && areaHouses.length > 0) {
+                    houseForBearing = areaHouses.reduce(function(prev, curr) {
+                        var dPrev = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], prev.lat, prev.lng);
+                        var dCurr = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], curr.lat, curr.lng);
+                        return dCurr < dPrev ? curr : prev;
+                    });
+                }
+
+                if (houseForBearing) {
+                    var bHouse = getBearing(lastPoint.latlng[0], lastPoint.latlng[1], houseForBearing.lat, houseForBearing.lng) * Math.PI / 180;
+                    sumSin += 0.40 * Math.sin(bHouse); sumCos += 0.40 * Math.cos(bHouse); totalWeight += 0.40;
+                }
+
+                if (totalWeight > 0) {
+                    var avgRad = Math.atan2(sumSin / totalWeight, sumCos / totalWeight);
+                    bearingDeg = ((avgRad * 180 / Math.PI) + 360) % 360;
+                }
             }
+
+            var processedPoints = points.map(function(pt, idx) {
+                var isLatest = (idx === points.length - 1);
+                var ptMs = getPointTimestampMs(pt);
+                var diffMinutes = Math.floor((nowMs - ptMs) / 60000);
+
+                var opacity = 1.0;
+                if (diffMinutes > 60) {
+                    var fade = (diffMinutes - 60) / 180;
+                    opacity = Math.round(Math.max(0.50, 1.0 - (fade * 0.50)) * 100) / 100;
+                }
+
+                return {
+                    key: pt.key,
+                    latlng: pt.latlng,
+                    name: pt.fullName || pt.baseName,
+                    pointType: pt.pointType || pt.baseName || "Hint",
+                    color: pt.color,
+                    time: pt.time,
+                    datetimeIso: pt.datetimeIso || null,
+                    pointTimestamp: ptMs,
+                    area: pt.area,
+                    opacity: opacity,
+                    extraInfo: isLatest ? speedText : "",
+                    isLatest: isLatest
+                };
+            });
+
+            var lastPtMs = getPointTimestampMs(lastPoint);
+            var isFuture = (lastPtMs > nowMs);
+            var rawSecondsPassed = isFuture ? 0 : Math.floor((nowMs - lastPtMs) / 1000);
+
+            var isCappedByAge = (!isFuture && rawSecondsPassed >= maxGrowthSeconds);
+            var effectiveSecondsPassed = isCappedByAge ? maxGrowthSeconds : rawSecondsPassed;
+
+            var currentRadiusMeters = 1;
+            if (!isFuture) {
+                var effectiveSpeedKmh = calculatedSpeedKmh !== null ? calculatedSpeedKmh : 6.5;
+                var metersPerSecond = (effectiveSpeedKmh * 1000) / 3600;
+                currentRadiusMeters = Math.max(1, Math.round(1 + (effectiveSecondsPassed * metersPerSecond)));
+            }
+
+            var areaColor = areaColors[area] || "#e74c3c";
+            var distFormatted = currentRadiusMeters >= 1000
+                ? (currentRadiusMeters / 1000).toFixed(1) + ' km'
+                : currentRadiusMeters + ' m';
+
+            var badgeText = isFuture
+                ? `🎯 ${area}: 1 m (in toekomst)`
+                : (isCappedByAge
+                    ? `⏸️ ${area}: ${distFormatted} (max ${maxGrowthHours}u)`
+                    : `🎯 ${area}: ${distFormatted}`);
+
+            var arrows = [];
+            if (bearingDeg !== null && !isFuture) {
+                [-60, 60].forEach(function(offsetAngle) {
+                    var arrowAngle = Math.round((bearingDeg + offsetAngle + 360) % 360);
+                    var arrowEndCoord = getDestinationLatLng(lastPoint.latlng[0], lastPoint.latlng[1], currentRadiusMeters, arrowAngle);
+                    arrows.push({
+                        angle: arrowAngle,
+                        endCoord: arrowEndCoord
+                    });
+                });
+            }
+
+            // Bereken geschatte looproute (stippellijn) + snijpunt op de groeiende cirkel
+            var estimatedWalkRoute = [];
+            var estimatedTargetHouseName = "";
+            var circleIntersectionPoint = null;
+
+            if (nearestUnvisitedHouse) {
+                estimatedTargetHouseName = nearestUnvisitedHouse.name;
+                estimatedWalkRoute = await getEstimatedWalkingRoute(
+                    lastPoint.latlng,
+                    [nearestUnvisitedHouse.lat, nearestUnvisitedHouse.lng]
+                );
+
+                if (!isFuture && estimatedWalkRoute && estimatedWalkRoute.length >= 2) {
+                    circleIntersectionPoint = findRouteCircleIntersection(
+                        lastPoint.latlng,
+                        currentRadiusMeters,
+                        estimatedWalkRoute
+                    );
+                }
+            }
+
+            computedAreas[area] = {
+                points: processedPoints,
+                routeCoords: points.length >= 2 ? points.map(function(p) { return p.latlng; }) : [],
+                lineColor: (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000"),
+                geofence: {
+                    center: lastPoint.latlng,
+                    radiusMeters: currentRadiusMeters,
+                    color: areaColor,
+                    badgeText: badgeText,
+                    arrows: arrows,
+                    estimatedWalkRoute: estimatedWalkRoute,
+                    estimatedTargetHouse: estimatedTargetHouseName,
+                    intersectionPoint: circleIntersectionPoint
+                }
+            };
         }
 
-        var processedPoints = points.map(function(pt, idx) {
-            var isLatest = (idx === points.length - 1);
-            var ptMs = getPointTimestampMs(pt);
-            var diffMinutes = Math.floor((nowMs - ptMs) / 60000);
-
-            var opacity = 1.0;
-            if (diffMinutes > 60) {
-                var fade = (diffMinutes - 60) / 180;
-                opacity = Math.round(Math.max(0.50, 1.0 - (fade * 0.50)) * 100) / 100;
-            }
-
+        var processedOtherPoints = rawOtherPoints.map(function(pt) {
             return {
                 key: pt.key,
                 latlng: pt.latlng,
-                name: pt.fullName || pt.baseName,
-                pointType: pt.pointType || pt.baseName || "Hint",
-                color: pt.color,
-                time: pt.time,
-                datetimeIso: pt.datetimeIso || null,
-                pointTimestamp: ptMs,
-                area: pt.area,
-                opacity: opacity,
-                extraInfo: isLatest ? speedText : "",
-                isLatest: isLatest
+                name: pt.fullName || pt.baseName || "Anders",
+                pointType: "Anders",
+                color: pt.color || "#34495e",
+                time: "",
+                area: "",
+                opacity: 1.0,
+                extraInfo: "",
+                isLatest: false
             };
         });
 
-        var lastPtMs = getPointTimestampMs(lastPoint);
-        var isFuture = (lastPtMs > nowMs);
-        var rawSecondsPassed = isFuture ? 0 : Math.floor((nowMs - lastPtMs) / 1000);
-
-        // Stop met groeien zodra het laatste punt ouder is dan X uur
-        var isCappedByAge = (!isFuture && rawSecondsPassed >= maxGrowthSeconds);
-        var effectiveSecondsPassed = isCappedByAge ? maxGrowthSeconds : rawSecondsPassed;
-
-        var currentRadiusMeters = 1;
-        if (!isFuture) {
-            var effectiveSpeedKmh = calculatedSpeedKmh !== null ? calculatedSpeedKmh : 6.5;
-            var metersPerSecond = (effectiveSpeedKmh * 1000) / 3600;
-            currentRadiusMeters = Math.max(1, Math.round(1 + (effectiveSecondsPassed * metersPerSecond)));
-        }
-
-        var areaColor = areaColors[area] || "#e74c3c";
-        var distFormatted = currentRadiusMeters >= 1000
-            ? (currentRadiusMeters / 1000).toFixed(1) + ' km'
-            : currentRadiusMeters + ' m';
-
-        var badgeText = isFuture
-            ? `🎯 ${area}: 1 m (in toekomst)`
-            : (isCappedByAge
-                ? `⏸️ ${area}: ${distFormatted} (max ${maxGrowthHours}u)`
-                : `🎯 ${area}: ${distFormatted}`);
-
-        var arrows = [];
-        if (bearingDeg !== null && !isFuture) {
-            [-60, 60].forEach(function(offsetAngle) {
-                var arrowAngle = Math.round((bearingDeg + offsetAngle + 360) % 360);
-                var arrowEndCoord = getDestinationLatLng(lastPoint.latlng[0], lastPoint.latlng[1], currentRadiusMeters, arrowAngle);
-                arrows.push({
-                    angle: arrowAngle,
-                    endCoord: arrowEndCoord
-                });
-            });
-        }
-
-        computedAreas[area] = {
-            points: processedPoints,
-            routeCoords: points.length >= 2 ? points.map(function(p) { return p.latlng; }) : [],
-            lineColor: (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000"),
-            geofence: {
-                center: lastPoint.latlng,
-                radiusMeters: currentRadiusMeters,
-                color: areaColor,
-                badgeText: badgeText,
-                arrows: arrows
-            }
-        };
+        await db.ref('computedMapState').set({
+            updatedAt: Date.now(),
+            masterId: adminSessionId,
+            areas: computedAreas,
+            otherPoints: processedOtherPoints
+        });
+    } finally {
+        isCalculatingMapState = false;
     }
-
-    // Verwerk losse 'Anders'-punten (zonder deelgebied en zonder tijdstip)
-    var processedOtherPoints = rawOtherPoints.map(function(pt) {
-        return {
-            key: pt.key,
-            latlng: pt.latlng,
-            name: pt.fullName || pt.baseName || "Anders",
-            pointType: "Anders",
-            color: pt.color || "#34495e",
-            time: "",
-            area: "",
-            opacity: 1.0,
-            extraInfo: "",
-            isLatest: false
-        };
-    });
-
-    db.ref('computedMapState').set({
-        updatedAt: Date.now(),
-        masterId: adminSessionId,
-        areas: computedAreas,
-        otherPoints: processedOtherPoints
-    });
 };
 
 /* --- 4. RD-PUNT MODAL & ZWEVEND ADMIN-INSTELLINGEN PANEEL OP DE KAART --- */
@@ -478,7 +608,6 @@ function injectAdminUI() {
             font-size: 0.88rem; outline: none; font-weight: 600;
         }
         .rd-input:focus, .rd-select:focus { border-color: #3498db; }
-        /* Specifieke dropdown-kleuren voor alleen dit menu */
         #rd-type-select.type-hunt { background-color: #2ecc71 !important; color: #ffffff !important; border-color: #27ae60 !important; }
         #rd-type-select.type-hint { background-color: #5dade2 !important; color: #ffffff !important; border-color: #3498db !important; }
         #rd-type-select.type-anders { background-color: #34495e !important; color: #ecf0f1 !important; border-color: #4a6278 !important; }
@@ -542,7 +671,6 @@ function injectAdminUI() {
     `;
     document.head.appendChild(style);
 
-    // 1. Voeg de RD-Punt Modal toe aan body
     var overlay = document.createElement('div');
     overlay.id = 'rd-modal-overlay';
     overlay.innerHTML = `
@@ -661,7 +789,6 @@ function injectAdminUI() {
     document.getElementById('rd-btn-cancel').addEventListener('click', closeRdModal);
     document.getElementById('rd-btn-save').addEventListener('click', saveRdModalData);
 
-    // 2. Voeg het zwevende, versleepbare Admin Instellingen Paneel toe aan #map-wrapper
     var mapWrapper = document.getElementById('map-wrapper');
     if (mapWrapper && !document.getElementById('admin-settings-panel')) {
         var settingsPanel = document.createElement('div');
@@ -683,13 +810,11 @@ function injectAdminUI() {
         `;
         mapWrapper.appendChild(settingsPanel);
 
-        // Voorkom dat klikken/scrollen in het paneel de Leaflet-kaart eronder beweegt
         if (typeof L !== 'undefined' && L.DomEvent) {
             L.DomEvent.disableClickPropagation(settingsPanel);
             L.DomEvent.disableScrollPropagation(settingsPanel);
         }
 
-        // Minimaliseren en uitklappen
         var minBtn = document.getElementById('admin-settings-min-btn');
         var settingsBody = document.getElementById('admin-settings-body');
         minBtn.addEventListener('click', function() {
@@ -702,7 +827,6 @@ function injectAdminUI() {
             }
         });
 
-        // Synchroniseer wijziging van X uur direct naar Firebase
         var maxHoursInput = document.getElementById('admin-max-hours-input');
         maxHoursInput.addEventListener('change', function() {
             var val = parseFloat(this.value);
@@ -719,7 +843,6 @@ function injectAdminUI() {
             });
         });
 
-        // Maak het Admin-paneel versleepbaar (muis & touch)
         var sHeader = document.getElementById('admin-settings-header');
         var isDraggingPanel = false, dragStartX = 0, dragStartY = 0;
 
@@ -849,7 +972,7 @@ async function saveRdModalData() {
 
     errBox.style.display = 'none';
 
-    var chosenType = typeSelect.value; // "Hint", "Hunt" of "Anders"
+    var chosenType = typeSelect.value;
     var rawLoc = locInput.value.trim();
 
     if (!rawLoc) {
@@ -1015,6 +1138,7 @@ window.clearRdPoints = function() {
     if (!isAdmin) return;
     var pinInput = prompt("Voer de admin-pincode in om de RD-lijnen te wissen:", "");
     if (pinInput === "6546") {
+        walkingRouteCache = {};
         db.ref('rdPoints').remove().then(function() {
             db.ref('computedMapState').remove();
             alert("RD-punten succesvol gewist.");
@@ -1049,7 +1173,6 @@ window.initAdminEngine = function() {
 
     renderFixedHouses();
 
-    // Luister naar de beheer-instellingen (waarde X voor max cirkelgroei in uren) zodat alle Admins in sync zijn
     db.ref('adminSettings').on('value', function(snapshot) {
         var val = snapshot.val();
         if (val && val.maxCircleGrowthHours !== undefined) {
@@ -1065,7 +1188,6 @@ window.initAdminEngine = function() {
         window.calculateAndPublishMapState(false);
     });
 
-    // Luister naar ruwe RD-punten en verdeel in deelgebieden óf 'Anders'-punten
     db.ref('rdPoints').on('value', function(snapshot) {
         for (var a in rawRdPointsByArea) rawRdPointsByArea[a] = [];
         rawOtherPoints = [];
