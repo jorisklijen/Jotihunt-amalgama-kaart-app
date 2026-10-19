@@ -1,11 +1,26 @@
 /* ==========================================================================
    4. ADMIN-ENGINE.JS - CENTRALE REKENMOTOR & BEHEER (ALLEEN VOOR ADMIN)
-   Inclusief Multi-Admin Master Lock, Adres-Geocoding (PDOK/OSM),
-   Datum/Tijd-picker (middernacht-proof) en Gekleurde Dropdown (Hint/Hunt/Anders).
+   Inclusief:
+   - Multi-Admin Master Lock
+   - RD (met/zonder komma), GPS & Adres-Geocoding (PDOK / OSM)
+   - Gekleurde Dropdown (Hint / Hunt / Anders) waarbij 'Anders' geen gebied/tijd heeft
+   - Slimme Loopsnelheid: Hunt-punten (laatste 2 tellen voor 50%), fallback naar Hint,
+     standaard 6.5 km/u, en filter voor >X min op Status Rood (aan/uit te zetten met schuifje).
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
+var rawOtherPoints = []; // Voor punten met type "Anders" (zonder deelgebied en tijdstip)
 var currentEditingRdKey = null;
+
+/* Instellingen voor snelheidsberekening & rode status (gesynchroniseerd met Firebase) */
+var speedSettings = {
+    ignoreRedStatus: true,
+    redThresholdMinutes: 10,
+    defaultSpeedKmh: 6.5
+};
+
+/* Geschiedenis van rode status per deelgebied om >X min rood te detecteren */
+var areaRedHistory = {};
 
 /* --- 0. MULTI-ADMIN LEADER ELECTION (MASTER LOCK) --- */
 var adminSessionId = 'admin_' + Math.random().toString(36).substr(2, 9);
@@ -79,7 +94,6 @@ function parseCoordInput(coordInput) {
     if (!coordInput) return null;
     var clean = coordInput.trim();
 
-    // Alleen parsen als coördinaat wanneer de invoer uitsluitend uit cijfers, spaties, komma's, punten of mintekens bestaat
     if (!/^[\d\s.,;-]+$/.test(clean)) {
         return null;
     }
@@ -91,11 +105,9 @@ function parseCoordInput(coordInput) {
     var val2 = parseFloat(parts[1].replace(',', '.'));
     if (isNaN(val1) || isNaN(val2)) return null;
 
-    // Check of het GPS-coördinaten (WGS84) zijn
     if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
         return [val1, val2];
     } else {
-        // RD-coördinaten (bijv. 1645 4312 -> aanvullen tot 6 cijfers: 164500, 431200)
         var xStr = parts[0].replace(',', '.').split('.')[0];
         var yStr = parts[1].replace(',', '.').split('.')[0];
         while (xStr.length < 6) { xStr += "0"; }
@@ -116,11 +128,9 @@ function parseCoordInput(coordInput) {
 async function resolveLocationInput(rawInput) {
     if (!rawInput || !rawInput.trim()) return null;
 
-    // 1. Probeer eerst als RD-punt (met/zonder komma) of GPS-coördinaat
     var directCoords = parseCoordInput(rawInput);
     if (directCoords) return directCoords;
 
-    // 2. Zo niet: zoek het adres op via de officiële Nederlandse PDOK Locatieserver API
     var query = rawInput.trim();
     try {
         var pdokUrl = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free?q=" + encodeURIComponent(query) + "&rows=1";
@@ -128,7 +138,7 @@ async function resolveLocationInput(rawInput) {
         if (res.ok) {
             var data = await res.json();
             if (data && data.response && data.response.docs && data.response.docs.length > 0) {
-                var centroide = data.response.docs[0].centroide_ll; // Formaat: "POINT(5.8987 51.9851)"
+                var centroide = data.response.docs[0].centroide_ll;
                 if (centroide) {
                     var match = centroide.match(/POINT\(([\d.-]+)\s+([\d.-]+)\)/);
                     if (match) {
@@ -143,7 +153,6 @@ async function resolveLocationInput(rawInput) {
         console.warn("PDOK adres-lookup mislukt, probeer fallback...", e);
     }
 
-    // 3. Fallback via OpenStreetMap Nominatim
     try {
         var nomUrl = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=nl&q=" + encodeURIComponent(query);
         var nomRes = await fetch(nomUrl);
@@ -162,7 +171,6 @@ async function resolveLocationInput(rawInput) {
     return null;
 }
 
-/* Hulpfuncties voor Datum & Tijd (accuraat over middernacht 23:00 -> 00:00) */
 function toLocalIsoString(dateObj) {
     var d = dateObj || new Date();
     var yyyy = d.getFullYear();
@@ -181,7 +189,6 @@ function getPointTimestampMs(pt) {
         var parsed = new Date(pt.datetimeIso).getTime();
         if (!isNaN(parsed)) return parsed;
     }
-    // Fallback voor oude punten die alleen "HH:MM" hadden
     if (pt.time && pt.time.includes(':')) {
         var baseDate = pt.createdTimestamp ? new Date(pt.createdTimestamp) : new Date();
         var parts = pt.time.split(':');
@@ -191,7 +198,167 @@ function getPointTimestampMs(pt) {
     return pt.createdTimestamp || Date.now();
 }
 
-/* --- 2. CENTRALE BEREKENING & PUBLICATIE NAAR FIREBASE --- */
+/* --- 2. RODE STATUS TRACKING & SLIMME SNELHEIDSBEREKENING --- */
+function updateRedStatusTracking(areasArray) {
+    if (!Array.isArray(areasArray)) return;
+    var now = Date.now();
+    var changed = false;
+
+    targetAreas.forEach(function(areaName) {
+        var areaObj = areasArray.find(function(a) {
+            return (a.name || a.title || '').toLowerCase().includes(areaName.toLowerCase());
+        });
+        if (!areaObj) return;
+
+        var raw = areaObj.status || areaObj.state || areaObj.status_text || areaObj.status_id || '';
+        var cat = getNormalizedStatusCategory(raw);
+
+        if (!areaRedHistory[areaName]) {
+            areaRedHistory[areaName] = { isRed: false, redStartMs: null, periods: [] };
+        }
+        var hist = areaRedHistory[areaName];
+
+        if (cat.key === 'rood') {
+            if (!hist.isRed) {
+                hist.isRed = true;
+                hist.redStartMs = now;
+                changed = true;
+            }
+        } else {
+            if (hist.isRed) {
+                var startMs = hist.redStartMs || now;
+                if (!hist.periods) hist.periods = [];
+                hist.periods.push({ startMs: startMs, endMs: now });
+                // Bewaar laatste 30 rode periodes per deelgebied
+                if (hist.periods.length > 30) hist.periods.shift();
+                hist.isRed = false;
+                hist.redStartMs = null;
+                changed = true;
+            }
+        }
+    });
+
+    if (changed && isMasterAdmin) {
+        db.ref('areaRedHistory').set(areaRedHistory);
+    }
+}
+
+/* Controleert of er tussen t1Ms en t2Ms een status 'rood' is geweest van langer dan X minuten */
+function hadLongRedBetween(areaName, t1Ms, t2Ms, pointB) {
+    if (!speedSettings.ignoreRedStatus) return false;
+    var thresholdMs = (Number(speedSettings.redThresholdMinutes) || 10) * 60 * 1000;
+
+    // 1. Check of op het punt zelf al was vastgelegd dat hij na >X min rood kwam
+    if (pointB && pointB.redDurationBeforeMs && pointB.redDurationBeforeMs >= thresholdMs) {
+        return true;
+    }
+
+    // 2. Check de opgeslagen rode periodes van dit deelgebied
+    var hist = areaRedHistory[areaName];
+    if (!hist) return false;
+
+    var periods = (hist.periods || []).slice();
+    if (hist.isRed && hist.redStartMs) {
+        periods.push({ startMs: hist.redStartMs, endMs: Date.now() });
+    }
+
+    for (var i = 0; i < periods.length; i++) {
+        var p = periods[i];
+        var duration = p.endMs - p.startMs;
+        // Als de rode periode langer duurde dan X min én plaatsvond tussen punt A en punt B
+        if (duration >= thresholdMs && p.endMs > t1Ms && p.startMs <= t2Ms) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Berekent de geldige snelheidssegmenten uit een lijst van punten */
+function getValidSpeedSegments(pts, areaName) {
+    var segments = [];
+    for (var i = 0; i < pts.length - 1; i++) {
+        var pA = pts[i];
+        var pB = pts[i + 1];
+        var t1 = getPointTimestampMs(pA);
+        var t2 = getPointTimestampMs(pB);
+
+        if (t2 <= t1) continue;
+
+        // Negeer dit segment als het deelgebied tussendoor >X min op rood heeft gestaan (auto-vervoer)
+        if (hadLongRedBetween(areaName, t1, t2, pB)) {
+            continue;
+        }
+
+        var distKm = getDistanceKm(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]);
+        var hours = (t2 - t1) / 3600000;
+        if (hours > 0) {
+            var kmh = distKm / hours;
+            segments.push(kmh);
+        }
+    }
+    return segments;
+}
+
+/* Berekent het gewogen gemiddelde waarbij het laatste segment altijd voor 50% meetelt */
+function computeWeightedSpeedFromSegments(segments) {
+    if (!segments || segments.length === 0) return null;
+    if (segments.length === 1) {
+        return segments[0];
+    }
+    var lastSegSpeed = segments[segments.length - 1];
+    var prevSegments = segments.slice(0, segments.length - 1);
+    var sumPrev = prevSegments.reduce(function(acc, val) { return acc + val; }, 0);
+    var avgPrev = sumPrev / prevSegments.length;
+
+    // Laatste 2 punten (laatste segment) tellen voor 50% mee, eerdere segmenten samen voor 50%
+    return (0.50 * lastSegSpeed) + (0.50 * avgPrev);
+}
+
+/* Hoofdfunctie voor loopsnelheid van een deelgebied */
+function calculateAreaWalkingSpeed(areaPoints, areaName) {
+    var defaultKmh = Number(speedSettings.defaultSpeedKmh) || 6.5;
+
+    // Stap 1: Filter alleen de 'Hunt' punten
+    var huntPoints = areaPoints.filter(function(p) {
+        return (p.pointType || p.baseName) === "Hunt";
+    });
+
+    var huntSegments = getValidSpeedSegments(huntPoints, areaName);
+    if (huntSegments.length > 0) {
+        var rawHuntSpeed = computeWeightedSpeedFromSegments(huntSegments);
+        var clampedHunt = Math.min(12.0, Math.max(0.5, rawHuntSpeed));
+        var displayHunt = Math.round(rawHuntSpeed * 10) / 10;
+        return {
+            speedKmh: clampedHunt,
+            speedText: `~${displayHunt} km/u (Hunt)`
+        };
+    }
+
+    // Stap 2: Fallback naar 'Hunt' + 'Hint' punten als er geen/onvoldoende geldige Hunt-segmenten zijn
+    var huntAndHintPoints = areaPoints.filter(function(p) {
+        var t = p.pointType || p.baseName || "Hint";
+        return t === "Hunt" || t === "Hint";
+    });
+
+    var combinedSegments = getValidSpeedSegments(huntAndHintPoints, areaName);
+    if (combinedSegments.length > 0) {
+        var rawCombinedSpeed = computeWeightedSpeedFromSegments(combinedSegments);
+        var clampedCombined = Math.min(12.0, Math.max(0.5, rawCombinedSpeed));
+        var displayCombined = Math.round(rawCombinedSpeed * 10) / 10;
+        return {
+            speedKmh: clampedCombined,
+            speedText: `~${displayCombined} km/u (incl. Hint)`
+        };
+    }
+
+    // Stap 3: Echt helemaal geen bruikbare Hunt of Hint segmenten -> Standaard 6,5 km/u
+    return {
+        speedKmh: defaultKmh,
+        speedText: `~${defaultKmh} km/u (Standaard)`
+    };
+}
+
+/* --- 3. CENTRALE BEREKENING & PUBLICATIE NAAR FIREBASE --- */
 window.calculateAndPublishMapState = function(forceManual = false) {
     if (!isAdmin) return;
     if (!isMasterAdmin && !forceManual) return;
@@ -203,45 +370,24 @@ window.calculateAndPublishMapState = function(forceManual = false) {
         var points = rawRdPointsByArea[area].slice();
         if (points.length === 0) continue;
 
-        // Sorteer chronologisch op exacte datum + tijd (werkt feilloos van 23:00 naar 00:00 de volgende dag)
         points.sort(function(a, b) {
             return getPointTimestampMs(a) - getPointTimestampMs(b);
         });
         var lastPoint = points[points.length - 1];
 
-        var calculatedSpeedKmh = null;
-        var speedText = "";
+        // Bereken de loopsnelheid volgens de nieuwe Hunt/Hint/Rood-regels
+        var speedResult = calculateAreaWalkingSpeed(points, area);
+        var calculatedSpeedKmh = speedResult.speedKmh;
+        var speedText = speedResult.speedText;
+
         var bearingDeg = null;
-        var samplePoints = points.slice(-3);
-
-        if (samplePoints.length >= 2) {
-            var pFirst = samplePoints[0];
-            var pLast = samplePoints[samplePoints.length - 1];
-            var t1Ms = getPointTimestampMs(pFirst);
-            var t2Ms = getPointTimestampMs(pLast);
-
-            if (t1Ms !== null && t2Ms !== null && t2Ms > t1Ms) {
-                var totalDistKm = 0;
-                for (var i = 0; i < samplePoints.length - 1; i++) {
-                    totalDistKm += getDistanceKm(samplePoints[i].latlng[0], samplePoints[i].latlng[1],
-                                                 samplePoints[i+1].latlng[0], samplePoints[i+1].latlng[1]);
-                }
-                var timeDiffHours = (t2Ms - t1Ms) / 3600000;
-                if (timeDiffHours > 0) {
-                    var rawKmh = (totalDistKm / timeDiffHours);
-                    calculatedSpeedKmh = Math.min(7.0, Math.max(0.5, rawKmh));
-                    var displayKmh = Math.round(rawKmh * 10) / 10;
-                    speedText = `~${displayKmh} km/u`;
-                }
-            }
-
+        if (points.length >= 2) {
             var sumSin = 0, sumCos = 0, totalWeight = 0;
-            if (points.length >= 2) {
-                var pA = points[points.length - 2];
-                var pB = points[points.length - 1];
-                var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
-                sumSin += 0.40 * Math.sin(b1); sumCos += 0.40 * Math.cos(b1); totalWeight += 0.40;
-            }
+            var pA = points[points.length - 2];
+            var pB = points[points.length - 1];
+            var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
+            sumSin += 0.40 * Math.sin(b1); sumCos += 0.40 * Math.cos(b1); totalWeight += 0.40;
+
             if (points.length >= 3) {
                 var pA2 = points[points.length - 3];
                 var pB2 = points[points.length - 2];
@@ -294,7 +440,7 @@ window.calculateAndPublishMapState = function(forceManual = false) {
                 pointTimestamp: ptMs,
                 area: pt.area,
                 opacity: opacity,
-                extraInfo: (isLatest && speedText) ? speedText : "",
+                extraInfo: isLatest ? speedText : "",
                 isLatest: isLatest
             };
         });
@@ -305,8 +451,7 @@ window.calculateAndPublishMapState = function(forceManual = false) {
 
         var currentRadiusMeters = 1;
         if (!isFuture) {
-            var effectiveSpeedKmh = calculatedSpeedKmh !== null ? calculatedSpeedKmh : 5.5;
-            effectiveSpeedKmh = Math.min(7.0, effectiveSpeedKmh);
+            var effectiveSpeedKmh = calculatedSpeedKmh !== null ? calculatedSpeedKmh : 6.5;
             var metersPerSecond = (effectiveSpeedKmh * 1000) / 3600;
             currentRadiusMeters = Math.max(1, Math.round(1 + (secondsPassed * metersPerSecond)));
         }
@@ -342,14 +487,31 @@ window.calculateAndPublishMapState = function(forceManual = false) {
         };
     }
 
+    // Verwerk losse 'Anders'-punten (zonder deelgebied en zonder tijdstip)
+    var processedOtherPoints = rawOtherPoints.map(function(pt) {
+        return {
+            key: pt.key,
+            latlng: pt.latlng,
+            name: pt.fullName || pt.baseName || "Anders",
+            pointType: "Anders",
+            color: pt.color || "#34495e",
+            time: "",
+            area: "",
+            opacity: 1.0,
+            extraInfo: "",
+            isLatest: false
+        };
+    });
+
     db.ref('computedMapState').set({
         updatedAt: Date.now(),
         masterId: adminSessionId,
-        areas: computedAreas
+        areas: computedAreas,
+        otherPoints: processedOtherPoints
     });
 };
 
-/* --- 3. RD-PUNT MODAL (DROPDOWN MET KLEUREN, DATUM/TIJD-PICKER & ADRES-INVOER) --- */
+/* --- 4. RD-PUNT MODAL & SNELHEIDS-INSTELLINGEN (X WAARDE & RODE STAAT SCHUIFJE) --- */
 function injectRdModalUI() {
     if (document.getElementById('rd-modal-overlay')) return;
 
@@ -358,10 +520,11 @@ function injectRdModalUI() {
         #rd-modal-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(26, 37, 47, 0.85); backdrop-filter: blur(3px);
-            z-index: 3000; justify-content: center; align-items: center;
+            z-index: 3000; justify-content: center; align-items: center; padding: 10px;
         }
         #rd-modal-box {
-            background: #2c3e50; color: #ecf0f1; width: 92%; max-width: 370px;
+            background: #2c3e50; color: #ecf0f1; width: 100%; max-width: 390px;
+            max-height: 92vh; overflow-y: auto;
             border-radius: 8px; padding: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
             border: 1px solid #4a6278; display: flex; flex-direction: column; gap: 11px;
             font-size: 0.85rem;
@@ -386,11 +549,41 @@ function injectRdModalUI() {
         #rd-type-select option[value="Hint"] { background-color: #5dade2; color: #ffffff; font-weight: bold; }
         #rd-type-select option[value="Anders"] { background-color: #34495e; color: #ecf0f1; font-weight: bold; }
         #rd-modal-hint-note { font-size: 0.73rem; color: #85c1e9; display: none; }
+        #rd-modal-anders-note { font-size: 0.73rem; color: #f39c12; display: none; }
         #rd-modal-error {
             display: none; background: rgba(231, 76, 60, 0.2); border: 1px solid #e74c3c;
             color: #ff7675; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600;
         }
-        .rd-modal-actions { display: flex; gap: 8px; margin-top: 6px; }
+        /* Snelheids-instellingen sectie met schuifje (toggle switch) en X-waarde */
+        .rd-settings-box {
+            background: rgba(26, 37, 47, 0.55); border: 1px solid #4a6278;
+            border-radius: 6px; padding: 10px; margin-top: 2px;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        .rd-settings-title { font-weight: bold; font-size: 0.78rem; color: #f1c40f; }
+        .rd-toggle-row {
+            display: flex; justify-content: space-between; align-items: center; gap: 10px;
+        }
+        .rd-toggle-label { font-size: 0.76rem; color: #ecf0f1; line-height: 1.25; }
+        /* Toggle Switch CSS */
+        .rd-switch { position: relative; display: inline-block; width: 42px; height: 22px; flex-shrink: 0; }
+        .rd-switch input { opacity: 0; width: 0; height: 0; }
+        .rd-slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #7f8c8d; transition: .25s; border-radius: 22px;
+        }
+        .rd-slider:before {
+            position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
+            background-color: white; transition: .25s; border-radius: 50%;
+        }
+        .rd-switch input:checked + .rd-slider { background-color: #2ecc71; }
+        .rd-switch input:checked + .rd-slider:before { transform: translateX(20px); }
+        .rd-x-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .rd-x-input {
+            width: 70px; padding: 5px 8px; border-radius: 4px; border: 1px solid #4a6278;
+            background: #34495e; color: #ffffff; font-weight: bold; text-align: center;
+        }
+        .rd-modal-actions { display: flex; gap: 8px; margin-top: 4px; }
         .rd-btn {
             flex: 1; padding: 9px; border: none; border-radius: 5px;
             font-weight: bold; font-size: 0.85rem; cursor: pointer; color: white;
@@ -414,6 +607,7 @@ function injectRdModalUI() {
                     <option value="Hunt">Hunt</option>
                     <option value="Anders">Anders</option>
                 </select>
+                <span id="rd-modal-anders-note">ℹ️ Bij 'Anders' wordt geen deelgebied en geen tijdstip opgeslagen.</span>
             </div>
 
             <div class="rd-field-group">
@@ -421,7 +615,7 @@ function injectRdModalUI() {
                 <input type="text" id="rd-loc-input" class="rd-input" placeholder="Bijv: 1645 4312 of Ernest Hemingwaystraat 73, Arnhem">
             </div>
 
-            <div class="rd-field-group">
+            <div class="rd-field-group" id="rd-area-group">
                 <label for="rd-area-select">Deelgebied:</label>
                 <select id="rd-area-select" class="rd-select">
                     <option value="">-- Kies deelgebied --</option>
@@ -435,10 +629,26 @@ function injectRdModalUI() {
                 </select>
             </div>
 
-            <div class="rd-field-group">
+            <div class="rd-field-group" id="rd-datetime-group">
                 <label for="rd-datetime-input">Datum & Tijdstip:</label>
                 <input type="datetime-local" id="rd-datetime-input" class="rd-input" required>
                 <span id="rd-modal-hint-note">ℹ️ Voor een 'Hint' zijn alleen hele uren (:00) toegestaan.</span>
+            </div>
+
+            <!-- Menu voor waarde X en schuifje voor rode status bij snelheidsberekening -->
+            <div class="rd-settings-box">
+                <div class="rd-settings-title">⚙️ Loopsnelheid & Rode Status Filter</div>
+                <div class="rd-toggle-row">
+                    <span class="rd-toggle-label">Negeer Hunt-punt na rode status (&gt; X min) voor snelheid:</span>
+                    <label class="rd-switch">
+                        <input type="checkbox" id="rd-red-toggle" checked>
+                        <span class="rd-slider"></span>
+                    </label>
+                </div>
+                <div class="rd-x-row" id="rd-x-Wrapper">
+                    <span class="rd-toggle-label">Waarde voor <b>X</b> (minuten op rood):</span>
+                    <input type="number" id="rd-x-minutes" class="rd-x-input" min="1" max="180" value="10">
+                </div>
             </div>
 
             <div id="rd-modal-error"></div>
@@ -452,30 +662,64 @@ function injectRdModalUI() {
     document.body.appendChild(overlay);
 
     var typeSelect = document.getElementById('rd-type-select');
+    var areaGroup = document.getElementById('rd-area-group');
+    var areaSelect = document.getElementById('rd-area-select');
+    var dtGroup = document.getElementById('rd-datetime-group');
     var dtInput = document.getElementById('rd-datetime-input');
     var hintNote = document.getElementById('rd-modal-hint-note');
+    var andersNote = document.getElementById('rd-modal-anders-note');
+    var redToggle = document.getElementById('rd-red-toggle');
+    var xMinutesInput = document.getElementById('rd-x-minutes');
 
     function updateTypeDropdownStyle() {
         var val = typeSelect.value;
         typeSelect.className = 'rd-select ' + (val === 'Hunt' ? 'type-hunt' : (val === 'Hint' ? 'type-hint' : 'type-anders'));
 
-        if (val === 'Hint') {
-            hintNote.style.display = 'block';
-            // Zet minuten direct op :00 als Hint geselecteerd wordt
-            if (dtInput.value && dtInput.value.includes('T')) {
-                var parts = dtInput.value.split(':');
-                if (parts.length >= 2 && parts[1] !== '00') {
-                    dtInput.value = parts[0] + ':00';
-                }
-            }
-        } else {
+        if (val === 'Anders') {
+            // Bij 'Anders' kan en hoeft er GEEN deelgebied en GEEN tijdstip ingevoerd te worden
+            areaGroup.style.display = 'none';
+            areaSelect.value = '';
+            areaSelect.disabled = true;
+
+            dtGroup.style.display = 'none';
+            dtInput.value = '';
+            dtInput.disabled = true;
+
             hintNote.style.display = 'none';
+            andersNote.style.display = 'block';
+        } else {
+            areaGroup.style.display = 'flex';
+            areaSelect.disabled = false;
+
+            dtGroup.style.display = 'flex';
+            dtInput.disabled = false;
+            andersNote.style.display = 'none';
+
+            // Zorg dat er altijd direct de huidige datum en tijd staan als het veld leeg was
+            if (!dtInput.value) {
+                var now = new Date();
+                if (val === 'Hint') {
+                    now.setMinutes(0, 0, 0);
+                }
+                dtInput.value = toLocalIsoString(now);
+            }
+
+            if (val === 'Hint') {
+                hintNote.style.display = 'block';
+                if (dtInput.value && dtInput.value.includes('T')) {
+                    var parts = dtInput.value.split(':');
+                    if (parts.length >= 2 && parts[1] !== '00') {
+                        dtInput.value = parts[0] + ':00';
+                    }
+                }
+            } else {
+                hintNote.style.display = 'none';
+            }
         }
     }
 
     typeSelect.addEventListener('change', updateTypeDropdownStyle);
 
-    // Zorg dat bij 'Hint' ook bij het aanpassen van de tijd de minuten op :00 springen
     dtInput.addEventListener('change', function() {
         if (typeSelect.value === 'Hint' && dtInput.value && dtInput.value.includes(':')) {
             var parts = dtInput.value.split(':');
@@ -484,6 +728,24 @@ function injectRdModalUI() {
             }
         }
     });
+
+    // Sla wijzigingen aan het schuifje of waarde X direct op naar Firebase en herbereken de snelheid
+    function syncSpeedSettingsFromUI() {
+        var newIgnore = !!redToggle.checked;
+        var newX = Math.max(1, parseInt(xMinutesInput.value, 10) || 10);
+        speedSettings.ignoreRedStatus = newIgnore;
+        speedSettings.redThresholdMinutes = newX;
+
+        db.ref('adminSettings').update({
+            ignoreRedStatus: newIgnore,
+            redThresholdMinutes: newX
+        }).then(function() {
+            window.calculateAndPublishMapState(true);
+        });
+    }
+
+    redToggle.addEventListener('change', syncSpeedSettingsFromUI);
+    xMinutesInput.addEventListener('change', syncSpeedSettingsFromUI);
 
     document.getElementById('rd-btn-cancel').addEventListener('click', closeRdModal);
     document.getElementById('rd-btn-save').addEventListener('click', saveRdModalData);
@@ -498,8 +760,14 @@ function openRdModal(mode, existingKey, existingData) {
     var locInput = document.getElementById('rd-loc-input');
     var areaSelect = document.getElementById('rd-area-select');
     var dtInput = document.getElementById('rd-datetime-input');
+    var redToggle = document.getElementById('rd-red-toggle');
+    var xMinutesInput = document.getElementById('rd-x-minutes');
     var errBox = document.getElementById('rd-modal-error');
     errBox.style.display = 'none';
+
+    // Zet schuifje en waarde X op de actuele Firebase-instelling
+    redToggle.checked = !!speedSettings.ignoreRedStatus;
+    xMinutesInput.value = Number(speedSettings.redThresholdMinutes) || 10;
 
     if (mode === 'edit' && existingData) {
         titleEl.innerText = "✏️ RD-Punt Bewerken";
@@ -515,27 +783,31 @@ function openRdModal(mode, existingKey, existingData) {
             locInput.value = "";
         }
 
-        areaSelect.value = existingData.area || "";
-
-        if (existingData.datetimeIso) {
-            dtInput.value = existingData.datetimeIso;
+        if (typeSelect.value === "Anders") {
+            areaSelect.value = "";
+            dtInput.value = "";
         } else {
-            var fallbackDate = existingData.pointTimestamp ? new Date(existingData.pointTimestamp) : new Date(existingData.createdTimestamp || Date.now());
-            if (existingData.time && existingData.time.includes(':')) {
-                var tParts = existingData.time.split(':');
-                fallbackDate.setHours(parseInt(tParts[0], 10) || 0, parseInt(tParts[1], 10) || 0, 0, 0);
+            areaSelect.value = existingData.area || "";
+            if (existingData.datetimeIso) {
+                dtInput.value = existingData.datetimeIso;
+            } else {
+                var fallbackDate = existingData.pointTimestamp ? new Date(existingData.pointTimestamp) : new Date(existingData.createdTimestamp || Date.now());
+                if (existingData.time && existingData.time.includes(':')) {
+                    var tParts = existingData.time.split(':');
+                    fallbackDate.setHours(parseInt(tParts[0], 10) || 0, parseInt(tParts[1], 10) || 0, 0, 0);
+                }
+                dtInput.value = toLocalIsoString(fallbackDate);
             }
-            dtInput.value = toLocalIsoString(fallbackDate);
         }
     } else {
         titleEl.innerText = "📍 Nieuw RD-Punt Toevoegen";
-        typeSelect.value = "Hint";
+        // Standaard openen met huidige datum & tijd direct ingevuld!
+        // We zetten hem standaard op 'Hunt' zodat de exacte huidige minuut direct zichtbaar is (bij wissel naar 'Hint' rondt hij af op :00)
+        typeSelect.value = "Hunt";
         locInput.value = "";
         areaSelect.value = "";
 
         var now = new Date();
-        // Omdat standaard 'Hint' geselecteerd staat, zetten we de standaardminuten netjes op :00
-        now.setMinutes(0, 0, 0);
         dtInput.value = toLocalIsoString(now);
     }
 
@@ -564,8 +836,6 @@ async function saveRdModalData() {
 
     var chosenType = typeSelect.value; // "Hint", "Hunt" of "Anders"
     var rawLoc = locInput.value.trim();
-    var chosenArea = parseTargetArea(areaSelect.value);
-    var dtVal = dtInput.value;
 
     if (!rawLoc) {
         errBox.innerText = "Voer een RD-coördinaat, GPS-coördinaat of adres in.";
@@ -573,24 +843,44 @@ async function saveRdModalData() {
         return;
     }
 
-    if (!dtVal || !dtVal.includes('T')) {
-        errBox.innerText = "Kies een geldige datum en tijd via de datum/tijd-picker.";
-        errBox.style.display = 'block';
-        return;
-    }
+    var chosenArea = "";
+    var timeFormatted = "";
+    var dtVal = null;
+    var pointTimestampMs = null;
 
-    var dateObj = new Date(dtVal);
-    if (isNaN(dateObj.getTime())) {
-        errBox.innerText = "Ongeldige datum of tijd gekozen.";
-        errBox.style.display = 'block';
-        return;
-    }
+    // Alleen voor 'Hint' en 'Hunt' zijn Deelgebied en Datum/Tijd van toepassing
+    if (chosenType !== "Anders") {
+        chosenArea = parseTargetArea(areaSelect.value);
+        if (!chosenArea) {
+            errBox.innerText = "Kies een deelgebied voor dit " + chosenType + "-punt.";
+            errBox.style.display = 'block';
+            return;
+        }
 
-    // Controleer of bij 'Hint' een heel uur is ingevoerd
-    if (chosenType === "Hint" && dateObj.getMinutes() !== 0) {
-        errBox.innerText = "Voor een 'Hint' moeten altijd hele uren (bijv. 14:00) worden ingevoerd!";
-        errBox.style.display = 'block';
-        return;
+        dtVal = dtInput.value;
+        if (!dtVal || !dtVal.includes('T')) {
+            errBox.innerText = "Kies een geldige datum en tijd via de datum/tijd-picker.";
+            errBox.style.display = 'block';
+            return;
+        }
+
+        var dateObj = new Date(dtVal);
+        if (isNaN(dateObj.getTime())) {
+            errBox.innerText = "Ongeldige datum of tijd gekozen.";
+            errBox.style.display = 'block';
+            return;
+        }
+
+        if (chosenType === "Hint" && dateObj.getMinutes() !== 0) {
+            errBox.innerText = "Voor een 'Hint' moeten altijd hele uren (bijv. 14:00) worden ingevoerd!";
+            errBox.style.display = 'block';
+            return;
+        }
+
+        var hh = String(dateObj.getHours()).padStart(2, '0');
+        var mm = String(dateObj.getMinutes()).padStart(2, '0');
+        timeFormatted = `${hh}:${mm}`;
+        pointTimestampMs = dateObj.getTime();
     }
 
     saveBtn.disabled = true;
@@ -607,13 +897,29 @@ async function saveRdModalData() {
         return;
     }
 
-    var hh = String(dateObj.getHours()).padStart(2, '0');
-    var mm = String(dateObj.getMinutes()).padStart(2, '0');
-    var timeFormatted = `${hh}:${mm}`;
-    var pointTimestampMs = dateObj.getTime();
+    var markerColor = "#34495e";
+    var areaSuffix = "";
+    if (chosenType !== "Anders" && chosenArea && areaColors[chosenArea]) {
+        markerColor = areaColors[chosenArea];
+        areaSuffix = " [" + chosenArea + "]";
+    }
 
-    var markerColor = (chosenArea && areaColors[chosenArea]) ? areaColors[chosenArea] : "#000000";
-    var areaSuffix = chosenArea ? " [" + chosenArea + "]" : "";
+    // Check of het deelgebied vlak voor dit punt op rood stond (zodat het punt dit zelf ook onthoudt in Firebase)
+    var redDurationBeforeMs = 0;
+    if (chosenArea && areaRedHistory[chosenArea]) {
+        var hist = areaRedHistory[chosenArea];
+        if (hist.isRed && hist.redStartMs) {
+            redDurationBeforeMs = Math.max(0, (pointTimestampMs || Date.now()) - hist.redStartMs);
+        } else if (hist.periods && hist.periods.length > 0) {
+            var lastPeriod = hist.periods[hist.periods.length - 1];
+            // Als dit het eerste punt is na de laatst geregistreerde rode periode
+            var existingPts = rawRdPointsByArea[chosenArea] || [];
+            var lastKnownPtMs = existingPts.length > 0 ? getPointTimestampMs(existingPts[existingPts.length - 1]) : 0;
+            if (lastPeriod.endMs > lastKnownPtMs && (pointTimestampMs || Date.now()) >= lastPeriod.startMs) {
+                redDurationBeforeMs = Math.max(0, lastPeriod.endMs - lastPeriod.startMs);
+            }
+        }
+    }
 
     var payload = {
         latlng: latlng,
@@ -621,11 +927,12 @@ async function saveRdModalData() {
         pointType: chosenType,
         baseName: chosenType,
         fullName: chosenType + areaSuffix,
-        area: chosenArea,
+        area: chosenType === "Anders" ? "" : chosenArea,
         color: markerColor,
-        time: timeFormatted,
-        datetimeIso: dtVal,
-        pointTimestamp: pointTimestampMs
+        time: chosenType === "Anders" ? "" : timeFormatted,
+        datetimeIso: chosenType === "Anders" ? null : dtVal,
+        pointTimestamp: chosenType === "Anders" ? null : pointTimestampMs,
+        redDurationBeforeMs: redDurationBeforeMs
     };
 
     if (currentEditingRdKey) {
@@ -646,7 +953,7 @@ async function saveRdModalData() {
     }
 }
 
-/* --- 4. ADMIN BEHEERACTIES (RD-PUNTEN, HUISJES & GEBRUIKERS) --- */
+/* --- 5. ADMIN BEHEERACTIES (RD-PUNTEN, HUISJES & GEBRUIKERS) --- */
 window.toggleHouseVisited = function(houseName) {
     if (!isAdmin) return;
     var safeKey = houseName.replace(/[.#$[\]]/g, '_');
@@ -726,7 +1033,7 @@ window.removeInactiveUser = function(userId, userName) {
     }
 };
 
-/* --- 5. JOTIHUNT API SYNCHRONISATIE (UITSLUITEND DOOR MASTER ADMIN) --- */
+/* --- 6. JOTIHUNT API SYNCHRONISATIE (UITSLUITEND DOOR MASTER ADMIN) --- */
 async function fetchJotihuntEndpoint(endpoint) {
     var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
     var routes = [
@@ -771,6 +1078,7 @@ window.syncJotihuntToFirebase = async function(forceManual = false) {
         var areasData = await fetchJotihuntEndpoint("areas");
         if (Array.isArray(areasData) && areasData.length > 0) {
             updatePayload.areas = areasData;
+            updateRedStatusTracking(areasData);
             anySuccess = true;
         }
     } catch (areaErr) {}
@@ -807,19 +1115,15 @@ window.fetchLatestArticleManual = function() {
     });
 };
 
-/* --- 6. INITIALISATIE VAN DE ADMIN ENGINE --- */
+/* --- 7. INITIALISATIE VAN DE ADMIN ENGINE --- */
 window.initAdminEngine = function() {
-    // 1. Start Master-Admin verkiezing
     initMasterElection();
 
-    // 2. Stel Proj4js RD-projectie in
     proj4.defs("EPSG:28992", "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.387638888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.417,50.3319,465.524,-0.398957,0.343988,-1.8774,4.0725 +units=m +no_defs");
     proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 
-    // 3. Injecteer de nieuwe RD-punt Modal UI
     injectRdModalUI();
 
-    // 4. Activeer Leaflet Tekentools
     var drawControl = new L.Control.Draw({
         edit: { featureGroup: drawnItems, remove: true },
         draw: {
@@ -829,27 +1133,67 @@ window.initAdminEngine = function() {
     });
     map.addControl(drawControl);
 
-    // 5. Herteken de clubgebouwen zodat de Admin-knoppen ('Markeer als bezocht') verschijnen
     renderFixedHouses();
 
-    // 6. Luister naar ruwe RD-punten en herbereken wanneer wij de Master zijn
+    // Luister naar de snelheids-instellingen (waarde X en schuifje voor rode status)
+    db.ref('adminSettings').on('value', function(snapshot) {
+        var val = snapshot.val();
+        if (val) {
+            if (typeof val.ignoreRedStatus === 'boolean') speedSettings.ignoreRedStatus = val.ignoreRedStatus;
+            if (val.redThresholdMinutes) speedSettings.redThresholdMinutes = Number(val.redThresholdMinutes);
+        }
+        window.calculateAndPublishMapState(false);
+    });
+
+    // Luister naar de geschiedenis van rode statussen per deelgebied
+    db.ref('areaRedHistory').on('value', function(snapshot) {
+        areaRedHistory = snapshot.val() || {};
+    });
+
+    // Volg ook vossenstatus-updates uit jotihuntSync om rode periodes bij te werken
+    db.ref('jotihuntSync/areas').on('value', function(snapshot) {
+        var areas = snapshot.val();
+        if (areas) {
+            var arr = Array.isArray(areas) ? areas : Object.values(areas);
+            updateRedStatusTracking(arr);
+        }
+    });
+
+    // Luister naar ruwe RD-punten en verdeel in deelgebieden óf 'Anders'-punten
     db.ref('rdPoints').on('value', function(snapshot) {
         for (var a in rawRdPointsByArea) rawRdPointsByArea[a] = [];
+        rawOtherPoints = [];
+
         var data = snapshot.val();
         if (data) {
             Object.keys(data).forEach(function(key) {
                 var p = data[key];
                 if (p && p.latlng && Array.isArray(p.latlng) && p.latlng.length === 2) {
-                    if (p.area && rawRdPointsByArea[p.area]) {
+                    var pType = p.pointType || p.baseName || "Hint";
+                    if (pType === "Anders" || !p.area) {
+                        rawOtherPoints.push({
+                            key: key,
+                            latlng: p.latlng,
+                            rawLocationInput: p.rawLocationInput || "",
+                            pointType: "Anders",
+                            baseName: "Anders",
+                            fullName: "Anders",
+                            area: "",
+                            time: "",
+                            color: p.color || "#34495e",
+                            createdTimestamp: p.createdTimestamp || p.createdAt || Date.now()
+                        });
+                    } else if (p.area && rawRdPointsByArea[p.area]) {
                         rawRdPointsByArea[p.area].push({
                             key: key,
                             latlng: p.latlng,
                             rawLocationInput: p.rawLocationInput || "",
-                            pointType: p.pointType || p.baseName || "Hint",
+                            pointType: pType,
                             time: p.time || "12:00",
                             datetimeIso: p.datetimeIso || null,
                             pointTimestamp: p.pointTimestamp || null,
-                            baseName: p.baseName || "Hint",
+                            redDurationBeforeMs: p.redDurationBeforeMs || 0,
+                            baseName: p.baseName || pType,
                             fullName: p.fullName || p.baseName,
                             area: p.area,
                             color: p.color || areaColors[p.area] || "#000000",
@@ -862,12 +1206,10 @@ window.initAdminEngine = function() {
         window.calculateAndPublishMapState(false);
     });
 
-    // 7. Start de 30-seconden Admin-rekenklok (wordt alleen uitgevoerd door de actieve Master Admin)
     setInterval(function() {
         window.calculateAndPublishMapState(false);
     }, 30000);
 
-    // 8. Start de Jotihunt API-synchronisatie (elke 45 seconden door de Master Admin)
     setTimeout(function() {
         window.syncJotihuntToFirebase(false);
     }, 1500);

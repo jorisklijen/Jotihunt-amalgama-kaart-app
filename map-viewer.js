@@ -224,14 +224,15 @@ function createWalkerMarker(pt) {
         iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15]
     });
 
-    var labelText = pt.name + " (" + pt.time + ")" + (pt.extraInfo ? " • " + pt.extraInfo : "");
+    var timeLabelPart = pt.time ? " (" + pt.time + ")" : "";
+    var labelText = pt.name + timeLabelPart + (pt.extraInfo ? " • " + pt.extraInfo : "");
     var marker = L.marker(pt.latlng, { icon: customIcon });
     marker.bindTooltip(labelText, { permanent: false, direction: 'right', className: 'marker-label' });
 
-    var popupContent = `<div style="font-size:12px; min-width:180px;">
+    var popupContent = `<div style="font-size:12px; min-width:190px;">
         <b>${pt.name}</b><br>
-        <span>Tijd: <b>${pt.time}</b></span><br>
-        ${pt.extraInfo ? `<span>Snelheid: <b>${pt.extraInfo}</b></span><br>` : ''}
+        ${pt.time ? `<span>Tijd: <b>${pt.time}</b></span><br>` : ''}
+        ${pt.extraInfo ? `<span>Loopsnelheid: <b style="color:#27ae60;">${pt.extraInfo}</b></span><br>` : ''}
         <button onclick="window.navigateToAreaPoint(${pt.latlng[0]}, ${pt.latlng[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
             📍 Navigeer naar dit punt
         </button>
@@ -259,6 +260,15 @@ function renderComputedMapState(state) {
     latestKnownAreaPoints = {};
 
     var areasData = (state && state.areas) ? state.areas : {};
+    var otherPoints = (state && state.otherPoints) ? state.otherPoints : [];
+
+    // Teken eerst eventuele losse 'Anders'-punten (zonder deelgebied/tijd)
+    if (Array.isArray(otherPoints)) {
+        otherPoints.forEach(function (pt) {
+            var marker = createWalkerMarker(pt);
+            rdPointsLayer.addLayer(marker);
+        });
+    }
 
     // Verwijder geofences van deelgebieden die gewist zijn
     Object.keys(activeGeofenceCircles).forEach(function (area) {
@@ -280,7 +290,7 @@ function renderComputedMapState(state) {
         var areaObj = areasData[area];
         if (!areaObj || !areaObj.points || areaObj.points.length === 0) return;
 
-        // 1. Teken voorberekende RD-punten
+        // 1. Teken voorberekende RD-punten van het deelgebied
         areaObj.points.forEach(function (pt) {
             var marker = createWalkerMarker(pt);
             rdPointsLayer.addLayer(marker);
