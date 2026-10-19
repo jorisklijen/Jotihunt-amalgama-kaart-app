@@ -1,10 +1,11 @@
 /* ==========================================================================
    4. ADMIN-ENGINE.JS - CENTRALE REKENMOTOR & BEHEER (ALLEEN VOOR ADMIN)
-   Inclusief Multi-Admin Master Lock: voorkomt dubbele timers en API-calls
-   wanneer meerdere Admins tegelijkertijd ingelogd zijn.
+   Inclusief Multi-Admin Master Lock, Adres-Geocoding (PDOK/OSM),
+   Datum/Tijd-picker (middernacht-proof) en Gekleurde Dropdown (Hint/Hunt/Anders).
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
+var currentEditingRdKey = null;
 
 /* --- 0. MULTI-ADMIN LEADER ELECTION (MASTER LOCK) --- */
 var adminSessionId = 'admin_' + Math.random().toString(36).substr(2, 9);
@@ -14,13 +15,11 @@ var currentMasterData = null;
 function initMasterElection() {
     var lockRef = db.ref('adminMasterLock');
 
-    // Luister wie er op dit moment de Master Admin is
     lockRef.on('value', function(snapshot) {
         currentMasterData = snapshot.val();
         evaluateMasterRole();
     });
 
-    // Controleer elke 12 seconden of wij de Master moeten blijven of worden
     setInterval(evaluateMasterRole, 12000);
 }
 
@@ -30,13 +29,11 @@ function evaluateMasterRole() {
     var lockRef = db.ref('adminMasterLock');
     var badge = document.getElementById('user-badge');
 
-    // Geen Master aanwezig, wij zijn het al, of de huidige Master is >35 sec offline/inactief
     if (!currentMasterData || currentMasterData.adminId === adminSessionId || (now - (currentMasterData.lastHeartbeat || 0)) > 35000) {
         lockRef.set({
             adminId: adminSessionId,
             lastHeartbeat: now
         });
-        // Geef het slot direct vrij zodra dit tabblad wordt gesloten
         lockRef.onDisconnect().remove();
         isMasterAdmin = true;
         if (badge) badge.innerText = "Beheerder (⚡ Master Engine)";
@@ -46,7 +43,7 @@ function evaluateMasterRole() {
     }
 }
 
-/* --- 1. WISKUNDE, RICHTINGSVECTOREN & RD-CONVERSIE --- */
+/* --- 1. WISKUNDE, RICHTINGSVECTOREN, RD-CONVERSIE & GEOCODING --- */
 function getBearing(lat1, lon1, lat2, lon2) {
     var y = Math.sin((lon2 - lon1) * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
     var x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
@@ -69,12 +66,6 @@ function getDestinationLatLng(lat, lng, distMeters, bearingDeg) {
     return [endLat * 180 / Math.PI, endLng * 180 / Math.PI];
 }
 
-function parseTimeToMinutes(timeStr) {
-    if (!timeStr || !timeStr.includes(':')) return null;
-    var p = timeStr.split(':');
-    return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
-}
-
 function parseTargetArea(input) {
     if (!input) return "";
     var cleanInput = input.trim().toLowerCase();
@@ -83,17 +74,28 @@ function parseTargetArea(input) {
     }) || "";
 }
 
+/* Ondersteunt RD met of zonder komma (1645, 4312 of 1645 4312) én GPS-coördinaten (51.9851, 5.8987) */
 function parseCoordInput(coordInput) {
-    var parts = coordInput.split(/[\s,;]+/);
-    if (parts.length < 2) return null;
+    if (!coordInput) return null;
+    var clean = coordInput.trim();
+
+    // Alleen parsen als coördinaat wanneer de invoer uitsluitend uit cijfers, spaties, komma's, punten of mintekens bestaat
+    if (!/^[\d\s.,;-]+$/.test(clean)) {
+        return null;
+    }
+
+    var parts = clean.split(/[\s,;]+/).filter(Boolean);
+    if (parts.length !== 2) return null;
 
     var val1 = parseFloat(parts[0].replace(',', '.'));
     var val2 = parseFloat(parts[1].replace(',', '.'));
     if (isNaN(val1) || isNaN(val2)) return null;
 
+    // Check of het GPS-coördinaten (WGS84) zijn
     if (Math.abs(val1) <= 90 && Math.abs(val2) <= 180) {
         return [val1, val2];
     } else {
+        // RD-coördinaten (bijv. 1645 4312 -> aanvullen tot 6 cijfers: 164500, 431200)
         var xStr = parts[0].replace(',', '.').split('.')[0];
         var yStr = parts[1].replace(',', '.').split('.')[0];
         while (xStr.length < 6) { xStr += "0"; }
@@ -110,21 +112,101 @@ function parseCoordInput(coordInput) {
     }
 }
 
+/* Zet RD, GPS óf een gekopieerd adres (bijv. "Ernest Hemingwaystraat 73, 6836 TK Arnhem") om naar [lat, lng] */
+async function resolveLocationInput(rawInput) {
+    if (!rawInput || !rawInput.trim()) return null;
+
+    // 1. Probeer eerst als RD-punt (met/zonder komma) of GPS-coördinaat
+    var directCoords = parseCoordInput(rawInput);
+    if (directCoords) return directCoords;
+
+    // 2. Zo niet: zoek het adres op via de officiële Nederlandse PDOK Locatieserver API
+    var query = rawInput.trim();
+    try {
+        var pdokUrl = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free?q=" + encodeURIComponent(query) + "&rows=1";
+        var res = await fetch(pdokUrl);
+        if (res.ok) {
+            var data = await res.json();
+            if (data && data.response && data.response.docs && data.response.docs.length > 0) {
+                var centroide = data.response.docs[0].centroide_ll; // Formaat: "POINT(5.8987 51.9851)"
+                if (centroide) {
+                    var match = centroide.match(/POINT\(([\d.-]+)\s+([\d.-]+)\)/);
+                    if (match) {
+                        var lng = parseFloat(match[1]);
+                        var lat = parseFloat(match[2]);
+                        if (!isNaN(lat) && !isNaN(lng)) return [lat, lng];
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("PDOK adres-lookup mislukt, probeer fallback...", e);
+    }
+
+    // 3. Fallback via OpenStreetMap Nominatim
+    try {
+        var nomUrl = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=nl&q=" + encodeURIComponent(query);
+        var nomRes = await fetch(nomUrl);
+        if (nomRes.ok) {
+            var nomData = await nomRes.json();
+            if (Array.isArray(nomData) && nomData.length > 0) {
+                var lat2 = parseFloat(nomData[0].lat);
+                var lng2 = parseFloat(nomData[0].lon);
+                if (!isNaN(lat2) && !isNaN(lng2)) return [lat2, lng2];
+            }
+        }
+    } catch (e2) {
+        console.warn("Nominatim adres-lookup mislukt:", e2);
+    }
+
+    return null;
+}
+
+/* Hulpfuncties voor Datum & Tijd (accuraat over middernacht 23:00 -> 00:00) */
+function toLocalIsoString(dateObj) {
+    var d = dateObj || new Date();
+    var yyyy = d.getFullYear();
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    var hh = String(d.getHours()).padStart(2, '0');
+    var min = String(d.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+function getPointTimestampMs(pt) {
+    if (pt.pointTimestamp && !isNaN(pt.pointTimestamp)) {
+        return Number(pt.pointTimestamp);
+    }
+    if (pt.datetimeIso) {
+        var parsed = new Date(pt.datetimeIso).getTime();
+        if (!isNaN(parsed)) return parsed;
+    }
+    // Fallback voor oude punten die alleen "HH:MM" hadden
+    if (pt.time && pt.time.includes(':')) {
+        var baseDate = pt.createdTimestamp ? new Date(pt.createdTimestamp) : new Date();
+        var parts = pt.time.split(':');
+        baseDate.setHours(parseInt(parts[0], 10) || 0, parseInt(parts[1], 10) || 0, 0, 0);
+        return baseDate.getTime();
+    }
+    return pt.createdTimestamp || Date.now();
+}
+
 /* --- 2. CENTRALE BEREKENING & PUBLICATIE NAAR FIREBASE --- */
 window.calculateAndPublishMapState = function(forceManual = false) {
     if (!isAdmin) return;
-    // Voorkom dat meerdere Admins tegelijkertijd de 30s timer pushen (tenzij handmatig geforceerd na een actie)
     if (!isMasterAdmin && !forceManual) return;
 
-    var now = new Date();
-    var currentTotalSeconds = (now.getHours() * 3600) + (now.getMinutes() * 60) + now.getSeconds();
+    var nowMs = Date.now();
     var computedAreas = {};
 
     for (var area in rawRdPointsByArea) {
         var points = rawRdPointsByArea[area].slice();
         if (points.length === 0) continue;
 
-        points.sort(function(a, b) { return (a.time || "").localeCompare(b.time || ""); });
+        // Sorteer chronologisch op exacte datum + tijd (werkt feilloos van 23:00 naar 00:00 de volgende dag)
+        points.sort(function(a, b) {
+            return getPointTimestampMs(a) - getPointTimestampMs(b);
+        });
         var lastPoint = points[points.length - 1];
 
         var calculatedSpeedKmh = null;
@@ -135,16 +217,16 @@ window.calculateAndPublishMapState = function(forceManual = false) {
         if (samplePoints.length >= 2) {
             var pFirst = samplePoints[0];
             var pLast = samplePoints[samplePoints.length - 1];
-            var t1 = parseTimeToMinutes(pFirst.time);
-            var t2 = parseTimeToMinutes(pLast.time);
+            var t1Ms = getPointTimestampMs(pFirst);
+            var t2Ms = getPointTimestampMs(pLast);
 
-            if (t1 !== null && t2 !== null && t2 > t1) {
+            if (t1Ms !== null && t2Ms !== null && t2Ms > t1Ms) {
                 var totalDistKm = 0;
                 for (var i = 0; i < samplePoints.length - 1; i++) {
                     totalDistKm += getDistanceKm(samplePoints[i].latlng[0], samplePoints[i].latlng[1],
                                                  samplePoints[i+1].latlng[0], samplePoints[i+1].latlng[1]);
                 }
-                var timeDiffHours = (t2 - t1) / 60;
+                var timeDiffHours = (t2Ms - t1Ms) / 3600000;
                 if (timeDiffHours > 0) {
                     var rawKmh = (totalDistKm / timeDiffHours);
                     calculatedSpeedKmh = Math.min(7.0, Math.max(0.5, rawKmh));
@@ -192,12 +274,8 @@ window.calculateAndPublishMapState = function(forceManual = false) {
 
         var processedPoints = points.map(function(pt, idx) {
             var isLatest = (idx === points.length - 1);
-            var ptMinutes = parseTimeToMinutes(pt.time);
-            var diffMinutes = 0;
-            if (ptMinutes !== null) {
-                var currMin = Math.floor(currentTotalSeconds / 60);
-                diffMinutes = currMin - ptMinutes;
-            }
+            var ptMs = getPointTimestampMs(pt);
+            var diffMinutes = Math.floor((nowMs - ptMs) / 60000);
 
             var opacity = 1.0;
             if (diffMinutes > 60) {
@@ -209,8 +287,11 @@ window.calculateAndPublishMapState = function(forceManual = false) {
                 key: pt.key,
                 latlng: pt.latlng,
                 name: pt.fullName || pt.baseName,
+                pointType: pt.pointType || pt.baseName || "Hint",
                 color: pt.color,
                 time: pt.time,
+                datetimeIso: pt.datetimeIso || null,
+                pointTimestamp: ptMs,
                 area: pt.area,
                 opacity: opacity,
                 extraInfo: (isLatest && speedText) ? speedText : "",
@@ -218,19 +299,9 @@ window.calculateAndPublishMapState = function(forceManual = false) {
             };
         });
 
-        var lastPtMinutes = parseTimeToMinutes(lastPoint.time);
-        var isFuture = false;
-        var secondsPassed = 0;
-
-        if (lastPtMinutes !== null) {
-            var pointSeconds = lastPtMinutes * 60;
-            if (pointSeconds > currentTotalSeconds) { isFuture = true; }
-            else { secondsPassed = currentTotalSeconds - pointSeconds; }
-        } else if (lastPoint.createdTimestamp) {
-            var msDiff = Date.now() - lastPoint.createdTimestamp;
-            if (msDiff < 0) { isFuture = true; }
-            else { secondsPassed = Math.floor(msDiff / 1000); }
-        }
+        var lastPtMs = getPointTimestampMs(lastPoint);
+        var isFuture = (lastPtMs > nowMs);
+        var secondsPassed = isFuture ? 0 : Math.floor((nowMs - lastPtMs) / 1000);
 
         var currentRadiusMeters = 1;
         if (!isFuture) {
@@ -278,7 +349,304 @@ window.calculateAndPublishMapState = function(forceManual = false) {
     });
 };
 
-/* --- 3. ADMIN BEHEERACTIES (RD-PUNTEN, HUISJES & GEBRUIKERS) --- */
+/* --- 3. RD-PUNT MODAL (DROPDOWN MET KLEUREN, DATUM/TIJD-PICKER & ADRES-INVOER) --- */
+function injectRdModalUI() {
+    if (document.getElementById('rd-modal-overlay')) return;
+
+    var style = document.createElement('style');
+    style.innerHTML = `
+        #rd-modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(26, 37, 47, 0.85); backdrop-filter: blur(3px);
+            z-index: 3000; justify-content: center; align-items: center;
+        }
+        #rd-modal-box {
+            background: #2c3e50; color: #ecf0f1; width: 92%; max-width: 370px;
+            border-radius: 8px; padding: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            border: 1px solid #4a6278; display: flex; flex-direction: column; gap: 11px;
+            font-size: 0.85rem;
+        }
+        #rd-modal-box h3 {
+            margin: 0 0 2px 0; font-size: 1.05rem; color: #ffffff;
+            border-bottom: 1px solid #4a6278; padding-bottom: 6px;
+        }
+        .rd-field-group { display: flex; flex-direction: column; gap: 4px; }
+        .rd-field-group label { font-weight: 600; font-size: 0.78rem; color: #bdc3c7; }
+        .rd-input, .rd-select {
+            width: 100%; padding: 8px 10px; border-radius: 5px;
+            border: 1px solid #4a6278; background: #34495e; color: #ecf0f1;
+            font-size: 0.88rem; outline: none; font-weight: 600;
+        }
+        .rd-input:focus, .rd-select:focus { border-color: #3498db; }
+        /* Specifieke dropdown-kleuren voor alleen dit menu */
+        #rd-type-select.type-hunt { background-color: #2ecc71 !important; color: #ffffff !important; border-color: #27ae60 !important; }
+        #rd-type-select.type-hint { background-color: #5dade2 !important; color: #ffffff !important; border-color: #3498db !important; }
+        #rd-type-select.type-anders { background-color: #34495e !important; color: #ecf0f1 !important; border-color: #4a6278 !important; }
+        #rd-type-select option[value="Hunt"] { background-color: #2ecc71; color: #ffffff; font-weight: bold; }
+        #rd-type-select option[value="Hint"] { background-color: #5dade2; color: #ffffff; font-weight: bold; }
+        #rd-type-select option[value="Anders"] { background-color: #34495e; color: #ecf0f1; font-weight: bold; }
+        #rd-modal-hint-note { font-size: 0.73rem; color: #85c1e9; display: none; }
+        #rd-modal-error {
+            display: none; background: rgba(231, 76, 60, 0.2); border: 1px solid #e74c3c;
+            color: #ff7675; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600;
+        }
+        .rd-modal-actions { display: flex; gap: 8px; margin-top: 6px; }
+        .rd-btn {
+            flex: 1; padding: 9px; border: none; border-radius: 5px;
+            font-weight: bold; font-size: 0.85rem; cursor: pointer; color: white;
+        }
+        .rd-btn-save { background: #27ae60; }
+        .rd-btn-save:disabled { background: #7f8c8d; cursor: wait; }
+        .rd-btn-cancel { background: #7f8c8d; }
+    `;
+    document.head.appendChild(style);
+
+    var overlay = document.createElement('div');
+    overlay.id = 'rd-modal-overlay';
+    overlay.innerHTML = `
+        <div id="rd-modal-box">
+            <h3 id="rd-modal-title">📍 RD-Punt Toevoegen</h3>
+
+            <div class="rd-field-group">
+                <label for="rd-type-select">Type punt (Naam):</label>
+                <select id="rd-type-select" class="rd-select type-hint">
+                    <option value="Hint">Hint</option>
+                    <option value="Hunt">Hunt</option>
+                    <option value="Anders">Anders</option>
+                </select>
+            </div>
+
+            <div class="rd-field-group">
+                <label for="rd-loc-input">Locatie (RD met/zonder komma, GPS of Adres):</label>
+                <input type="text" id="rd-loc-input" class="rd-input" placeholder="Bijv: 1645 4312 of Ernest Hemingwaystraat 73, Arnhem">
+            </div>
+
+            <div class="rd-field-group">
+                <label for="rd-area-select">Deelgebied:</label>
+                <select id="rd-area-select" class="rd-select">
+                    <option value="">-- Kies deelgebied --</option>
+                    <option value="Alpha">Alpha</option>
+                    <option value="Bravo">Bravo</option>
+                    <option value="Delta">Delta</option>
+                    <option value="Foxtrot">Foxtrot</option>
+                    <option value="Golf">Golf</option>
+                    <option value="Hotel">Hotel</option>
+                    <option value="Oscar">Oscar</option>
+                </select>
+            </div>
+
+            <div class="rd-field-group">
+                <label for="rd-datetime-input">Datum & Tijdstip:</label>
+                <input type="datetime-local" id="rd-datetime-input" class="rd-input" required>
+                <span id="rd-modal-hint-note">ℹ️ Voor een 'Hint' zijn alleen hele uren (:00) toegestaan.</span>
+            </div>
+
+            <div id="rd-modal-error"></div>
+
+            <div class="rd-modal-actions">
+                <button type="button" class="rd-btn rd-btn-cancel" id="rd-btn-cancel">Annuleren</button>
+                <button type="button" class="rd-btn rd-btn-save" id="rd-btn-save">Opslaan</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    var typeSelect = document.getElementById('rd-type-select');
+    var dtInput = document.getElementById('rd-datetime-input');
+    var hintNote = document.getElementById('rd-modal-hint-note');
+
+    function updateTypeDropdownStyle() {
+        var val = typeSelect.value;
+        typeSelect.className = 'rd-select ' + (val === 'Hunt' ? 'type-hunt' : (val === 'Hint' ? 'type-hint' : 'type-anders'));
+
+        if (val === 'Hint') {
+            hintNote.style.display = 'block';
+            // Zet minuten direct op :00 als Hint geselecteerd wordt
+            if (dtInput.value && dtInput.value.includes('T')) {
+                var parts = dtInput.value.split(':');
+                if (parts.length >= 2 && parts[1] !== '00') {
+                    dtInput.value = parts[0] + ':00';
+                }
+            }
+        } else {
+            hintNote.style.display = 'none';
+        }
+    }
+
+    typeSelect.addEventListener('change', updateTypeDropdownStyle);
+
+    // Zorg dat bij 'Hint' ook bij het aanpassen van de tijd de minuten op :00 springen
+    dtInput.addEventListener('change', function() {
+        if (typeSelect.value === 'Hint' && dtInput.value && dtInput.value.includes(':')) {
+            var parts = dtInput.value.split(':');
+            if (parts[1] !== '00') {
+                dtInput.value = parts[0] + ':00';
+            }
+        }
+    });
+
+    document.getElementById('rd-btn-cancel').addEventListener('click', closeRdModal);
+    document.getElementById('rd-btn-save').addEventListener('click', saveRdModalData);
+}
+
+function openRdModal(mode, existingKey, existingData) {
+    injectRdModalUI();
+    currentEditingRdKey = (mode === 'edit') ? existingKey : null;
+
+    var titleEl = document.getElementById('rd-modal-title');
+    var typeSelect = document.getElementById('rd-type-select');
+    var locInput = document.getElementById('rd-loc-input');
+    var areaSelect = document.getElementById('rd-area-select');
+    var dtInput = document.getElementById('rd-datetime-input');
+    var errBox = document.getElementById('rd-modal-error');
+    errBox.style.display = 'none';
+
+    if (mode === 'edit' && existingData) {
+        titleEl.innerText = "✏️ RD-Punt Bewerken";
+        var allowedTypes = ["Hint", "Hunt", "Anders"];
+        var currentType = existingData.pointType || existingData.baseName || "Hint";
+        typeSelect.value = allowedTypes.includes(currentType) ? currentType : "Anders";
+
+        if (existingData.rawLocationInput) {
+            locInput.value = existingData.rawLocationInput;
+        } else if (existingData.latlng) {
+            locInput.value = `${existingData.latlng[0].toFixed(5)}, ${existingData.latlng[1].toFixed(5)}`;
+        } else {
+            locInput.value = "";
+        }
+
+        areaSelect.value = existingData.area || "";
+
+        if (existingData.datetimeIso) {
+            dtInput.value = existingData.datetimeIso;
+        } else {
+            var fallbackDate = existingData.pointTimestamp ? new Date(existingData.pointTimestamp) : new Date(existingData.createdTimestamp || Date.now());
+            if (existingData.time && existingData.time.includes(':')) {
+                var tParts = existingData.time.split(':');
+                fallbackDate.setHours(parseInt(tParts[0], 10) || 0, parseInt(tParts[1], 10) || 0, 0, 0);
+            }
+            dtInput.value = toLocalIsoString(fallbackDate);
+        }
+    } else {
+        titleEl.innerText = "📍 Nieuw RD-Punt Toevoegen";
+        typeSelect.value = "Hint";
+        locInput.value = "";
+        areaSelect.value = "";
+
+        var now = new Date();
+        // Omdat standaard 'Hint' geselecteerd staat, zetten we de standaardminuten netjes op :00
+        now.setMinutes(0, 0, 0);
+        dtInput.value = toLocalIsoString(now);
+    }
+
+    typeSelect.dispatchEvent(new Event('change'));
+    document.getElementById('rd-modal-overlay').style.display = 'flex';
+    locInput.focus();
+}
+
+function closeRdModal() {
+    var overlay = document.getElementById('rd-modal-overlay');
+    if (overlay) overlay.style.display = 'none';
+    currentEditingRdKey = null;
+}
+
+async function saveRdModalData() {
+    if (!isAdmin) return;
+
+    var typeSelect = document.getElementById('rd-type-select');
+    var locInput = document.getElementById('rd-loc-input');
+    var areaSelect = document.getElementById('rd-area-select');
+    var dtInput = document.getElementById('rd-datetime-input');
+    var errBox = document.getElementById('rd-modal-error');
+    var saveBtn = document.getElementById('rd-btn-save');
+
+    errBox.style.display = 'none';
+
+    var chosenType = typeSelect.value; // "Hint", "Hunt" of "Anders"
+    var rawLoc = locInput.value.trim();
+    var chosenArea = parseTargetArea(areaSelect.value);
+    var dtVal = dtInput.value;
+
+    if (!rawLoc) {
+        errBox.innerText = "Voer een RD-coördinaat, GPS-coördinaat of adres in.";
+        errBox.style.display = 'block';
+        return;
+    }
+
+    if (!dtVal || !dtVal.includes('T')) {
+        errBox.innerText = "Kies een geldige datum en tijd via de datum/tijd-picker.";
+        errBox.style.display = 'block';
+        return;
+    }
+
+    var dateObj = new Date(dtVal);
+    if (isNaN(dateObj.getTime())) {
+        errBox.innerText = "Ongeldige datum of tijd gekozen.";
+        errBox.style.display = 'block';
+        return;
+    }
+
+    // Controleer of bij 'Hint' een heel uur is ingevoerd
+    if (chosenType === "Hint" && dateObj.getMinutes() !== 0) {
+        errBox.innerText = "Voor een 'Hint' moeten altijd hele uren (bijv. 14:00) worden ingevoerd!";
+        errBox.style.display = 'block';
+        return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.innerText = "Zoeken...";
+
+    var latlng = await resolveLocationInput(rawLoc);
+
+    saveBtn.disabled = false;
+    saveBtn.innerText = "Opslaan";
+
+    if (!latlng) {
+        errBox.innerText = "Locatie niet gevonden. Controleer het RD-punt, de coördinaten of het adres.";
+        errBox.style.display = 'block';
+        return;
+    }
+
+    var hh = String(dateObj.getHours()).padStart(2, '0');
+    var mm = String(dateObj.getMinutes()).padStart(2, '0');
+    var timeFormatted = `${hh}:${mm}`;
+    var pointTimestampMs = dateObj.getTime();
+
+    var markerColor = (chosenArea && areaColors[chosenArea]) ? areaColors[chosenArea] : "#000000";
+    var areaSuffix = chosenArea ? " [" + chosenArea + "]" : "";
+
+    var payload = {
+        latlng: latlng,
+        rawLocationInput: rawLoc,
+        pointType: chosenType,
+        baseName: chosenType,
+        fullName: chosenType + areaSuffix,
+        area: chosenArea,
+        color: markerColor,
+        time: timeFormatted,
+        datetimeIso: dtVal,
+        pointTimestamp: pointTimestampMs
+    };
+
+    if (currentEditingRdKey) {
+        payload.updatedAt = Date.now();
+        db.ref('rdPoints/' + currentEditingRdKey).update(payload).then(function() {
+            closeRdModal();
+            window.calculateAndPublishMapState(true);
+            map.closePopup();
+        });
+    } else {
+        payload.createdAt = Date.now();
+        payload.createdTimestamp = Date.now();
+        db.ref('rdPoints').push(payload).then(function() {
+            closeRdModal();
+            window.calculateAndPublishMapState(true);
+            map.setView(latlng, 14);
+        });
+    }
+}
+
+/* --- 4. ADMIN BEHEERACTIES (RD-PUNTEN, HUISJES & GEBRUIKERS) --- */
 window.toggleHouseVisited = function(houseName) {
     if (!isAdmin) return;
     var safeKey = houseName.replace(/[.#$[\]]/g, '_');
@@ -318,39 +686,7 @@ function checkAreaRoundCompletion() {
 
 window.addMarkerByRD = function() {
     if (!isAdmin) return;
-    var name = prompt("Voer een naam in voor dit punt:", "Punt");
-    if (!name) return;
-
-    var coordInput = prompt("Voer coördinaten in (RD of GPS):\nBijv: 1800, 4500  OF  51.9851, 5.8987", "1800, 4500");
-    if (!coordInput) return;
-
-    var latlng = parseCoordInput(coordInput);
-    if (!latlng) { alert("Ongeldige coördinaten ingevoerd."); return; }
-
-    var rawAreaInput = prompt("Koppel aan deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar). Laat leeg:", "");
-    var chosenArea = parseTargetArea(rawAreaInput);
-
-    var markerColor = "#000000";
-    var areaKey = "";
-    var areaSuffix = "";
-
-    if (chosenArea && areaColors[chosenArea]) {
-        areaKey = chosenArea;
-        markerColor = areaColors[areaKey];
-        areaSuffix = " [" + areaKey + "]";
-    }
-
-    var now = new Date();
-    var defaultTime = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
-    var timeInput = prompt("Voer tijdstip in (UU:MM):", defaultTime) || defaultTime;
-
-    db.ref('rdPoints').push({
-        latlng: latlng, time: timeInput, baseName: name, area: areaKey,
-        fullName: name + areaSuffix, color: markerColor, createdAt: Date.now(), createdTimestamp: Date.now()
-    }).then(function() {
-        window.calculateAndPublishMapState(true);
-        map.setView(latlng, 14);
-    });
+    openRdModal('add', null, null);
 };
 
 window.editRdPointPopup = function(key) {
@@ -358,32 +694,7 @@ window.editRdPointPopup = function(key) {
     db.ref('rdPoints/' + key).once('value', function(snapshot) {
         var p = snapshot.val();
         if (!p) return;
-
-        var newName = prompt("Bewerk naam van punt:", p.baseName || p.fullName || "Punt");
-        if (newName === null) return;
-        var newTime = prompt("Bewerk tijd (UU:MM):", p.time || "12:00");
-        if (newTime === null) return;
-        var currentCoordStr = p.latlng ? `${p.latlng[0].toFixed(5)}, ${p.latlng[1].toFixed(5)}` : "";
-        var newCoordInput = prompt("Bewerk coördinaten (RD of Lat,Lng):", currentCoordStr);
-        if (newCoordInput === null) return;
-
-        var parsedLatLng = parseCoordInput(newCoordInput);
-        if (!parsedLatLng) { alert("Ongeldige coördinaten!"); return; }
-
-        var rawAreaInput = prompt("Deelgebied (Alpha, Bravo, Delta, Foxtrot, Golf, Hotel, Oscar):", p.area || "");
-        if (rawAreaInput === null) return;
-
-        var chosenArea = parseTargetArea(rawAreaInput);
-        var markerColor = (chosenArea && areaColors[chosenArea]) ? areaColors[chosenArea] : "#000000";
-        var areaSuffix = chosenArea ? " [" + chosenArea + "]" : "";
-
-        db.ref('rdPoints/' + key).update({
-            baseName: newName, fullName: newName + areaSuffix,
-            time: newTime, latlng: parsedLatLng, area: chosenArea, color: markerColor
-        }).then(function() {
-            window.calculateAndPublishMapState(true);
-            map.closePopup();
-        });
+        openRdModal('edit', key, p);
     });
 };
 
@@ -415,7 +726,7 @@ window.removeInactiveUser = function(userId, userName) {
     }
 };
 
-/* --- 4. JOTIHUNT API SYNCHRONISATIE (UITSLUITEND DOOR MASTER ADMIN) --- */
+/* --- 5. JOTIHUNT API SYNCHRONISATIE (UITSLUITEND DOOR MASTER ADMIN) --- */
 async function fetchJotihuntEndpoint(endpoint) {
     var targetUrl = "https://jotihunt.nl/api/2.0/" + endpoint;
     var routes = [
@@ -450,7 +761,6 @@ async function fetchJotihuntEndpoint(endpoint) {
 var isSyncingNow = false;
 window.syncJotihuntToFirebase = async function(forceManual = false) {
     if (!isAdmin || isSyncingNow) return;
-    // Alleen de Master Admin pollt automatisch de Jotihunt API (tenzij op '🔔 Laatste' is geklikt)
     if (!isMasterAdmin && !forceManual) return;
 
     isSyncingNow = true;
@@ -497,7 +807,7 @@ window.fetchLatestArticleManual = function() {
     });
 };
 
-/* --- 5. INITIALISATIE VAN DE ADMIN ENGINE --- */
+/* --- 6. INITIALISATIE VAN DE ADMIN ENGINE --- */
 window.initAdminEngine = function() {
     // 1. Start Master-Admin verkiezing
     initMasterElection();
@@ -506,7 +816,10 @@ window.initAdminEngine = function() {
     proj4.defs("EPSG:28992", "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.387638888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.417,50.3319,465.524,-0.398957,0.343988,-1.8774,4.0725 +units=m +no_defs");
     proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 
-    // 3. Activeer Leaflet Tekentools
+    // 3. Injecteer de nieuwe RD-punt Modal UI
+    injectRdModalUI();
+
+    // 4. Activeer Leaflet Tekentools
     var drawControl = new L.Control.Draw({
         edit: { featureGroup: drawnItems, remove: true },
         draw: {
@@ -516,10 +829,10 @@ window.initAdminEngine = function() {
     });
     map.addControl(drawControl);
 
-    // 4. Herteken de clubgebouwen zodat de Admin-knoppen ('Markeer als bezocht') verschijnen
+    // 5. Herteken de clubgebouwen zodat de Admin-knoppen ('Markeer als bezocht') verschijnen
     renderFixedHouses();
 
-    // 5. Luister naar ruwe RD-punten en herbereken wanneer wij de Master zijn
+    // 6. Luister naar ruwe RD-punten en herbereken wanneer wij de Master zijn
     db.ref('rdPoints').on('value', function(snapshot) {
         for (var a in rawRdPointsByArea) rawRdPointsByArea[a] = [];
         var data = snapshot.val();
@@ -529,9 +842,17 @@ window.initAdminEngine = function() {
                 if (p && p.latlng && Array.isArray(p.latlng) && p.latlng.length === 2) {
                     if (p.area && rawRdPointsByArea[p.area]) {
                         rawRdPointsByArea[p.area].push({
-                            key: key, latlng: p.latlng, time: p.time || "12:00",
-                            baseName: p.baseName || "Punt", fullName: p.fullName || p.baseName,
-                            area: p.area, color: p.color || areaColors[p.area] || "#000000",
+                            key: key,
+                            latlng: p.latlng,
+                            rawLocationInput: p.rawLocationInput || "",
+                            pointType: p.pointType || p.baseName || "Hint",
+                            time: p.time || "12:00",
+                            datetimeIso: p.datetimeIso || null,
+                            pointTimestamp: p.pointTimestamp || null,
+                            baseName: p.baseName || "Hint",
+                            fullName: p.fullName || p.baseName,
+                            area: p.area,
+                            color: p.color || areaColors[p.area] || "#000000",
                             createdTimestamp: p.createdTimestamp || p.createdAt || Date.now()
                         });
                     }
@@ -541,12 +862,12 @@ window.initAdminEngine = function() {
         window.calculateAndPublishMapState(false);
     });
 
-    // 6. Start de 30-seconden Admin-rekenklok (wordt alleen uitgevoerd door de actieve Master Admin)
+    // 7. Start de 30-seconden Admin-rekenklok (wordt alleen uitgevoerd door de actieve Master Admin)
     setInterval(function() {
         window.calculateAndPublishMapState(false);
     }, 30000);
 
-    // 7. Start de Jotihunt API-synchronisatie (elke 45 seconden door de Master Admin)
+    // 8. Start de Jotihunt API-synchronisatie (elke 45 seconden door de Master Admin)
     setTimeout(function() {
         window.syncJotihuntToFirebase(false);
     }, 1500);
