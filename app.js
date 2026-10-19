@@ -1207,7 +1207,7 @@ async function syncJotihuntToFirebase(forceManual = false) {
     if (!isAdmin && !isDataStale && !isAreasEmpty && !forceManual) return;
 
     isSyncingNow = true;
-    var updatePayload = { lastSync: Date.now() };
+    var updatePayload = { lastSync: Date.Now ? Date.Now() : Date.now() };
     var anySuccess = false;
 
     // 1. Haal vossen/deelgebieden op
