@@ -15,7 +15,8 @@
    - Volledige keten-opbouw voor zowel primaire als alternatieve parallelroute (voorbij cirkel)
    - Handmatige Doel-Clubhuis Lock per deelgebied (via laatste RD-punt popup én Admin-menu)
    - Live Verwachte Vos-positie langs de wandelroute + Snijpunt met cirkelrand
-   - Zwevend Admin-paneel met groene/rode statusballetjes en dynamische tekstkleur.
+   - Zwevend Admin-paneel waarbij ALLE opties (labels + subteksten + gebieden)
+     donkergrijs (#95a5a6) zijn bij een groen bolletje en lichtgrijs (#dcdde1) bij een rood bolletje.
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
@@ -605,7 +606,6 @@ async function fetchOsrmFootRoutes(coordString, timeoutMs) {
 async function getBestSegmentRoute(startLatLng, endLatLng, avoidHistoryCoords, speedKmh, preferQuietParallel, primaryReferenceRoute) {
     var effSpeed = Math.max(2.0, Number(speedKmh) || 6.5);
     var maxDetourMetersFor15Min = (effSpeed * (15 / 60)) * 1000;
-    // Voor de alternatieve parallelroute staan we iets meer omweg toe (bijv. 25 min) zodat er ook over bruggen/dorpen altijd een 2e optie is
     var allowedExtraMeters = preferQuietParallel ? Math.max(2500, maxDetourMetersFor15Min * 1.75) : maxDetourMetersFor15Min;
 
     var directCoordStr = `${startLatLng[1]},${startLatLng[0]};${endLatLng[1]},${endLatLng[0]}`;
@@ -641,7 +641,6 @@ async function getBestSegmentRoute(startLatLng, endLatLng, avoidHistoryCoords, s
     var shortestDirectMeters = candidates[0].distMeters;
     var bestDirectOverlap = candidates[0].overlapMeters;
 
-    // Check of OSRM al een voldoende gescheiden alternatieve route heeft geleverd
     var alreadyHasSeparatedAlt = false;
     if (preferQuietParallel && primaryReferenceRoute && primaryReferenceRoute.length >= 2) {
         alreadyHasSeparatedAlt = candidates.some(function(c) {
@@ -868,7 +867,6 @@ async function getFastestWalkingDistanceKmBetweenPoints(lat1, lng1, lat2, lng2) 
         return walkKm;
     }
 
-    // Niet cachen als OSRM faalde, zodat het de volgende keer wel netjes wordt opgehaald
     return straightKm;
 }
 
@@ -1166,19 +1164,29 @@ window.setAreaLockedTarget = function(area, houseName) {
     });
 };
 
-/* Update het Admin Instellingen Paneel */
+/* Update het Admin Instellingen Paneel:
+   Elke optie (en bijbehorende subtekst) is donkergrijs (#95a5a6) wanneer het statusbolletje GROEN is,
+   en verandert naar lichtgrijs (#dcdde1 via class 'capped-reached') zodra het statusbolletje ROOD is! */
 function updateAdminSettingsPanelStatus() {
     var statusDot = document.getElementById('admin-max-hours-status-dot');
     var labelEl = document.getElementById('admin-max-hours-label');
     var subtextEl = document.getElementById('admin-max-hours-subtext');
+
     var altRouteDot = document.getElementById('admin-alt-route-status-dot');
     var altRouteToggle = document.getElementById('admin-alt-route-toggle');
+    var altRouteLabel = document.getElementById('admin-alt-route-label');
+    var altRouteSubtext = document.getElementById('admin-alt-route-subtext');
+
     var routeSpeedDot = document.getElementById('admin-route-speed-status-dot');
     var routeSpeedToggle = document.getElementById('admin-route-speed-toggle');
+    var routeSpeedLabel = document.getElementById('admin-route-speed-label');
+    var routeSpeedSubtext = document.getElementById('admin-route-speed-subtext');
+
     var areaStatusList = document.getElementById('admin-area-growth-list');
 
     if (!statusDot || !labelEl || !subtextEl) return;
 
+    // 1. Max. groeitijd cirkel: Groen = niet bereikt (donker), Rood = max bereikt (lichter grijs)
     var activeAreas = Object.keys(areaCappedStatus);
     var anyCapped = activeAreas.some(function(a) { return areaCappedStatus[a].isCapped; });
 
@@ -1187,32 +1195,48 @@ function updateAdminSettingsPanelStatus() {
         ? 'Maximale groeitijd is bereikt voor één of meer gebieden'
         : 'Groei actief (maximale groeitijd nog niet bereikt)';
 
-    if (anyCapped) {
-        labelEl.classList.add('capped-reached');
-        subtextEl.classList.add('capped-reached');
-    } else {
-        labelEl.classList.remove('capped-reached');
-        subtextEl.classList.remove('capped-reached');
-    }
+    labelEl.classList.toggle('capped-reached', anyCapped);
+    subtextEl.classList.toggle('capped-reached', anyCapped);
+
+    // 2. Alternatieve parallelroute: Groen = ingeschakeld (donker), Rood = uitgeschakeld (lichter grijs)
+    var altEnabled = !!adminSettings.showAltQuietRoute;
+    var isAltRed = !altEnabled;
 
     if (altRouteToggle && document.activeElement !== altRouteToggle) {
-        altRouteToggle.checked = !!adminSettings.showAltQuietRoute;
+        altRouteToggle.checked = altEnabled;
     }
     if (altRouteDot) {
-        altRouteDot.className = 'admin-status-dot ' + (adminSettings.showAltQuietRoute ? 'status-dot-green' : 'status-dot-red');
-        altRouteDot.title = adminSettings.showAltQuietRoute ? 'Alternatieve route ingeschakeld' : 'Alternatieve route uitgeschakeld';
+        altRouteDot.className = 'admin-status-dot ' + (isAltRed ? 'status-dot-red' : 'status-dot-green');
+        altRouteDot.title = altEnabled ? 'Alternatieve route ingeschakeld' : 'Alternatieve route uitgeschakeld';
+    }
+    if (altRouteLabel) {
+        altRouteLabel.classList.toggle('capped-reached', isAltRed);
+    }
+    if (altRouteSubtext) {
+        altRouteSubtext.classList.toggle('capped-reached', isAltRed);
     }
 
+    // 3. Loopsnelheid o.b.v. wandelroute: Groen = ingeschakeld (donker), Rood = uitgeschakeld (lichter grijs)
+    var routeSpeedEnabled = !!adminSettings.useRouteSpeedCalculation;
+    var isRouteSpeedRed = !routeSpeedEnabled;
+
     if (routeSpeedToggle && document.activeElement !== routeSpeedToggle) {
-        routeSpeedToggle.checked = !!adminSettings.useRouteSpeedCalculation;
+        routeSpeedToggle.checked = routeSpeedEnabled;
     }
     if (routeSpeedDot) {
-        routeSpeedDot.className = 'admin-status-dot ' + (adminSettings.useRouteSpeedCalculation ? 'status-dot-green' : 'status-dot-red');
-        routeSpeedDot.title = adminSettings.useRouteSpeedCalculation
+        routeSpeedDot.className = 'admin-status-dot ' + (isRouteSpeedRed ? 'status-dot-red' : 'status-dot-green');
+        routeSpeedDot.title = routeSpeedEnabled
             ? 'Loopsnelheid o.b.v. wandelroute ingeschakeld'
             : 'Loopsnelheid o.b.v. hemelsbrede afstand (standaard)';
     }
+    if (routeSpeedLabel) {
+        routeSpeedLabel.classList.toggle('capped-reached', isRouteSpeedRed);
+    }
+    if (routeSpeedSubtext) {
+        routeSpeedSubtext.classList.toggle('capped-reached', isRouteSpeedRed);
+    }
 
+    // 4. Per deelgebied status: Groen = groeit (donker), Rood = max bereikt (lichter grijs)
     if (areaStatusList) {
         if (activeAreas.length === 0) {
             areaStatusList.style.display = 'none';
@@ -1268,8 +1292,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
         return;
     }
 
-    // Als er al een berekening loopt (bijv. tijdens OSRM-aanvragen), zet het nieuwe verzoek in de wachtrij
-    // zodat een nieuw toegevoegd RD-punt of bezocht clubhuis NOOIT wordt overgeslagen!
     if (isCalculatingMapState) {
         pendingCalculationRequest = true;
         if (forceManual) pendingForceManual = true;
@@ -1297,7 +1319,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             var lastPoint = points[points.length - 1];
             var lastRdPtMs = getPointTimestampMs(lastPoint);
 
-            // Snelheid wordt uitsluitend berekend op basis van RD-punten (bezochte huisjes tellen NIET mee voor de snelheid)
             var speedResult = await calculateAreaWalkingSpeed(points);
             var calculatedSpeedKmh = speedResult.speedKmh;
             var speedText = speedResult.speedText;
@@ -1316,7 +1337,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 }
             });
 
-            // Indien alle clubgebouwen al bezocht zouden zijn, val terug op alle huizen zodat er nog steeds een route is
             if (unvisitedHouses.length === 0 && areaHouses.length > 0) {
                 unvisitedHouses = areaHouses.slice();
             }
@@ -1376,7 +1396,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 currentRadiusMeters = Math.max(1, Math.round(1 + (effectiveSecondsPassed * metersPerSecond)));
             }
 
-            // Controleer of er voor dit gebied een handmatig gelockt doel-clubhuis is ingesteld
             var lockedTargetName = (adminSettings.lockedTargets && adminSettings.lockedTargets[area])
                 ? adminSettings.lockedTargets[area]
                 : null;
@@ -1492,8 +1511,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             }
 
             // 6. Bereken zowel de primaire voorspellende looproute als de alternatieve parallelroute over de volledige keten.
-            //    Beide routes vertrekken ALTIJD vanaf effectiveLastCoord (het allerlaatste punt van de RD-lijn,
-            //    dus óók vanaf een clubgebouw als dat als laatste is bezocht!).
             var estimatedWalkRoute = [];
             var alternativeWalkRoute = [];
             var estimatedTargetHouseName = "";
@@ -1756,6 +1773,7 @@ function injectAdminUI() {
         .admin-area-status-item {
             display: flex; align-items: center; gap: 6px;
             font-size: 0.72rem; color: #95a5a6; font-weight: 600;
+            transition: color 0.2s ease;
         }
         .admin-area-status-item.capped-reached {
             color: #dcdde1 !important;
@@ -1912,11 +1930,11 @@ function injectAdminUI() {
                 <div class="admin-setting-row">
                     <div class="admin-setting-label-wrap">
                         <span id="admin-alt-route-status-dot" class="admin-status-dot status-dot-green" title="Alternatieve route actief"></span>
-                        <label for="admin-alt-route-toggle" style="color:#bdc3c7;">🛤️ Toon alternatieve parallelroute (mijd N-wegen):</label>
+                        <label id="admin-alt-route-label" for="admin-alt-route-toggle">🛤️ Toon alternatieve parallelroute (mijd N-wegen):</label>
                     </div>
                     <input type="checkbox" id="admin-alt-route-toggle" checked>
                 </div>
-                <div class="admin-setting-subtext">
+                <div id="admin-alt-route-subtext" class="admin-setting-subtext">
                     Berekent een 2e doelgerichte route over de hele keten die N-wegen en dubbele wegen mijdt.
                 </div>
 
@@ -1925,11 +1943,11 @@ function injectAdminUI() {
                 <div class="admin-setting-row">
                     <div class="admin-setting-label-wrap">
                         <span id="admin-route-speed-status-dot" class="admin-status-dot status-dot-red" title="Loopsnelheid o.b.v. hemelsbreed"></span>
-                        <label for="admin-route-speed-toggle" style="color:#bdc3c7;">🥾 Loopsnelheid o.b.v. wandelroute (i.p.v. hemelsbreed):</label>
+                        <label id="admin-route-speed-label" for="admin-route-speed-toggle">🥾 Loopsnelheid o.b.v. wandelroute (i.p.v. hemelsbreed):</label>
                     </div>
                     <input type="checkbox" id="admin-route-speed-toggle">
                 </div>
-                <div class="admin-setting-subtext">
+                <div id="admin-route-speed-subtext" class="admin-setting-subtext">
                     Gebruikt de snelste wandelafstand over wegen/paden tussen RD-punten voor de 50/50 snelheidsberekening.
                 </div>
 
@@ -1999,6 +2017,9 @@ function injectAdminUI() {
                 window.calculateAndPublishMapState(true);
             });
         });
+
+        // Zet direct bij initialisatie de juiste grijs-tinten op basis van de statusbolletjes
+        updateAdminSettingsPanelStatus();
 
         var sHeader = document.getElementById('admin-settings-header');
         var isDraggingPanel = false, dragStartX = 0, dragStartY = 0;
