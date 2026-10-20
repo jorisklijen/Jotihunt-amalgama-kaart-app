@@ -209,6 +209,7 @@ var activeGeofenceBadges = {};
 var activeGeofenceArrows = {};
 var activeEstimatedRoutes = {};
 var activeIntersectionDots = {};
+var activeLiveExpectedFoxMarkers = {};
 
 function createWalkerMarker(pt) {
     var isOscar = (pt.area === "Oscar");
@@ -268,7 +269,7 @@ function renderComputedMapState(state) {
         });
     }
 
-    // Verwijder geofences, geschatte routes en snijpunten van deelgebieden die gewist zijn
+    // Verwijder geofences, geschatte routes en markers van deelgebieden die gewist zijn
     Object.keys(activeGeofenceCircles).forEach(function (area) {
         if (!areasData[area]) {
             geofenceLayer.removeLayer(activeGeofenceCircles[area]);
@@ -288,6 +289,10 @@ function renderComputedMapState(state) {
             if (activeIntersectionDots[area]) {
                 geofenceLayer.removeLayer(activeIntersectionDots[area]);
                 delete activeIntersectionDots[area];
+            }
+            if (activeLiveExpectedFoxMarkers[area]) {
+                geofenceLayer.removeLayer(activeLiveExpectedFoxMarkers[area]);
+                delete activeLiveExpectedFoxMarkers[area];
             }
         }
     });
@@ -319,17 +324,24 @@ function renderComputedMapState(state) {
             rdRouteLayer.addLayer(polyline);
         }
 
-        // 3. Teken of update voorberekende Geofence, Pijlen, Geschatte Looproute & Snijpunt
+        // 3. Teken of update voorberekende Geofence, Pijlen, Voorspellende Looproute & Live Verwachte Positie
         if (areaObj.geofence) {
             var gf = areaObj.geofence;
+            var circleColor = gf.color || "#7f8c8d"; // Wordt grijs (#7f8c8d) zodra max groeitijd is verstreken
+            var routeAreaColor = gf.areaColor || areaColors[area] || gf.color;
 
             if (activeGeofenceCircles[area]) {
                 activeGeofenceCircles[area].setLatLng(gf.center);
                 activeGeofenceCircles[area].setRadius(gf.radiusMeters);
+                activeGeofenceCircles[area].setStyle({
+                    color: circleColor,
+                    fillColor: circleColor,
+                    fillOpacity: gf.isCappedByAge ? 0.16 : 0.12
+                });
             } else {
                 var circle = L.circle(gf.center, {
-                    radius: gf.radiusMeters, color: gf.color, weight: 2,
-                    dashArray: '6, 6', fillColor: gf.color, fillOpacity: 0.12, interactive: false
+                    radius: gf.radiusMeters, color: circleColor, weight: 2,
+                    dashArray: '6, 6', fillColor: circleColor, fillOpacity: gf.isCappedByAge ? 0.16 : 0.12, interactive: false
                 });
                 geofenceLayer.addLayer(circle);
                 activeGeofenceCircles[area] = circle;
@@ -337,7 +349,7 @@ function renderComputedMapState(state) {
 
             var badgeIcon = L.divIcon({
                 className: 'geofence-badge-wrapper',
-                html: `<div class="geofence-radius-badge" style="border-color:${gf.color};">${gf.badgeText}</div>`,
+                html: `<div class="geofence-radius-badge" style="border-color:${circleColor};">${gf.badgeText}</div>`,
                 iconSize: [80, 20], iconAnchor: [40, 10]
             });
             if (activeGeofenceBadges[area]) {
@@ -357,13 +369,13 @@ function renderComputedMapState(state) {
             if (gf.arrows && Array.isArray(gf.arrows)) {
                 gf.arrows.forEach(function (arr) {
                     var arrowLine = L.polyline([gf.center, arr.endCoord], {
-                        color: gf.color, weight: 2.5, dashArray: '4, 4', opacity: 0.85, interactive: false
+                        color: circleColor, weight: 2.5, dashArray: '4, 4', opacity: 0.85, interactive: false
                     });
                     geofenceLayer.addLayer(arrowLine);
                     activeGeofenceArrows[area].push(arrowLine);
 
                     var tipSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" style="transform: rotate(${arr.angle}deg);">
-                        <polygon points="12,2 22,22 12,17 2,22" fill="${gf.color}" stroke="#ffffff" stroke-width="1.5"/>
+                        <polygon points="12,2 22,22 12,17 2,22" fill="${circleColor}" stroke="#ffffff" stroke-width="1.5"/>
                     </svg>`;
                     var tipIcon = L.divIcon({
                         className: 'arrow-tip-icon', html: tipSvg, iconSize: [20, 20], iconAnchor: [10, 10]
@@ -374,51 +386,50 @@ function renderComputedMapState(state) {
                 });
             }
 
-            // 4. Teken geschatte wandelroute naar dichtstbijzijnde onbezochte clubgebouw (Stippellijn)
+            // 4. Teken voorspellende wandelroute richting logische onbezochte clubhuizen (Stippellijn)
             if (activeEstimatedRoutes[area]) {
                 geofenceLayer.removeLayer(activeEstimatedRoutes[area]);
                 delete activeEstimatedRoutes[area];
             }
             if (gf.estimatedWalkRoute && Array.isArray(gf.estimatedWalkRoute) && gf.estimatedWalkRoute.length >= 2) {
                 var walkLine = L.polyline(gf.estimatedWalkRoute, {
-                    color: gf.color,
+                    color: routeAreaColor,
                     weight: 3,
                     dashArray: '3, 8',
                     opacity: 0.9,
                     className: 'estimated-walk-line'
                 });
-                var targetHouseLabel = gf.estimatedTargetHouse ? ` richting <b>${gf.estimatedTargetHouse}</b>` : '';
-                walkLine.bindPopup(`<b>🥾 Geschatte looproute (${area})</b><br>Dichtstbijzijnde onbezochte locatie${targetHouseLabel}`);
+                var targetHouseLabel = gf.estimatedTargetHouse ? `<br>Route langs onbezocht: <b>${gf.estimatedTargetHouse}</b>` : '';
+                walkLine.bindPopup(`<b>🥾 Voorspelde looproute (${area})</b>${targetHouseLabel}`);
                 geofenceLayer.addLayer(walkLine);
                 activeEstimatedRoutes[area] = walkLine;
             }
 
-            // 5. Teken klein maar zichtbaar puntje waar de geschatte looproute en de groeiende cirkel elkaar ontmoeten
+            // 5. Teken klein maar zichtbaar puntje waar de geschatte looproute en de groeiende cirkel elkaar kruisen
             if (activeIntersectionDots[area]) {
                 geofenceLayer.removeLayer(activeIntersectionDots[area]);
                 delete activeIntersectionDots[area];
             }
             if (gf.intersectionPoint && Array.isArray(gf.intersectionPoint) && gf.intersectionPoint.length === 2) {
-                var dotHtml = `<div class="fox-intersection-dot" style="background-color: ${gf.color};"></div>`;
+                var dotHtml = `<div class="fox-intersection-dot" style="background-color: ${routeAreaColor};"></div>`;
                 var dotIcon = L.divIcon({
                     className: 'fox-intersection-wrapper',
                     html: dotHtml,
-                    iconSize: [14, 14],
-                    iconAnchor: [7, 7],
-                    popupAnchor: [0, -7]
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6],
+                    popupAnchor: [0, -6]
                 });
                 var dotMarker = L.marker(gf.intersectionPoint, { icon: dotIcon });
-                var targetName = gf.estimatedTargetHouse || "dichtstbijzijnde locatie";
-                dotMarker.bindTooltip(`🦊 Verwachte positie ${area} (route → ${targetName})`, {
+                var targetName = gf.estimatedTargetHouse || "onbezochte locatie";
+                dotMarker.bindTooltip(`⭕ Cirkel-kruispunt ${area}`, {
                     permanent: false,
                     direction: 'top',
                     className: 'marker-label'
                 });
                 dotMarker.bindPopup(`
                     <div style="font-size:12px; min-width:185px;">
-                        <b>🦊 Verwachte Vos-positie (${area})</b><br>
-                        Kruispunt looproute & cirkelrand<br>
-                        Doel: <b>${targetName}</b><br>
+                        <b>⭕ Kruispunt Cirkel & Route (${area})</b><br>
+                        Doelroute: <b>${targetName}</b><br>
                         <button onclick="window.navigateToAreaPoint(${gf.intersectionPoint[0]}, ${gf.intersectionPoint[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
                             📍 Navigeer naar dit kruispunt
                         </button>
@@ -426,6 +437,52 @@ function renderComputedMapState(state) {
                 `);
                 geofenceLayer.addLayer(dotMarker);
                 activeIntersectionDots[area] = dotMarker;
+            }
+
+            // 6. Teken LIVE Verwachte Positie van de vos óp de voorspelde looplijn (o.b.v. berekende gemiddelde snelheid)
+            if (activeLiveExpectedFoxMarkers[area]) {
+                geofenceLayer.removeLayer(activeLiveExpectedFoxMarkers[area]);
+                delete activeLiveExpectedFoxMarkers[area];
+            }
+            if (gf.liveExpectedFoxPoint && gf.liveExpectedFoxPoint.coord && Array.isArray(gf.liveExpectedFoxPoint.coord)) {
+                var livePt = gf.liveExpectedFoxPoint;
+                var walkedDistStr = livePt.distanceMeters >= 1000
+                    ? (livePt.distanceMeters / 1000).toFixed(2) + ' km'
+                    : livePt.distanceMeters + ' m';
+
+                var liveFoxHtml = `
+                    <div class="fox-live-route-marker" style="background-color: ${routeAreaColor};">
+                        <span class="fox-live-route-pulse" style="border-color: ${routeAreaColor};"></span>
+                    </div>
+                `;
+                var liveFoxIcon = L.divIcon({
+                    className: 'fox-live-route-wrapper',
+                    html: liveFoxHtml,
+                    iconSize: [18, 18],
+                    iconAnchor: [9, 9],
+                    popupAnchor: [0, -9]
+                });
+
+                var liveFoxMarker = L.marker(livePt.coord, { icon: liveFoxIcon });
+                var nextClubText = livePt.targetHouse ? ` richting ${livePt.targetHouse}` : '';
+                liveFoxMarker.bindTooltip(`🦊 Verwachte vos ${area}: op ${walkedDistStr} langs route${nextClubText}`, {
+                    permanent: false,
+                    direction: 'top',
+                    className: 'marker-label'
+                });
+                liveFoxMarker.bindPopup(`
+                    <div style="font-size:12px; min-width:195px;">
+                        <b>🦊 Live Verwachte Positie (${area})</b><br>
+                        Afgelegd over looplijn: <b>${walkedDistStr}</b><br>
+                        ${livePt.speedText ? `Snelheid: <b style="color:#2ecc71;">${livePt.speedText}</b><br>` : ''}
+                        ${livePt.targetHouse ? `Eerstvolgende club: <b>${livePt.targetHouse}</b><br>` : ''}
+                        <button onclick="window.navigateToAreaPoint(${livePt.coord[0]}, ${livePt.coord[1]})" style="background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
+                            📍 Navigeer naar verwachte vos
+                        </button>
+                    </div>
+                `);
+                geofenceLayer.addLayer(liveFoxMarker);
+                activeLiveExpectedFoxMarkers[area] = liveFoxMarker;
             }
         }
     });

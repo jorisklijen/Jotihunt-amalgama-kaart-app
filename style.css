@@ -112,7 +112,8 @@ html, body {
 .custom-walker-pin,
 .custom-rd-pin,
 .custom-car-pin,
-.fox-intersection-wrapper {
+.fox-intersection-wrapper,
+.fox-live-route-wrapper {
     background: none !important;
     border: none !important;
     contain: layout style paint;
@@ -127,15 +128,44 @@ html, body {
     transform: translateZ(0);
 }
 
-/* Zichtbaar voorspellingspuntje waar de geschatte looproute en de cirkel elkaar kruisen */
+/* Klein zichtbaar puntje waar de geschatte looproute en de cirkel elkaar kruisen */
 .fox-intersection-dot {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
-    border: 2.5px solid #ffffff;
-    box-shadow: 0 0 6px rgba(0, 0, 0, 0.85);
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.85);
     cursor: pointer;
     transform: translateZ(0);
+}
+
+/* Live verwachte positie van de vos OP de voorspelde looplijn */
+.fox-live-route-marker {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2.5px solid #ffffff;
+    box-shadow: 0 0 7px rgba(0, 0, 0, 0.9);
+    cursor: pointer;
+    transform: translateZ(0);
+}
+
+.fox-live-route-pulse {
+    position: absolute;
+    top: -5px;
+    left: -5px;
+    right: -5px;
+    bottom: -5px;
+    border-radius: 50%;
+    border: 2px solid #ffffff;
+    animation: foxPulseAnim 2s infinite ease-out;
+    pointer-events: none;
+}
+
+@keyframes foxPulseAnim {
+    0% { transform: scale(0.8); opacity: 0.95; }
+    100% { transform: scale(1.75); opacity: 0; }
 }
 
 /* --- MARKER LABELS --- */

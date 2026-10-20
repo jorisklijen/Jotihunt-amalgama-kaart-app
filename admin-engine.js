@@ -6,9 +6,11 @@
    - Gekleurde Dropdown (Hint / Hunt / Anders) waarbij 'Anders' geen gebied/tijd heeft
    - Slimme Loopsnelheid: Negeert verplaatsingen > 7 km/u, weegt laatste segment
      voor 50% en overige geldige segmenten voor 50% (Hunt -> fallback Hint -> 6.5 km/u)
-   - Geschatte Wandelroute (stippellijn) naar dichtstbijzijnde onbezochte locatie
-     + Exacte snijpunt-marker op de groeiende cirkelrand.
-   - Zwevend, versleepbaar & minimaliseerbaar Admin-paneel voor X uur max cirkelgroei.
+   - Semi-logische Voorspellende Wandelroute langs onbezochte clubhuizen
+     (rekening houdend met looprichting + tegenhunt-bezoekplicht)
+   - Live Verwachte Vos-positie langs de wandelroute o.b.v. gemiddelde snelheid
+     + Snijpunt met de groeiende cirkel (die grijs kleurt zodra max tijd X is bereikt).
+   - Zwevend Admin-paneel met groene/rode statusballetjes en dynamische tekstkleur.
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
@@ -17,6 +19,9 @@ var currentEditingRdKey = null;
 
 /* Cache voor opgehaalde wandelroutes zodat we niet elke 30s onnodig API-calls doen */
 var walkingRouteCache = {};
+
+/* Houdt per deelgebied bij of de max groeitijd is bereikt voor de UI-statusballetjes */
+var areaCappedStatus = {};
 
 /* Instellingen voor snelheidsberekening & cirkelgroei (gesynchroniseerd met Firebase) */
 var adminSettings = {
@@ -61,13 +66,19 @@ function evaluateMasterRole() {
     }
 }
 
-/* --- 1. WISKUNDE, RICHTINGSVECTOREN, ROUTE-INTERSECTIE & GEOCODING --- */
+/* --- 1. WISKUNDE, RICHTINGSVECTOREN, ROUTE-LOGICA & GEOCODING --- */
 function getBearing(lat1, lon1, lat2, lon2) {
     var y = Math.sin((lon2 - lon1) * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
     var x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
             Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos((lon2 - lon1) * Math.PI / 180);
     var brng = Math.atan2(y, x) * 180 / Math.PI;
     return (brng + 360) % 360;
+}
+
+/* Kleinste hoekverschil (0 tot 180 graden) tussen twee kompasrichtingen */
+function getAngleDifferenceDeg(angleA, angleB) {
+    var diff = Math.abs(angleA - angleB) % 360;
+    return diff > 180 ? 360 - diff : diff;
 }
 
 function getDestinationLatLng(lat, lng, distMeters, bearingDeg) {
@@ -84,16 +95,80 @@ function getDestinationLatLng(lat, lng, distMeters, bearingDeg) {
     return [endLat * 180 / Math.PI, endLng * 180 / Math.PI];
 }
 
-/* Haalt de geschatte looproute (over echte wegen/wandelpaden) op tussen laatste RD-punt en het doel-clubhuis */
-async function getEstimatedWalkingRoute(startLatLng, endLatLng) {
-    var cacheKey = `${startLatLng[0].toFixed(5)},${startLatLng[1].toFixed(5)}_${endLatLng[0].toFixed(5)},${endLatLng[1].toFixed(5)}`;
+/* Bepaalt een semi-logische keten van nog niet bezochte clubhuizen (max 2 stappen vooruit)
+   op basis van afstand én de huidige looprichting van de vossen */
+function selectSemiLogicalTargetHouses(lastLatLng, movementBearingDeg, unvisitedHouses) {
+    if (!unvisitedHouses || unvisitedHouses.length === 0) return [];
+
+    // Stap 1: Kies het meest logische eerstvolgende onbezochte clubhuis
+    var scoredFirst = unvisitedHouses.map(function(h) {
+        var distKm = getDistanceKm(lastLatLng[0], lastLatLng[1], h.lat, h.lng);
+        var penaltyFactor = 1.0;
+
+        if (movementBearingDeg !== null) {
+            var bearingToHouse = getBearing(lastLatLng[0], lastLatLng[1], h.lat, h.lng);
+            var angleDiff = getAngleDifferenceDeg(movementBearingDeg, bearingToHouse);
+            // Hoe beter het clubhuis in de huidige looprichting ligt, hoe lager de "effectieve afstand"-straf.
+            // Recht vooruit (0°) = factor 0.65 (voorrang!), haaks (90°) = 1.10, recht achteruit (180°) = 1.65.
+            penaltyFactor = 0.65 + (angleDiff / 180) * 1.0;
+        }
+
+        return {
+            house: h,
+            distKm: distKm,
+            score: distKm * penaltyFactor
+        };
+    });
+
+    scoredFirst.sort(function(a, b) { return a.score - b.score; });
+    var primaryTarget = scoredFirst[0].house;
+
+    if (unvisitedHouses.length === 1) {
+        return [primaryTarget];
+    }
+
+    // Stap 2: Kijk vanaf dit eerste doel-clubhuis of er een logisch vervolg-clubhuis is voor een doorlopende route
+    var incomingBearing = getBearing(lastLatLng[0], lastLatLng[1], primaryTarget.lat, primaryTarget.lng);
+    var remainingHouses = unvisitedHouses.filter(function(h) { return h.name !== primaryTarget.name; });
+
+    var scoredSecond = remainingHouses.map(function(h) {
+        var distKm = getDistanceKm(primaryTarget.lat, primaryTarget.lng, h.lat, h.lng);
+        var bearingToNext = getBearing(primaryTarget.lat, primaryTarget.lng, h.lat, h.lng);
+        var angleDiff = getAngleDifferenceDeg(incomingBearing, bearingToNext);
+        // Voorkom onlogische zigzag-routes terug naar waar ze net vandaan kwamen
+        var penaltyFactor = 0.70 + (angleDiff / 180) * 0.95;
+        return {
+            house: h,
+            distKm: distKm,
+            score: distKm * penaltyFactor
+        };
+    });
+
+    scoredSecond.sort(function(a, b) { return a.score - b.score; });
+    var secondaryTarget = scoredSecond[0].house;
+
+    return [primaryTarget, secondaryTarget];
+}
+
+/* Haalt de wandelroute (over echte wegen/wandelpaden) op langs de gekozen waypoints */
+async function getEstimatedWalkingRouteChain(waypointsLatLng) {
+    if (!waypointsLatLng || waypointsLatLng.length < 2) return [];
+
+    var cacheKey = waypointsLatLng.map(function(pt) {
+        return `${pt[0].toFixed(5)},${pt[1].toFixed(5)}`;
+    }).join('_');
+
     if (walkingRouteCache[cacheKey]) {
         return walkingRouteCache[cacheKey];
     }
 
+    var coordString = waypointsLatLng.map(function(pt) {
+        return `${pt[1]},${pt[0]}`;
+    }).join(';');
+
     var endpoints = [
-        `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${startLatLng[1]},${startLatLng[0]};${endLatLng[1]},${endLatLng[0]}?overview=full&geometries=geojson`,
-        `https://router.project-osrm.org/route/v1/foot/${startLatLng[1]},${startLatLng[0]};${endLatLng[1]},${endLatLng[0]}?overview=full&geometries=geojson`
+        `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coordString}?overview=full&geometries=geojson`,
+        `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson`
     ];
 
     for (var i = 0; i < endpoints.length; i++) {
@@ -112,9 +187,9 @@ async function getEstimatedWalkingRoute(startLatLng, endLatLng) {
                             Math.round(c[0] * 100000) / 100000
                         ];
                     });
-                    // Beperk het aantal punten tot max ~120 voor een lichte Firebase-sync
-                    if (coords.length > 120) {
-                        var step = Math.ceil(coords.length / 120);
+                    // Beperk tot max ~140 punten zodat Firebase razendsnel blijft
+                    if (coords.length > 140) {
+                        var step = Math.ceil(coords.length / 140);
                         var simplified = [];
                         for (var j = 0; j < coords.length; j += step) {
                             simplified.push(coords[j]);
@@ -131,12 +206,11 @@ async function getEstimatedWalkingRoute(startLatLng, endLatLng) {
                 }
             }
         } catch (err) {
-            // Probeer volgende routing-server of val terug op directe lijn
+            // Probeer volgende routing-server of val terug op rechte segmenten
         }
     }
 
-    // Fallback als de route-server onbereikbaar is: rechte lijn tussen start en clubgebouw
-    return [startLatLng, endLatLng];
+    return waypointsLatLng;
 }
 
 /* Berekent het exacte snijpunt waar de geschatte looproute en de rand van de groeiende cirkel elkaar ontmoeten */
@@ -153,7 +227,6 @@ function findRouteCircleIntersection(centerLatLng, radiusMeters, routeCoords) {
         var d1 = getDistanceKm(cLat, cLng, p1[0], p1[1]) * 1000;
         var d2 = getDistanceKm(cLat, cLng, p2[0], p2[1]) * 1000;
 
-        // Controleer of dit routedeel van binnen de cirkel naar buiten de cirkel kruist
         if ((d1 <= radiusMeters && d2 >= radiusMeters) || (d1 >= radiusMeters && d2 <= radiusMeters)) {
             if (Math.abs(d2 - d1) < 0.001) {
                 return [p1[0], p1[1]];
@@ -169,6 +242,51 @@ function findRouteCircleIntersection(centerLatLng, radiusMeters, routeCoords) {
         }
     }
     return null;
+}
+
+/* Berekent waar de vos zich LIVE op de wandelroute bevindt door de afgelegde afstand (tijd * gem. snelheid)
+   exact langs de bochten van de berekende wandelroute uit te zetten */
+function getPointAlongRouteByDistance(routeCoords, targetDistanceMeters) {
+    if (!routeCoords || routeCoords.length === 0) return null;
+    if (routeCoords.length === 1 || targetDistanceMeters <= 0) {
+        return {
+            coord: routeCoords[0],
+            distanceWalkedMeters: 0,
+            reachedEnd: false
+        };
+    }
+
+    var accumulatedMeters = 0;
+
+    for (var i = 0; i < routeCoords.length - 1; i++) {
+        var p1 = routeCoords[i];
+        var p2 = routeCoords[i + 1];
+        var segMeters = getDistanceKm(p1[0], p1[1], p2[0], p2[1]) * 1000;
+
+        if (accumulatedMeters + segMeters >= targetDistanceMeters) {
+            var remaining = targetDistanceMeters - accumulatedMeters;
+            var ratio = segMeters > 0 ? (remaining / segMeters) : 0;
+            ratio = Math.max(0, Math.min(1, ratio));
+            var lat = p1[0] + ratio * (p2[0] - p1[0]);
+            var lng = p1[1] + ratio * (p2[1] - p1[1]);
+            return {
+                coord: [
+                    Math.round(lat * 100000) / 100000,
+                    Math.round(lng * 100000) / 100000
+                ],
+                distanceWalkedMeters: Math.round(targetDistanceMeters),
+                reachedEnd: false
+            };
+        }
+        accumulatedMeters += segMeters;
+    }
+
+    var lastPt = routeCoords[routeCoords.length - 1];
+    return {
+        coord: [lastPt[0], lastPt[1]],
+        distanceWalkedMeters: Math.round(accumulatedMeters),
+        reachedEnd: true
+    };
 }
 
 function parseTargetArea(input) {
@@ -366,12 +484,62 @@ function calculateAreaWalkingSpeed(areaPoints) {
     };
 }
 
+/* Update het Admin Instellingen Paneel (statusballetje groen/rood + donkergrijze/lichtgrijze tekst) */
+function updateAdminSettingsPanelStatus() {
+    var statusDot = document.getElementById('admin-max-hours-status-dot');
+    var labelEl = document.getElementById('admin-max-hours-label');
+    var subtextEl = document.getElementById('admin-max-hours-subtext');
+    var areaStatusList = document.getElementById('admin-area-growth-list');
+
+    if (!statusDot || !labelEl || !subtextEl) return;
+
+    var activeAreas = Object.keys(areaCappedStatus);
+    var anyCapped = activeAreas.some(function(a) { return areaCappedStatus[a].isCapped; });
+
+    // Balletje bij de instelling: groen als max groeitijd nog niet gehaald is, rood als deze bereikt is
+    statusDot.className = 'admin-status-dot ' + (anyCapped ? 'status-dot-red' : 'status-dot-green');
+    statusDot.title = anyCapped
+        ? 'Maximale groeitijd is bereikt voor één of meer gebieden'
+        : 'Groei actief (maximale groeitijd nog niet bereikt)';
+
+    // Tekstkleur: donkergrijs (#95a5a6) als max groeitijd nog niet gehaald is, lichtere grijstint (#dcdde1) als max bereikt is
+    if (anyCapped) {
+        labelEl.classList.add('capped-reached');
+        subtextEl.classList.add('capped-reached');
+    } else {
+        labelEl.classList.remove('capped-reached');
+        subtextEl.classList.remove('capped-reached');
+    }
+
+    // Optioneel overzicht per actief deelgebied met eigen groen/rood balletje
+    if (areaStatusList) {
+        if (activeAreas.length === 0) {
+            areaStatusList.style.display = 'none';
+            areaStatusList.innerHTML = '';
+        } else {
+            areaStatusList.style.display = 'flex';
+            areaStatusList.innerHTML = activeAreas.map(function(a) {
+                var st = areaCappedStatus[a];
+                var dotCls = st.isCapped ? 'status-dot-red' : 'status-dot-green';
+                var txtCls = st.isCapped ? 'admin-area-status-item capped-reached' : 'admin-area-status-item';
+                return `<div class="${txtCls}">
+                    <span class="admin-status-dot ${dotCls}"></span>
+                    <span>${a}: ${st.statusLabel}</span>
+                </div>`;
+            }).join('');
+        }
+    }
+}
+
 /* --- 3. CENTRALE BEREKENING & PUBLICATIE NAAR FIREBASE --- */
 var isCalculatingMapState = false;
 
 window.calculateAndPublishMapState = async function(forceManual = false) {
     if (!isAdmin) return;
-    if (!isMasterAdmin && !forceManual) return;
+    if (!isMasterAdmin && !forceManual) {
+        updateAdminSettingsPanelStatus();
+        return;
+    }
     if (isCalculatingMapState && !forceManual) return;
 
     isCalculatingMapState = true;
@@ -379,6 +547,8 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
     try {
         var nowMs = Date.now();
         var computedAreas = {};
+        var newAreaCappedStatus = {};
+
         var maxGrowthHours = Number(adminSettings.maxCircleGrowthHours);
         if (isNaN(maxGrowthHours) || maxGrowthHours <= 0) maxGrowthHours = 3;
         var maxGrowthSeconds = maxGrowthHours * 3600;
@@ -396,50 +566,60 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             var calculatedSpeedKmh = speedResult.speedKmh;
             var speedText = speedResult.speedText;
 
-            // Zoek alle nog NIET bezochte deelnemende locaties in dit deelgebied
+            // 1. Bepaal de pure looprichting van de vossen op basis van hun RD-lijn (laatste 2 à 3 punten)
+            var lineMovementBearingDeg = null;
+            if (points.length >= 2) {
+                var mSin = 0, mCos = 0, mWeight = 0;
+                var pA = points[points.length - 2];
+                var pB = points[points.length - 1];
+                var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
+                mSin += 0.80 * Math.sin(b1); mCos += 0.80 * Math.cos(b1); mWeight += 0.80;
+
+                if (points.length >= 3) {
+                    var pA2 = points[points.length - 3];
+                    var pB2 = points[points.length - 2];
+                    var b2 = getBearing(pA2.latlng[0], pA2.latlng[1], pB2.latlng[0], pB2.latlng[1]) * Math.PI / 180;
+                    mSin += 0.20 * Math.sin(b2); mCos += 0.20 * Math.cos(b2); mWeight += 0.20;
+                }
+                if (mWeight > 0) {
+                    var avgMoveRad = Math.atan2(mSin / mWeight, mCos / mWeight);
+                    lineMovementBearingDeg = ((avgMoveRad * 180 / Math.PI) + 360) % 360;
+                }
+            }
+
+            // 2. Zoek alle nog NIET bezochte deelnemende clubhuizen in dit deelgebied
+            // (Vossen moeten langs de clubs om hun tegenhunt-sticker af te geven)
             var areaHouses = allLocations.filter(function(l) { return l.area === area; });
             var unvisitedHouses = areaHouses.filter(function(h) {
                 var safeKey = h.name.replace(/[.#$[\]]/g, '_');
                 return !houseVisitedStatus[safeKey];
             });
 
-            // Dichtstbijzijnde onbezochte locatie bepalen
-            var nearestUnvisitedHouse = null;
-            if (unvisitedHouses.length > 0) {
-                nearestUnvisitedHouse = unvisitedHouses.reduce(function(prev, curr) {
-                    var dPrev = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], prev.lat, prev.lng);
-                    var dCurr = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], curr.lat, curr.lng);
-                    return dCurr < dPrev ? curr : prev;
-                });
-            }
+            // Selecteer een semi-logische volgorde van onbezochte clubhuizen (rekening houdend met looprichting + afstand)
+            var targetHousesChain = selectSemiLogicalTargetHouses(
+                lastPoint.latlng,
+                lineMovementBearingDeg,
+                unvisitedHouses
+            );
+            var primaryTargetHouse = targetHousesChain.length > 0 ? targetHousesChain[0] : null;
 
-            // Bereken de bestaande richtingshoek (gradenhoek voor de pijlen)
+            // 3. Bereken de gecombineerde richtingshoek voor de gradenhoek-pijlen op de cirkel
             var bearingDeg = null;
             if (points.length >= 2) {
                 var sumSin = 0, sumCos = 0, totalWeight = 0;
-                var pA = points[points.length - 2];
-                var pB = points[points.length - 1];
-                var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
-                sumSin += 0.40 * Math.sin(b1); sumCos += 0.40 * Math.cos(b1); totalWeight += 0.40;
+                var pPrev = points[points.length - 2];
+                var pCurr = points[points.length - 1];
+                var bLast = getBearing(pPrev.latlng[0], pPrev.latlng[1], pCurr.latlng[0], pCurr.latlng[1]) * Math.PI / 180;
+                sumSin += 0.45 * Math.sin(bLast); sumCos += 0.45 * Math.cos(bLast); totalWeight += 0.45;
 
                 if (points.length >= 3) {
-                    var pA2 = points[points.length - 3];
-                    var pB2 = points[points.length - 2];
-                    var b2 = getBearing(pA2.latlng[0], pA2.latlng[1], pB2.latlng[0], pB2.latlng[1]) * Math.PI / 180;
-                    sumSin += 0.10 * Math.sin(b2); sumCos += 0.10 * Math.cos(b2); totalWeight += 0.10;
+                    var pPrev2 = points[points.length - 3];
+                    var bPrev = getBearing(pPrev2.latlng[0], pPrev2.latlng[1], pPrev.latlng[0], pPrev.latlng[1]) * Math.PI / 180;
+                    sumSin += 0.15 * Math.sin(bPrev); sumCos += 0.15 * Math.cos(bPrev); totalWeight += 0.15;
                 }
 
-                var houseForBearing = nearestUnvisitedHouse;
-                if (!houseForBearing && areaHouses.length > 0) {
-                    houseForBearing = areaHouses.reduce(function(prev, curr) {
-                        var dPrev = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], prev.lat, prev.lng);
-                        var dCurr = getDistanceKm(lastPoint.latlng[0], lastPoint.latlng[1], curr.lat, curr.lng);
-                        return dCurr < dPrev ? curr : prev;
-                    });
-                }
-
-                if (houseForBearing) {
-                    var bHouse = getBearing(lastPoint.latlng[0], lastPoint.latlng[1], houseForBearing.lat, houseForBearing.lng) * Math.PI / 180;
+                if (primaryTargetHouse) {
+                    var bHouse = getBearing(lastPoint.latlng[0], lastPoint.latlng[1], primaryTargetHouse.lat, primaryTargetHouse.lng) * Math.PI / 180;
                     sumSin += 0.40 * Math.sin(bHouse); sumCos += 0.40 * Math.cos(bHouse); totalWeight += 0.40;
                 }
 
@@ -483,14 +663,17 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             var isCappedByAge = (!isFuture && rawSecondsPassed >= maxGrowthSeconds);
             var effectiveSecondsPassed = isCappedByAge ? maxGrowthSeconds : rawSecondsPassed;
 
+            var effectiveSpeedKmh = calculatedSpeedKmh !== null ? calculatedSpeedKmh : 6.5;
             var currentRadiusMeters = 1;
             if (!isFuture) {
-                var effectiveSpeedKmh = calculatedSpeedKmh !== null ? calculatedSpeedKmh : 6.5;
                 var metersPerSecond = (effectiveSpeedKmh * 1000) / 3600;
                 currentRadiusMeters = Math.max(1, Math.round(1 + (effectiveSecondsPassed * metersPerSecond)));
             }
 
-            var areaColor = areaColors[area] || "#e74c3c";
+            var baseAreaColor = areaColors[area] || "#e74c3c";
+            // Als de maximale groeitijd verstreken is, wordt de cirkel op de kaart grijs (#7f8c8d)
+            var circleDisplayColor = isCappedByAge ? "#7f8c8d" : baseAreaColor;
+
             var distFormatted = currentRadiusMeters >= 1000
                 ? (currentRadiusMeters / 1000).toFixed(1) + ' km'
                 : currentRadiusMeters + ' m';
@@ -498,8 +681,13 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             var badgeText = isFuture
                 ? `🎯 ${area}: 1 m (in toekomst)`
                 : (isCappedByAge
-                    ? `⏸️ ${area}: ${distFormatted} (max ${maxGrowthHours}u)`
+                    ? `⏸️ ${area}: ${distFormatted} (max ${maxGrowthHours}u bereikt)`
                     : `🎯 ${area}: ${distFormatted}`);
+
+            newAreaCappedStatus[area] = {
+                isCapped: isCappedByAge,
+                statusLabel: isCappedByAge ? `Max (${maxGrowthHours}u) bereikt` : `Groeit (${distFormatted})`
+            };
 
             var arrows = [];
             if (bearingDeg !== null && !isFuture) {
@@ -513,24 +701,40 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 });
             }
 
-            // Bereken geschatte looproute (stippellijn) + snijpunt op de groeiende cirkel
+            // 4. Bereken de voorspellende looproute (alleen vooruit richting de logische onbezochte clubhuizen)
             var estimatedWalkRoute = [];
             var estimatedTargetHouseName = "";
             var circleIntersectionPoint = null;
+            var liveExpectedFoxPoint = null;
 
-            if (nearestUnvisitedHouse) {
-                estimatedTargetHouseName = nearestUnvisitedHouse.name;
-                estimatedWalkRoute = await getEstimatedWalkingRoute(
-                    lastPoint.latlng,
-                    [nearestUnvisitedHouse.lat, nearestUnvisitedHouse.lng]
-                );
+            if (targetHousesChain.length > 0) {
+                var waypoints = [lastPoint.latlng];
+                targetHousesChain.forEach(function(h) {
+                    waypoints.push([h.lat, h.lng]);
+                });
+
+                estimatedTargetHouseName = targetHousesChain.map(function(h) { return h.name; }).join(" ➔ ");
+                estimatedWalkRoute = await getEstimatedWalkingRouteChain(waypoints);
 
                 if (!isFuture && estimatedWalkRoute && estimatedWalkRoute.length >= 2) {
+                    // A. Snijpunt waar de geschatte looproute en de groeiende cirkel elkaar kruisen
                     circleIntersectionPoint = findRouteCircleIntersection(
                         lastPoint.latlng,
                         currentRadiusMeters,
                         estimatedWalkRoute
                     );
+
+                    // B. Live verwachte positie van de vos langs de wandelroute o.b.v. de berekende gemiddelde snelheid
+                    var walkedPos = getPointAlongRouteByDistance(estimatedWalkRoute, currentRadiusMeters);
+                    if (walkedPos && walkedPos.coord) {
+                        liveExpectedFoxPoint = {
+                            coord: walkedPos.coord,
+                            distanceMeters: walkedPos.distanceWalkedMeters,
+                            speedText: speedText,
+                            targetHouse: primaryTargetHouse ? primaryTargetHouse.name : "",
+                            reachedEnd: walkedPos.reachedEnd
+                        };
+                    }
                 }
             }
 
@@ -541,15 +745,21 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 geofence: {
                     center: lastPoint.latlng,
                     radiusMeters: currentRadiusMeters,
-                    color: areaColor,
+                    color: circleDisplayColor,
+                    areaColor: baseAreaColor,
+                    isCappedByAge: isCappedByAge,
                     badgeText: badgeText,
                     arrows: arrows,
                     estimatedWalkRoute: estimatedWalkRoute,
                     estimatedTargetHouse: estimatedTargetHouseName,
-                    intersectionPoint: circleIntersectionPoint
+                    intersectionPoint: circleIntersectionPoint,
+                    liveExpectedFoxPoint: liveExpectedFoxPoint
                 }
             };
         }
+
+        areaCappedStatus = newAreaCappedStatus;
+        updateAdminSettingsPanelStatus();
 
         var processedOtherPoints = rawOtherPoints.map(function(pt) {
             return {
@@ -635,7 +845,7 @@ function injectAdminUI() {
             background: #2c3e50; color: #ecf0f1;
             border: 1px solid #4a6278; border-radius: 8px;
             box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-            width: 235px; max-width: 78vw;
+            width: 255px; max-width: 82vw;
             font-size: 0.8rem; user-select: none; touch-action: none;
             overflow: hidden;
         }
@@ -656,17 +866,53 @@ function injectAdminUI() {
         .admin-setting-row {
             display: flex; justify-content: space-between; align-items: center; gap: 8px;
         }
+        .admin-setting-label-wrap {
+            display: flex; align-items: center; gap: 7px; flex: 1;
+        }
+        /* Standaard donkergrijs (#95a5a6) wanneer max groeitijd nog NIET gehaald is;
+           wordt lichtere grijstint (#dcdde1) zodra max groeitijd bereikt is */
         .admin-setting-row label {
-            font-size: 0.76rem; color: #bdc3c7; font-weight: 600; line-height: 1.25;
+            font-size: 0.76rem; color: #95a5a6; font-weight: 600; line-height: 1.25;
+            transition: color 0.2s ease;
+        }
+        .admin-setting-row label.capped-reached {
+            color: #dcdde1 !important;
+        }
+        .admin-status-dot {
+            width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+            display: inline-block; transition: background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .status-dot-green {
+            background-color: #2ecc71;
+            box-shadow: 0 0 5px rgba(46, 204, 113, 0.75);
+        }
+        .status-dot-red {
+            background-color: #e74c3c;
+            box-shadow: 0 0 5px rgba(231, 76, 60, 0.85);
         }
         #admin-max-hours-input {
-            width: 68px; padding: 5px 6px; border-radius: 5px;
+            width: 64px; padding: 5px 6px; border-radius: 5px;
             border: 1px solid #4a6278; background: #34495e; color: #ffffff;
             font-size: 0.85rem; font-weight: bold; text-align: center; outline: none;
         }
         #admin-max-hours-input:focus { border-color: #3498db; }
         .admin-setting-subtext {
             font-size: 0.7rem; color: #95a5a6; line-height: 1.25;
+            transition: color 0.2s ease;
+        }
+        .admin-setting-subtext.capped-reached {
+            color: #dcdde1 !important;
+        }
+        #admin-area-growth-list {
+            display: none; flex-direction: column; gap: 4px;
+            border-top: 1px solid #3d566e; padding-top: 6px; margin-top: 2px;
+        }
+        .admin-area-status-item {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 0.71rem; color: #95a5a6; font-weight: 600;
+        }
+        .admin-area-status-item.capped-reached {
+            color: #dcdde1 !important;
         }
     `;
     document.head.appendChild(style);
@@ -800,12 +1046,16 @@ function injectAdminUI() {
             </div>
             <div id="admin-settings-body">
                 <div class="admin-setting-row">
-                    <label for="admin-max-hours-input">Max. groeitijd cirkel (<b>X</b> uur):</label>
+                    <div class="admin-setting-label-wrap">
+                        <span id="admin-max-hours-status-dot" class="admin-status-dot status-dot-green" title="Groei actief"></span>
+                        <label id="admin-max-hours-label" for="admin-max-hours-input">Max. groeitijd cirkel (<b>X</b> uur):</label>
+                    </div>
                     <input type="number" id="admin-max-hours-input" min="0.5" max="48" step="0.5" value="3">
                 </div>
-                <div class="admin-setting-subtext">
+                <div id="admin-max-hours-subtext" class="admin-setting-subtext">
                     Cirkel stopt met groeien als laatste punt ouder is dan X uur. Snelheid negeert segmenten &gt; 7 km/u.
                 </div>
+                <div id="admin-area-growth-list"></div>
             </div>
         `;
         mapWrapper.appendChild(settingsPanel);
@@ -1139,6 +1389,8 @@ window.clearRdPoints = function() {
     var pinInput = prompt("Voer de admin-pincode in om de RD-lijnen te wissen:", "");
     if (pinInput === "6546") {
         walkingRouteCache = {};
+        areaCappedStatus = {};
+        updateAdminSettingsPanelStatus();
         db.ref('rdPoints').remove().then(function() {
             db.ref('computedMapState').remove();
             alert("RD-punten succesvol gewist.");
@@ -1186,6 +1438,29 @@ window.initAdminEngine = function() {
             }
         }
         window.calculateAndPublishMapState(false);
+    });
+
+    // Zorg dat ook Standby-Admins de statusballetjes en tekstkleuren synchroon zien
+    db.ref('computedMapState').on('value', function(snapshot) {
+        var state = snapshot.val();
+        var syncedStatus = {};
+        if (state && state.areas) {
+            Object.keys(state.areas).forEach(function(a) {
+                var gf = state.areas[a].geofence;
+                if (gf) {
+                    var isCap = !!gf.isCappedByAge;
+                    var distStr = gf.radiusMeters >= 1000
+                        ? (gf.radiusMeters / 1000).toFixed(1) + ' km'
+                        : gf.radiusMeters + ' m';
+                    syncedStatus[a] = {
+                        isCapped: isCap,
+                        statusLabel: isCap ? `Max (${adminSettings.maxCircleGrowthHours}u) bereikt` : `Groeit (${distStr})`
+                    };
+                }
+            });
+        }
+        areaCappedStatus = syncedStatus;
+        updateAdminSettingsPanelStatus();
     });
 
     db.ref('rdPoints').on('value', function(snapshot) {
