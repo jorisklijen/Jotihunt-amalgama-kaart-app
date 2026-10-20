@@ -117,7 +117,7 @@ function buildHousePopupHtml(loc) {
     var radiusBtnBg = hasActiveRadius ? "#c0392b" : "#8e44ad";
     var radiusBtnHtml = `<button onclick="window.toggleHouseRadius('${escapedName}', ${loc.lat}, ${loc.lng})" style="margin-top:6px; background:${radiusBtnBg}; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">${radiusBtnText}</button>`;
 
-    return `<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22; font-weight:bold;">Bezocht</span>' : '<span style="color:#2ecc71; font-weight:bold;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${radiusBtnHtml}${visitedBtnHtml}`;
+    return `<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22; font-weight:bold;">Bezocht (Tegenhunt)</span>' : '<span style="color:#2ecc71; font-weight:bold;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${radiusBtnHtml}${visitedBtnHtml}`;
 }
 
 window.toggleHouseRadius = function (houseName, lat, lng) {
@@ -208,8 +208,10 @@ var activeGeofenceCircles = {};
 var activeGeofenceBadges = {};
 var activeGeofenceArrows = {};
 var activeEstimatedRoutes = {};
+var activeAlternativeRoutes = {};
 var activeIntersectionDots = {};
 var activeLiveExpectedFoxMarkers = {};
+var activeAltExpectedFoxMarkers = {};
 
 function createWalkerMarker(pt) {
     var isOscar = (pt.area === "Oscar");
@@ -228,13 +230,44 @@ function createWalkerMarker(pt) {
     var marker = L.marker(pt.latlng, { icon: customIcon });
     marker.bindTooltip(labelText, { permanent: false, direction: 'right', className: 'marker-label' });
 
-    var popupContent = `<div style="font-size:12px; min-width:190px;">
+    // Als dit het LAATSTE RD-punt van een deelgebied is én de gebruiker is Admin:
+    // toon een dropdown om direct vanuit deze popup een doel-clubhuis te locken of op Automatisch te zetten!
+    var targetLockHtml = '';
+    if (isAdmin && pt.isLatest && pt.area) {
+        var areaHouses = allLocations.filter(function(l) { return l.area === pt.area; });
+        var unvisitedHouses = areaHouses.filter(function(h) {
+            var sKey = h.name.replace(/[.#$[\]]/g, '_');
+            return !houseVisitedStatus[sKey];
+        });
+        var currentLocked = pt.lockedTarget || "";
+        var autoLabel = pt.autoTarget ? `🤖 Auto (${pt.autoTarget})` : `🤖 Automatisch (Slim)`;
+
+        var lockOptions = `<option value="">${autoLabel}</option>`;
+        unvisitedHouses.forEach(function(h) {
+            var selectedAttr = (h.name === currentLocked) ? 'selected' : '';
+            lockOptions += `<option value="${h.name.replace(/"/g, '&quot;')}" ${selectedAttr}>🔒 Lock: ${h.name}</option>`;
+        });
+
+        targetLockHtml = `
+            <hr style="margin:6px 0; border:0; border-top:1px solid #4a627a;">
+            <label style="font-size:11px; color:#bdc3c7; font-weight:bold; display:block; margin-bottom:3px;">🎯 Doel-clubhuis (Route):</label>
+            <select onchange="if(window.setAreaLockedTarget) window.setAreaLockedTarget('${pt.area}', this.value)" style="width:100%; padding:4px; font-size:11px; font-weight:bold;">
+                ${lockOptions}
+            </select>
+        `;
+    } else if (pt.isLatest && pt.lockedTarget) {
+        targetLockHtml = `<span style="font-size:11px; color:#f1c40f;">🔒 Gelockt doel: <b>${pt.lockedTarget}</b></span><br>`;
+    }
+
+    var popupContent = `<div style="font-size:12px; min-width:195px;">
         <b>${pt.name}</b><br>
         ${pt.time ? `<span>Tijd: <b>${pt.time}</b></span><br>` : ''}
         ${pt.extraInfo ? `<span>Loopsnelheid: <b style="color:#2ecc71;">${pt.extraInfo}</b></span><br>` : ''}
+        ${(!isAdmin ? targetLockHtml : '')}
         <button onclick="window.navigateToAreaPoint(${pt.latlng[0]}, ${pt.latlng[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
             📍 Navigeer naar dit punt
         </button>
+        ${(isAdmin ? targetLockHtml : '')}
         ${(isAdmin && pt.key) ? `
             <hr style="margin:6px 0; border:0; border-top:1px solid #4a627a;">
             <div style="display:flex; gap:5px; margin-top:4px;">
@@ -286,6 +319,10 @@ function renderComputedMapState(state) {
                 geofenceLayer.removeLayer(activeEstimatedRoutes[area]);
                 delete activeEstimatedRoutes[area];
             }
+            if (activeAlternativeRoutes[area]) {
+                geofenceLayer.removeLayer(activeAlternativeRoutes[area]);
+                delete activeAlternativeRoutes[area];
+            }
             if (activeIntersectionDots[area]) {
                 geofenceLayer.removeLayer(activeIntersectionDots[area]);
                 delete activeIntersectionDots[area];
@@ -293,6 +330,10 @@ function renderComputedMapState(state) {
             if (activeLiveExpectedFoxMarkers[area]) {
                 geofenceLayer.removeLayer(activeLiveExpectedFoxMarkers[area]);
                 delete activeLiveExpectedFoxMarkers[area];
+            }
+            if (activeAltExpectedFoxMarkers[area]) {
+                geofenceLayer.removeLayer(activeAltExpectedFoxMarkers[area]);
+                delete activeAltExpectedFoxMarkers[area];
             }
         }
     });
@@ -324,7 +365,7 @@ function renderComputedMapState(state) {
             rdRouteLayer.addLayer(polyline);
         }
 
-        // 3. Teken of update voorberekende Geofence, Pijlen, Voorspellende Looproute & Live Verwachte Positie
+        // 3. Teken of update voorberekende Geofence, Pijlen, Voorspellende Looproutes & Live Verwachte Posities
         if (areaObj.geofence) {
             var gf = areaObj.geofence;
             var circleColor = gf.color || "#7f8c8d"; // Wordt grijs (#7f8c8d) zodra max groeitijd is verstreken
@@ -386,7 +427,7 @@ function renderComputedMapState(state) {
                 });
             }
 
-            // 4. Teken voorspellende wandelroute richting logische onbezochte clubhuizen (Stippellijn)
+            // 4A. Teken primaire voorspellende wandelroute richting onbezochte clubhuizen (Stippellijn)
             if (activeEstimatedRoutes[area]) {
                 geofenceLayer.removeLayer(activeEstimatedRoutes[area]);
                 delete activeEstimatedRoutes[area];
@@ -394,15 +435,35 @@ function renderComputedMapState(state) {
             if (gf.estimatedWalkRoute && Array.isArray(gf.estimatedWalkRoute) && gf.estimatedWalkRoute.length >= 2) {
                 var walkLine = L.polyline(gf.estimatedWalkRoute, {
                     color: routeAreaColor,
-                    weight: 3,
-                    dashArray: '3, 8',
-                    opacity: 0.9,
+                    weight: 3.5,
+                    dashArray: '4, 8',
+                    opacity: 0.92,
                     className: 'estimated-walk-line'
                 });
-                var targetHouseLabel = gf.estimatedTargetHouse ? `<br>Route langs onbezocht: <b>${gf.estimatedTargetHouse}</b>` : '';
-                walkLine.bindPopup(`<b>🥾 Voorspelde looproute (${area})</b>${targetHouseLabel}`);
+                var targetHouseLabel = gf.estimatedTargetHouse ? `<br>Doelroute: <b>${gf.estimatedTargetHouse}</b>` : '';
+                var visitedNote = gf.visitedOriginHouse ? `<br>Herkomst (bezocht): <b>${gf.visitedOriginHouse}</b>` : '';
+                walkLine.bindPopup(`<b>🥾 Primaire voorspelde looproute (${area})</b>${targetHouseLabel}${visitedNote}`);
                 geofenceLayer.addLayer(walkLine);
                 activeEstimatedRoutes[area] = walkLine;
+            }
+
+            // 4B. Teken alternatieve parallelroute (mijdt N-wegen / drukke wegen) indien aanwezig
+            if (activeAlternativeRoutes[area]) {
+                geofenceLayer.removeLayer(activeAlternativeRoutes[area]);
+                delete activeAlternativeRoutes[area];
+            }
+            if (gf.alternativeWalkRoute && Array.isArray(gf.alternativeWalkRoute) && gf.alternativeWalkRoute.length >= 2) {
+                var altLine = L.polyline(gf.alternativeWalkRoute, {
+                    color: routeAreaColor,
+                    weight: 2.5,
+                    dashArray: '2, 7',
+                    opacity: 0.72,
+                    className: 'alternative-walk-line'
+                });
+                var altTargetLabel = gf.estimatedTargetHouse ? `<br>Doel: <b>${gf.estimatedTargetHouse}</b>` : '';
+                altLine.bindPopup(`<b>🛤️ Alternatieve parallelroute (${area})</b><br>Mijdt N-wegen / kiest parallelweg${altTargetLabel}`);
+                geofenceLayer.addLayer(altLine);
+                activeAlternativeRoutes[area] = altLine;
             }
 
             // 5. Teken klein maar zichtbaar puntje waar de geschatte looproute en de groeiende cirkel elkaar kruisen
@@ -439,7 +500,7 @@ function renderComputedMapState(state) {
                 activeIntersectionDots[area] = dotMarker;
             }
 
-            // 6. Teken LIVE Verwachte Positie van de vos óp de voorspelde looplijn (o.b.v. berekende gemiddelde snelheid)
+            // 6A. Teken LIVE Verwachte Positie van de vos óp de primaire voorspelde looplijn
             if (activeLiveExpectedFoxMarkers[area]) {
                 geofenceLayer.removeLayer(activeLiveExpectedFoxMarkers[area]);
                 delete activeLiveExpectedFoxMarkers[area];
@@ -464,18 +525,20 @@ function renderComputedMapState(state) {
                 });
 
                 var liveFoxMarker = L.marker(livePt.coord, { icon: liveFoxIcon });
-                var nextClubText = livePt.targetHouse ? ` richting ${livePt.targetHouse}` : '';
-                liveFoxMarker.bindTooltip(`🦊 Verwachte vos ${area}: op ${walkedDistStr} langs route${nextClubText}`, {
+                var lockBadge = livePt.isLocked ? '🔒 ' : '';
+                var nextClubText = livePt.targetHouse ? ` richting ${lockBadge}${livePt.targetHouse}` : '';
+                liveFoxMarker.bindTooltip(`🦊 Verwachte vos ${area}: op ${walkedDistStr}${nextClubText}`, {
                     permanent: false,
                     direction: 'top',
                     className: 'marker-label'
                 });
                 liveFoxMarker.bindPopup(`
-                    <div style="font-size:12px; min-width:195px;">
+                    <div style="font-size:12px; min-width:200px;">
                         <b>🦊 Live Verwachte Positie (${area})</b><br>
                         Afgelegd over looplijn: <b>${walkedDistStr}</b><br>
                         ${livePt.speedText ? `Snelheid: <b style="color:#2ecc71;">${livePt.speedText}</b><br>` : ''}
-                        ${livePt.targetHouse ? `Eerstvolgende club: <b>${livePt.targetHouse}</b><br>` : ''}
+                        ${livePt.targetHouse ? `Doel-clubhuis: <b>${lockBadge}${livePt.targetHouse}</b><br>` : ''}
+                        ${livePt.visitedOriginHouse ? `Laatst bezocht: <b>${livePt.visitedOriginHouse}</b><br>` : ''}
                         <button onclick="window.navigateToAreaPoint(${livePt.coord[0]}, ${livePt.coord[1]})" style="background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
                             📍 Navigeer naar verwachte vos
                         </button>
@@ -483,6 +546,46 @@ function renderComputedMapState(state) {
                 `);
                 geofenceLayer.addLayer(liveFoxMarker);
                 activeLiveExpectedFoxMarkers[area] = liveFoxMarker;
+            }
+
+            // 6B. Teken LIVE Verwachte Positie op de alternatieve parallelroute (indien ingeschakeld)
+            if (activeAltExpectedFoxMarkers[area]) {
+                geofenceLayer.removeLayer(activeAltExpectedFoxMarkers[area]);
+                delete activeAltExpectedFoxMarkers[area];
+            }
+            if (gf.altLiveExpectedFoxPoint && gf.altLiveExpectedFoxPoint.coord && Array.isArray(gf.altLiveExpectedFoxPoint.coord)) {
+                var altPt = gf.altLiveExpectedFoxPoint;
+                var altDistStr = altPt.distanceMeters >= 1000
+                    ? (altPt.distanceMeters / 1000).toFixed(2) + ' km'
+                    : altPt.distanceMeters + ' m';
+
+                var altDotHtml = `<div class="fox-alt-route-marker" style="background-color: ${routeAreaColor};"></div>`;
+                var altDotIcon = L.divIcon({
+                    className: 'fox-alt-route-wrapper',
+                    html: altDotHtml,
+                    iconSize: [13, 13],
+                    iconAnchor: [6, 6],
+                    popupAnchor: [0, -6]
+                });
+
+                var altMarker = L.marker(altPt.coord, { icon: altDotIcon });
+                altMarker.bindTooltip(`🛤️ Parallel-positie ${area} (${altDistStr})`, {
+                    permanent: false,
+                    direction: 'top',
+                    className: 'marker-label'
+                });
+                altMarker.bindPopup(`
+                    <div style="font-size:12px; min-width:190px;">
+                        <b>🛤️ Alternatieve Positie (${area})</b><br>
+                        Parallelroute (mijdt N-wegen)<br>
+                        Afgelegd: <b>${altDistStr}</b><br>
+                        <button onclick="window.navigateToAreaPoint(${altPt.coord[0]}, ${altPt.coord[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
+                            📍 Navigeer naar parallel-punt
+                        </button>
+                    </div>
+                `);
+                geofenceLayer.addLayer(altMarker);
+                activeAltExpectedFoxMarkers[area] = altMarker;
             }
         }
     });

@@ -113,7 +113,8 @@ html, body {
 .custom-rd-pin,
 .custom-car-pin,
 .fox-intersection-wrapper,
-.fox-live-route-wrapper {
+.fox-live-route-wrapper,
+.fox-alt-route-wrapper {
     background: none !important;
     border: none !important;
     contain: layout style paint;
@@ -139,7 +140,7 @@ html, body {
     transform: translateZ(0);
 }
 
-/* Live verwachte positie van de vos OP de voorspelde looplijn */
+/* Live verwachte positie van de vos OP de primaire voorspelde looplijn */
 .fox-live-route-marker {
     position: relative;
     width: 16px;
@@ -161,6 +162,18 @@ html, body {
     border: 2px solid #ffffff;
     animation: foxPulseAnim 2s infinite ease-out;
     pointer-events: none;
+}
+
+/* Verwachte positie op de alternatieve parallelroute (ruitvormig met gestippelde/witte rand) */
+.fox-alt-route-marker {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.85);
+    cursor: pointer;
+    transform: rotate(45deg) translateZ(0);
+    opacity: 0.9;
 }
 
 @keyframes foxPulseAnim {
