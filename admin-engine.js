@@ -6,10 +6,12 @@
    - Gekleurde Dropdown (Hint / Hunt / Anders) waarbij 'Anders' geen gebied/tijd heeft
    - Slimme Loopsnelheid: Negeert verplaatsingen > 7 km/u, weegt laatste segment
      voor 50% en overige geldige segmenten voor 50% (Hunt -> fallback Hint -> 6.5 km/u)
-   - Semi-logische Voorspellende Wandelroute langs onbezochte clubhuizen:
-     Neemt nu OOK al bezochte clubhuizen mee als herkomst-vector / ankerpunt!
+   - NIEUW: Toggle voor Loopsnelheid o.b.v. snelste wandelroute (i.p.v. hemelsbreed)
+   - NIEUW: Hard Waypoint Pinning tot exact op het coördinaat van elk clubgebouw
+   - NIEUW: Verankering van bezochte clubgebouwen langs het pad (tussen RD-punten of na laatste RD-punt)
+   - NIEUW: Geen dubbele wegen lopen (backtracking-preventie met 15-minuten omweg-regel)
+   - NIEUW: Volledige keten-opbouw voor zowel primaire als alternatieve parallelroute (voorbij cirkel)
    - Handmatige Doel-Clubhuis Lock per deelgebied (via laatste RD-punt popup én Admin-menu)
-   - Instelbare Alternatieve Route (mijdt N-wegen / drukke wegen en kiest parallelwegen)
    - Live Verwachte Vos-positie langs de wandelroute + Snijpunt met cirkelrand
    - Zwevend Admin-paneel met groene/rode statusballetjes en dynamische tekstkleur.
    ========================================================================== */
@@ -18,18 +20,20 @@ var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], 
 var rawOtherPoints = []; // Voor punten met type "Anders" (zonder deelgebied en tijdstip)
 var currentEditingRdKey = null;
 
-/* Cache voor opgehaalde wandelroutes zodat we niet elke 30s onnodig API-calls doen */
+/* Cache voor opgehaalde wandelroutes en segmentafstanden zodat we niet onnodig API-calls doen */
 var walkingRouteCache = {};
+var segmentDistanceCache = {};
 
 /* Houdt per deelgebied bij of de max groeitijd is bereikt voor de UI-statusballetjes */
 var areaCappedStatus = {};
 
-/* Instellingen voor snelheidsberekening, cirkelgroei, alternatieve routes & locked targets */
+/* Instellingen voor snelheidsberekening, cirkelgroei, alternatieve routes, wandelroute-snelheid & locked targets */
 var adminSettings = {
     maxCircleGrowthHours: 3,
     maxWalkingSpeedKmh: 7.0,
     defaultSpeedKmh: 6.5,
     showAltQuietRoute: true,
+    useRouteSpeedCalculation: false,
     lockedTargets: {} // { "Alpha": "Naam van Clubhuis", ... }
 };
 
@@ -98,6 +102,29 @@ function getDestinationLatLng(lat, lng, distMeters, bearingDeg) {
     return [endLat * 180 / Math.PI, endLng * 180 / Math.PI];
 }
 
+/* Kortste afstand in km van een punt P tot een lijnstuk A-B */
+function getPointToSegmentDistanceKm(pLat, pLng, aLat, aLng, bLat, bLng) {
+    var dAB = getDistanceKm(aLat, aLng, bLat, bLng);
+    if (dAB < 0.001) return getDistanceKm(pLat, pLng, aLat, aLng);
+
+    var cosLat = Math.cos(((aLat + bLat) / 2) * Math.PI / 180);
+    var ax = aLng * cosLat * 111.32, ay = aLat * 111.32;
+    var bx = bLng * cosLat * 111.32, by = bLat * 111.32;
+    var px = pLng * cosLat * 111.32, py = pLat * 111.32;
+
+    var vx = bx - ax, vy = by - ay;
+    var wx = px - ax, wy = py - ay;
+    var c1 = wx * vx + wy * vy;
+    if (c1 <= 0) return getDistanceKm(pLat, pLng, aLat, aLng);
+    var c2 = vx * vx + vy * vy;
+    if (c2 <= c1) return getDistanceKm(pLat, pLng, bLat, bLng);
+
+    var b = c1 / c2;
+    var projLng = aLng + b * (bLng - aLng);
+    var projLat = aLat + b * (bLat - aLat);
+    return getDistanceKm(pLat, pLng, projLat, projLng);
+}
+
 /* Hulpfunctie: Geeft de timestamp terug waarop een clubhuis als bezocht is gemarkeerd (of 1 als alleen boolean 'true') */
 function getHouseVisitedTimestamp(houseName) {
     var safeKey = houseName.replace(/[.#$[\]]/g, '_');
@@ -108,10 +135,58 @@ function getHouseVisitedTimestamp(houseName) {
     return 1; // Standaard boolean true
 }
 
+/* Verankering van bezochte clubgebouwen langs de historische RD-route:
+   Als een clubhuis op 'Bezocht' staat en langs het pad tussen twee opeenvolgende RD-punten ligt,
+   wordt dit clubgebouw als verplicht tussenpunt opgenomen zodat de RD-lijn daadwerkelijk tot aan het clubhuis loopt. */
+function buildHistoricalCoordsWithVisitedHouses(sortedPoints, visitedHouses) {
+    if (!sortedPoints || sortedPoints.length === 0) return [];
+    if (sortedPoints.length === 1) return [sortedPoints[0].latlng];
+
+    var resultCoords = [sortedPoints[0].latlng];
+    var usedHouses = {};
+
+    for (var i = 0; i < sortedPoints.length - 1; i++) {
+        var pA = sortedPoints[i];
+        var pB = sortedPoints[i + 1];
+        var segDistKm = getDistanceKm(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]);
+        var tA = getPointTimestampMs(pA);
+        var tB = getPointTimestampMs(pB);
+
+        if (visitedHouses && visitedHouses.length > 0 && segDistKm > 0.05) {
+            var candidates = [];
+            visitedHouses.forEach(function(h) {
+                if (usedHouses[h.name]) return;
+                var dToSeg = getPointToSegmentDistanceKm(h.lat, h.lng, pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]);
+                var dA = getDistanceKm(pA.latlng[0], pA.latlng[1], h.lat, h.lng);
+                var dB = getDistanceKm(h.lat, h.lng, pB.latlng[0], pB.latlng[1]);
+                var detourKm = (dA + dB) - segDistKm;
+
+                var ts = getHouseVisitedTimestamp(h.name);
+                var timeMatch = (ts && ts > 1000 && ts >= (tA - 15 * 60000) && ts <= (tB + 15 * 60000));
+
+                // Ligt het bezochte clubhuis vlak langs het segment (< 450m) of klopt de bezoek-timestamp binnen een redelijke omweg?
+                if ((dToSeg <= 0.45 && detourKm <= 0.85) || (timeMatch && detourKm <= 2.2)) {
+                    candidates.push({ house: h, dA: dA });
+                }
+            });
+
+            candidates.sort(function(a, b) { return a.dA - b.dA; });
+            candidates.forEach(function(c) {
+                usedHouses[c.house.name] = true;
+                resultCoords.push([c.house.lat, c.house.lng]);
+            });
+        }
+
+        resultCoords.push(pB.latlng);
+    }
+
+    return resultCoords;
+}
+
 /* Analyseert de reeds BEZOCHTE clubgebouwen in het deelgebied om te bepalen:
    1. Vanuit welke sector/club de vossen zijn gekomen (zodat de route logisch vooruit loopt, weg van bezochte clubs)
-   2. Of een bezocht clubhuis ná het laatste RD-punt is afgevinkt (of heel dicht bij het laatste RD-punt ligt) */
-function analyzeVisitedHousesContext(lastPointLatLng, lastPointMs, visitedHouses) {
+   2. Of een bezocht clubhuis ná het laatste RD-punt is afgevinkt óf vlak bij het laatste RD-punt ligt in de looprichting */
+function analyzeVisitedHousesContext(lastPointLatLng, lastPointMs, visitedHouses, lineMovementBearingDeg, historicalAnchoredCoords) {
     if (!visitedHouses || visitedHouses.length === 0) {
         return {
             originBearingDeg: null,
@@ -120,7 +195,6 @@ function analyzeVisitedHousesContext(lastPointLatLng, lastPointMs, visitedHouses
         };
     }
 
-    // Zoek het meest recent bezochte clubhuis (indien timestamps bekend zijn) of het dichtstbijzijnde bezochte clubhuis
     var sortedByDistance = visitedHouses.slice().sort(function(a, b) {
         var dA = getDistanceKm(lastPointLatLng[0], lastPointLatLng[1], a.lat, a.lng);
         var dB = getDistanceKm(lastPointLatLng[0], lastPointLatLng[1], b.lat, b.lng);
@@ -130,33 +204,56 @@ function analyzeVisitedHousesContext(lastPointLatLng, lastPointMs, visitedHouses
     var nearestVisited = sortedByDistance[0];
     var nearestDistKm = getDistanceKm(lastPointLatLng[0], lastPointLatLng[1], nearestVisited.lat, nearestVisited.lng);
 
-    // Kijk of er een clubhuis expliciet NA het tijdstip van het laatste RD-punt op bezocht is gezet
+    // Check of een bezocht clubhuis al eerder in het historische RD-spoor is verankerd
+    var alreadyInHistory = function(h) {
+        if (!historicalAnchoredCoords || historicalAnchoredCoords.length < 2) return false;
+        // Sla het allerlaatste punt (lastPointLatLng) over in de vergelijking
+        for (var i = 0; i < historicalAnchoredCoords.length - 1; i++) {
+            var c = historicalAnchoredCoords[i];
+            if (getDistanceKm(c[0], c[1], h.lat, h.lng) < 0.03) return true;
+        }
+        return false;
+    };
+
+    // 1. Kijk of er een clubhuis expliciet NA het tijdstip van het laatste RD-punt op bezocht is gezet
     var visitedAfterLastRd = null;
     var latestVisitTs = 0;
     visitedHouses.forEach(function(h) {
+        if (alreadyInHistory(h)) return;
         var ts = getHouseVisitedTimestamp(h.name);
-        if (ts && ts > 1000 && ts > (lastPointMs + 60000) && ts > latestVisitTs) {
-            // Alleen meenemen als het binnen een realistische straal (bijv. 6 km) van het laatste RD-punt ligt
-            var d = getDistanceKm(lastPointLatLng[0], lastPointLatLng[1], h.lat, h.lng);
-            if (d <= 6.0) {
-                latestVisitTs = ts;
-                visitedAfterLastRd = h;
-            }
+        var d = getDistanceKm(lastPointLatLng[0], lastPointLatLng[1], h.lat, h.lng);
+        if (ts && ts > 1000 && ts > (lastPointMs + 60000) && ts > latestVisitTs && d <= 6.0) {
+            latestVisitTs = ts;
+            visitedAfterLastRd = h;
         }
     });
+
+    // 2. Als er geen latere timestamp is, maar een bezocht clubgebouw ligt vlak bij het laatste RD-punt (bijv. <= 650m)
+    //    én nog niet eerder in het RD-spoor gepasseerd, veranker dit gebouw dan zodat de lijn er echt langs/in loopt!
+    if (!visitedAfterLastRd && nearestVisited && !alreadyInHistory(nearestVisited)) {
+        if (nearestDistKm > 0.015 && nearestDistKm <= 0.65) {
+            if (lineMovementBearingDeg !== null) {
+                var bToNearest = getBearing(lastPointLatLng[0], lastPointLatLng[1], nearestVisited.lat, nearestVisited.lng);
+                if (getAngleDifferenceDeg(lineMovementBearingDeg, bToNearest) <= 115 || nearestDistKm <= 0.30) {
+                    visitedAfterLastRd = nearestVisited;
+                }
+            } else {
+                visitedAfterLastRd = nearestVisited;
+            }
+        }
+    }
 
     // Bereken het gewogen zwaartepunt (centroid) van de bezochte clubhuizen om de "reeds afgewerkte sector" te kennen
     var sumLat = 0, sumLng = 0, totalW = 0;
     visitedHouses.forEach(function(h) {
         var d = Math.max(0.2, getDistanceKm(lastPointLatLng[0], lastPointLatLng[1], h.lat, h.lng));
-        var w = 1 / d; // Dichtbijzijnde bezochte clubs wegen zwaarder mee
+        var w = 1 / d;
         sumLat += h.lat * w;
         sumLng += h.lng * w;
         totalW += w;
     });
     var visitedCentroid = totalW > 0 ? [sumLat / totalW, sumLng / totalW] : [nearestVisited.lat, nearestVisited.lng];
 
-    // De herkomst-richting: vossen liepen VAN het bezochte clubhuis NAAR het huidige RD-punt
     var originBearingDeg = null;
     if (nearestDistKm > 0.05) {
         originBearingDeg = getBearing(nearestVisited.lat, nearestVisited.lng, lastPointLatLng[0], lastPointLatLng[1]);
@@ -170,107 +267,103 @@ function analyzeVisitedHousesContext(lastPointLatLng, lastPointMs, visitedHouses
     };
 }
 
-/* Bepaalt een semi-logische keten van nog niet bezochte clubhuizen (max 2 stappen vooruit)
-   op basis van:
-   1. Eventueel handmatig gelockt doel-clubhuis door Admin
-   2. Afstand vanaf het laatste RD-punt
-   3. De huidige looprichting van de RD-lijn
-   4. De ligging van reeds BEZOCHTE clubhuizen (vossen zijn daar al geweest voor hun tegenhunt-sticker
-      en bewegen zich dus logischerwijs voort vanuit die bezochte route richting de nog onbezochte sector) */
-function selectSemiLogicalTargetHouses(lastLatLng, movementBearingDeg, unvisitedHouses, visitedContext, lockedHouseName) {
+/* Bepaalt een semi-logische keten van nog niet bezochte clubhuizen die altijd ver genoeg doorloopt
+   om de volledige cirkelstraal + extra voorspellingsafstand te dekken (bijv. RD -> Clubhuis 1 -> Clubhuis 2 -> Clubhuis 3). */
+function selectSemiLogicalTargetHouses(lastLatLng, movementBearingDeg, unvisitedHouses, visitedContext, lockedHouseName, minRequiredChainMeters) {
     if (!unvisitedHouses || unvisitedHouses.length === 0) return [];
+
+    var requiredDistKm = Math.max(3.5, ((minRequiredChainMeters || 3000) / 1000) * 1.25);
 
     var effectiveStartLatLng = lastLatLng;
     if (visitedContext && visitedContext.recentVisitedAnchor) {
         effectiveStartLatLng = [visitedContext.recentVisitedAnchor.lat, visitedContext.recentVisitedAnchor.lng];
     }
 
-    var primaryTarget = null;
+    var chain = [];
+    var remaining = unvisitedHouses.slice();
+    var currentPos = effectiveStartLatLng;
+    var currentBearing = movementBearingDeg;
+    var accumulatedDistKm = getDistanceKm(lastLatLng[0], lastLatLng[1], effectiveStartLatLng[0], effectiveStartLatLng[1]);
 
-    // 1. Controleer eerst of de Admin handmatig een doel-clubhuis heeft gelockt voor dit deelgebied
+    // 1. Eerste doel-clubhuis (check eerst of Admin handmatig een target heeft gelockt)
+    var firstTarget = null;
     if (lockedHouseName) {
-        primaryTarget = unvisitedHouses.find(function(h) { return h.name === lockedHouseName; }) || null;
+        firstTarget = remaining.find(function(h) { return h.name === lockedHouseName; }) || null;
     }
 
-    // 2. Geen (geldige) lock? Bereken dan het slimste eerstvolgende onbezochte clubhuis
-    if (!primaryTarget) {
-        var scoredFirst = unvisitedHouses.map(function(h) {
-            var distKm = getDistanceKm(effectiveStartLatLng[0], effectiveStartLatLng[1], h.lat, h.lng);
-            var bearingToHouse = getBearing(effectiveStartLatLng[0], effectiveStartLatLng[1], h.lat, h.lng);
+    if (!firstTarget) {
+        var scoredFirst = remaining.map(function(h) {
+            var distKm = getDistanceKm(currentPos[0], currentPos[1], h.lat, h.lng);
+            var bearingToHouse = getBearing(currentPos[0], currentPos[1], h.lat, h.lng);
             var penaltyFactor = 1.0;
 
-            // Factor A: Looprichting van de RD-lijn (laatste RD-punten)
-            if (movementBearingDeg !== null) {
-                var angleDiff = getAngleDifferenceDeg(movementBearingDeg, bearingToHouse);
-                // Recht vooruit (0°) = 0.65 (sterke voorkeur), haaks (90°) = 1.10, achteruit (180°) = 1.60
+            if (currentBearing !== null) {
+                var angleDiff = getAngleDifferenceDeg(currentBearing, bearingToHouse);
                 penaltyFactor *= (0.65 + (angleDiff / 180) * 0.95);
             }
 
-            // Factor B: Informatie uit reeds BEZOCHTE clubgebouwen (vossen komen daar vandaan!)
             if (visitedContext) {
                 if (visitedContext.originBearingDeg !== null) {
                     var originAngleDiff = getAngleDifferenceDeg(visitedContext.originBearingDeg, bearingToHouse);
-                    // Als een onbezocht huisje in het verlengde ligt van de lijn [Bezocht Huisje -> Laatste RD-punt],
-                    // is dat een hele logische doorgaande route. Moeten ze terug richting het bezochte huisje, dan krijgt het straf.
                     var visitedFlowMultiplier = 0.80 + (originAngleDiff / 180) * 0.50;
                     penaltyFactor *= visitedFlowMultiplier;
                 }
-
                 if (visitedContext.visitedCentroid) {
-                    // Extra check: ligt dit onbezochte clubhuis verder weg van het bezochte cluster, of midden tussen al bezochte clubs?
                     var distFromVisitedCluster = getDistanceKm(visitedContext.visitedCentroid[0], visitedContext.visitedCentroid[1], h.lat, h.lng);
-                    var distStartFromCluster = getDistanceKm(visitedContext.visitedCentroid[0], visitedContext.visitedCentroid[1], effectiveStartLatLng[0], effectiveStartLatLng[1]);
+                    var distStartFromCluster = getDistanceKm(visitedContext.visitedCentroid[0], visitedContext.visitedCentroid[1], currentPos[0], currentPos[1]);
                     if (distFromVisitedCluster > distStartFromCluster) {
-                        // Ligt mooi vooruit in nieuw onbezocht gebied
                         penaltyFactor *= 0.92;
                     }
                 }
             }
 
-            return {
-                house: h,
-                distKm: distKm,
-                score: distKm * penaltyFactor
-            };
+            return { house: h, distKm: distKm, score: distKm * penaltyFactor };
         });
 
         scoredFirst.sort(function(a, b) { return a.score - b.score; });
-        primaryTarget = scoredFirst[0].house;
+        firstTarget = scoredFirst[0].house;
     }
 
-    if (unvisitedHouses.length === 1) {
-        return [primaryTarget];
+    chain.push(firstTarget);
+    accumulatedDistKm += getDistanceKm(currentPos[0], currentPos[1], firstTarget.lat, firstTarget.lng);
+    currentBearing = getBearing(currentPos[0], currentPos[1], firstTarget.lat, firstTarget.lng);
+    currentPos = [firstTarget.lat, firstTarget.lng];
+    remaining = remaining.filter(function(h) { return h.name !== firstTarget.name; });
+
+    // 2. Bouw de keten door (minimaal 2 clubhuizen indien beschikbaar, en ga door tot voorbij de cirkelstraal, max 4 etappes)
+    while (remaining.length > 0 && (chain.length < 2 || accumulatedDistKm < requiredDistKm) && chain.length < 4) {
+        var scoredNext = remaining.map(function(h) {
+            var distKm = getDistanceKm(currentPos[0], currentPos[1], h.lat, h.lng);
+            var bearingToNext = getBearing(currentPos[0], currentPos[1], h.lat, h.lng);
+            var angleDiff = currentBearing !== null ? getAngleDifferenceDeg(currentBearing, bearingToNext) : 0;
+            // Voorkom terugklappen naar waar we net vandaan kwamen
+            var penaltyFactor = 0.70 + (angleDiff / 180) * 1.05;
+            return { house: h, distKm: distKm, score: distKm * penaltyFactor };
+        });
+
+        scoredNext.sort(function(a, b) { return a.score - b.score; });
+        var nextHouse = scoredNext[0].house;
+
+        chain.push(nextHouse);
+        accumulatedDistKm += scoredNext[0].distKm;
+        currentBearing = getBearing(currentPos[0], currentPos[1], nextHouse.lat, nextHouse.lng);
+        currentPos = [nextHouse.lat, nextHouse.lng];
+        remaining = remaining.filter(function(h) { return h.name !== nextHouse.name; });
     }
 
-    // Stap 3: Kijk vanaf dit eerste doel-clubhuis wat het meest logische vervolg-clubhuis is (2-staps doorkijk)
-    var incomingBearing = getBearing(effectiveStartLatLng[0], effectiveStartLatLng[1], primaryTarget.lat, primaryTarget.lng);
-    var remainingHouses = unvisitedHouses.filter(function(h) { return h.name !== primaryTarget.name; });
-
-    var scoredSecond = remainingHouses.map(function(h) {
-        var distKm = getDistanceKm(primaryTarget.lat, primaryTarget.lng, h.lat, h.lng);
-        var bearingToNext = getBearing(primaryTarget.lat, primaryTarget.lng, h.lat, h.lng);
-        var angleDiff = getAngleDifferenceDeg(incomingBearing, bearingToNext);
-        var penaltyFactor = 0.70 + (angleDiff / 180) * 0.95;
-        return {
-            house: h,
-            distKm: distKm,
-            score: distKm * penaltyFactor
-        };
-    });
-
-    scoredSecond.sort(function(a, b) { return a.score - b.score; });
-    var secondaryTarget = scoredSecond[0].house;
-
-    return [primaryTarget, secondaryTarget];
+    return chain;
 }
 
 /* Hulpfunctie om een route-array netjes te comprimeren voor Firebase */
-function simplifyRouteCoords(rawCoords, maxPoints) {
-    var limit = maxPoints || 140;
+function simplifyRouteCoords(rawCoords, maxPoints, alreadyLatLng) {
+    if (!rawCoords || rawCoords.length === 0) return [];
+    var limit = maxPoints || 160;
     var coords = rawCoords.map(function(c) {
+        var lat = alreadyLatLng ? c[0] : c[1];
+        var lng = alreadyLatLng ? c[1] : c[0];
         return [
-            Math.round(c[1] * 100000) / 100000,
-            Math.round(c[0] * 100000) / 100000
+            Math.round(lat * 100000) / 100000,
+            Math.round(lng * 100000) / 100000
         ];
     });
     if (coords.length > limit) {
@@ -287,6 +380,35 @@ function simplifyRouteCoords(rawCoords, maxPoints) {
         coords = simplified;
     }
     return coords;
+}
+
+/* Hard Waypoint Pinning: Dwingt een berekend routepad om exact op het start- én eindcoördinaat
+   (bijv. het clubgebouw in een zijstraatje/bospad) te beginnen en eindigen. */
+function enforceExactEndpointPinning(coordsLatLng, exactStartLatLng, exactEndLatLng) {
+    var pinned = (coordsLatLng && coordsLatLng.length > 0) ? coordsLatLng.slice() : [];
+    var sPt = [Math.round(exactStartLatLng[0] * 100000) / 100000, Math.round(exactStartLatLng[1] * 100000) / 100000];
+    var ePt = [Math.round(exactEndLatLng[0] * 100000) / 100000, Math.round(exactEndLatLng[1] * 100000) / 100000];
+
+    if (pinned.length === 0) {
+        return [sPt, ePt];
+    }
+
+    var distStartMeters = getDistanceKm(pinned[0][0], pinned[0][1], sPt[0], sPt[1]) * 1000;
+    if (distStartMeters > 2) {
+        pinned.unshift(sPt);
+    } else {
+        pinned[0] = sPt;
+    }
+
+    var lastIdx = pinned.length - 1;
+    var distEndMeters = getDistanceKm(pinned[lastIdx][0], pinned[lastIdx][1], ePt[0], ePt[1]) * 1000;
+    if (distEndMeters > 2) {
+        pinned.push(ePt);
+    } else {
+        pinned[lastIdx] = ePt;
+    }
+
+    return pinned;
 }
 
 /* Berekent de totale lengte van een polyline in meters */
@@ -309,7 +431,6 @@ function calculateMainRoadPenalty(osrmRouteObj) {
             var name = String(step.name || "");
             var ref = String(step.ref || "");
             var combined = (name + " " + ref).toUpperCase();
-            // Check op N-wegen (bijv. N224, N325, N801, Provincialeweg, Rijksweg)
             if (/\bN\d{2,3}\b/.test(combined) || combined.includes("PROVINCIALEWEG") || combined.includes("RIJKSWEG")) {
                 nRoadMeters += (step.distance || 0);
             }
@@ -318,7 +439,7 @@ function calculateMainRoadPenalty(osrmRouteObj) {
     return nRoadMeters;
 }
 
-/* Berekent de gemiddelde afwijking in meters tussen twee routes om te zien of het echt een andere parallelweg is */
+/* Berekent de afwijking in meters tussen twee routes om te zien of het echt een andere parallelweg is */
 function getRouteSeparationMeters(routeA, routeB) {
     if (!routeA || !routeB || routeA.length < 2 || routeB.length < 2) return 0;
     var sampleIdxs = [
@@ -340,152 +461,321 @@ function getRouteSeparationMeters(routeA, routeB) {
     return maxMinDist;
 }
 
-/* Haalt zowel de primaire looproute als een doelgerichte alternatieve parallelroute op
-   (die N-wegen/drukke wegen mijdt en een parallelweg kiest als dat niet te ver om is) */
-async function getPrimaryAndAlternativeWalkingRoutes(waypointsLatLng, wantAlternative) {
-    if (!waypointsLatLng || waypointsLatLng.length < 2) {
-        return { primary: [], alternative: [] };
+/* Berekent hoeveel meter van candidateCoords dubbel loopt (backtracking / overlap) over avoidHistoryCoords */
+function computeRouteOverlapMeters(candidateCoords, avoidHistoryCoords) {
+    if (!candidateCoords || candidateCoords.length < 2 || !avoidHistoryCoords || avoidHistoryCoords.length < 2) {
+        return 0;
     }
 
-    var cacheKey = waypointsLatLng.map(function(pt) {
-        return `${pt[0].toFixed(5)},${pt[1].toFixed(5)}`;
-    }).join('_') + (wantAlternative ? '_ALT1' : '_ALT0');
+    var overlapMeters = 0;
+    for (var i = 0; i < candidateCoords.length - 1; i++) {
+        var p1 = candidateCoords[i];
+        var p2 = candidateCoords[i + 1];
+        var segLenMeters = getDistanceKm(p1[0], p1[1], p2[0], p2[1]) * 1000;
+        if (segLenMeters < 1) continue;
 
-    if (walkingRouteCache[cacheKey]) {
-        return walkingRouteCache[cacheKey];
+        var midLat = (p1[0] + p2[0]) / 2;
+        var midLng = (p1[1] + p2[1]) / 2;
+
+        // Negeer de eerste/laatste 35 meter direct op het knooppunt/clubhuis zelf (zodat aankomen op het punt mag),
+        // maar straf het teruglopen over dezelfde aanloopstraat (> 35m van start/eind) direct af.
+        var distFromStart = getDistanceKm(p1[0], p1[1], candidateCoords[0][0], candidateCoords[0][1]) * 1000;
+        if (distFromStart < 35) continue;
+
+        var isOverlapping = false;
+        for (var j = 0; j < avoidHistoryCoords.length - 1; j++) {
+            var h1 = avoidHistoryCoords[j];
+            var h2 = avoidHistoryCoords[j + 1];
+            var dKm = getPointToSegmentDistanceKm(midLat, midLng, h1[0], h1[1], h2[0], h2[1]);
+            if (dKm <= 0.028) { // Binnen 28 meter van een al gelopen weg/pad
+                isOverlapping = true;
+                break;
+            }
+        }
+
+        if (isOverlapping) {
+            overlapMeters += segLenMeters;
+        }
     }
+    return overlapMeters;
+}
 
-    var coordString = waypointsLatLng.map(function(pt) {
-        return `${pt[1]},${pt[0]}`;
-    }).join(';');
-
+/* Hulpfunctie om een OSRM-wandelroute op te halen voor een coördinaten-string */
+async function fetchOsrmFootRoutes(coordString, timeoutMs) {
     var endpoints = [
         `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coordString}?overview=full&geometries=geojson&alternatives=true&steps=true`,
         `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson&alternatives=true&steps=true`
     ];
 
-    var primaryCoords = null;
-    var altCoords = [];
-    var usedEndpointBase = "https://routing.openstreetmap.de/routed-foot/route/v1/foot/";
-
     for (var i = 0; i < endpoints.length; i++) {
         try {
             var controller = new AbortController();
-            var timeoutId = setTimeout(function() { controller.abort(); }, 4500);
+            var tId = setTimeout(function() { controller.abort(); }, timeoutMs || 4000);
             var res = await fetch(endpoints[i], { signal: controller.signal });
-            clearTimeout(timeoutId);
+            clearTimeout(tId);
 
             if (res.ok) {
                 var data = await res.json();
                 if (data && data.routes && data.routes.length > 0) {
-                    usedEndpointBase = endpoints[i].split('/route/v1/foot/')[0] + '/route/v1/foot/';
-                    var routes = data.routes;
-                    primaryCoords = simplifyRouteCoords(routes[0].geometry.coordinates, 130);
-                    var primaryDist = routes[0].distance || getPolylineLengthMeters(primaryCoords);
-
-                    // Als OSRM direct al een goed alternatief teruggeeft dat niet meer dan 35% langer is:
-                    if (wantAlternative && routes.length > 1) {
-                        var bestAlt = null;
-                        var bestAltScore = Infinity;
-
-                        for (var rIdx = 1; rIdx < routes.length; rIdx++) {
-                            var cand = routes[rIdx];
-                            var candDist = cand.distance || 1;
-                            // Niet te ver om: maximaal 35% extra afstand
-                            if (candDist <= primaryDist * 1.35) {
-                                var nPenalty = calculateMainRoadPenalty(cand);
-                                var score = candDist + (nPenalty * 3.0); // Straf N-wegen zwaar af
-                                if (score < bestAltScore) {
-                                    bestAltScore = score;
-                                    bestAlt = cand;
-                                }
-                            }
-                        }
-
-                        if (bestAlt && bestAlt.geometry && bestAlt.geometry.coordinates) {
-                            altCoords = simplifyRouteCoords(bestAlt.geometry.coordinates, 120);
-                        }
-                    }
-                    break;
+                    return data.routes;
                 }
             }
         } catch (err) {
             // Probeer volgende endpoint
         }
     }
+    return null;
+}
 
-    if (!primaryCoords) {
-        var fallbackRes = { primary: waypointsLatLng, alternative: [] };
-        return fallbackRes;
+/* Berekent één etappe (van startLatLng naar endLatLng, bijv. van RD-punt naar Clubhuis 1, of van Clubhuis 1 naar Clubhuis 2):
+   - Dwingt Hard Waypoint Pinning af tot exact op het clubgebouw
+   - Controleert of de route dubbel loopt over avoidHistoryCoords (eerder gelopen RD-route of aanlooproute)
+   - Past de 15-minuten regel toe: als dubbel lopen vermeden kan worden met een lus/omweg die <= 15 minuten extra kost
+     (o.b.v. de actuele loopsnelheid), kiest de engine automatisch de doorgaande route zonder backtracking! */
+async function getBestSegmentRoute(startLatLng, endLatLng, avoidHistoryCoords, speedKmh, preferQuietParallel, primaryReferenceRoute) {
+    var effSpeed = Math.max(2.0, Number(speedKmh) || 6.5);
+    // 15-minuten regel omgezet naar maximaal toegestane extra omweg-meters: (snelheid km/u * (15 / 60)) * 1000
+    var maxDetourMetersFor15Min = (effSpeed * (15 / 60)) * 1000;
+
+    var directCoordStr = `${startLatLng[1]},${startLatLng[0]};${endLatLng[1]},${endLatLng[0]}`;
+    var rawRoutes = await fetchOsrmFootRoutes(directCoordStr, 4000);
+
+    var candidates = [];
+
+    if (rawRoutes && rawRoutes.length > 0) {
+        rawRoutes.forEach(function(r) {
+            var simp = simplifyRouteCoords(r.geometry.coordinates, 95, false);
+            var pinned = enforceExactEndpointPinning(simp, startLatLng, endLatLng);
+            var distM = getPolylineLengthMeters(pinned);
+            var overlapM = computeRouteOverlapMeters(pinned, avoidHistoryCoords);
+            var nRoadM = calculateMainRoadPenalty(r);
+            candidates.push({
+                coords: pinned,
+                distMeters: distM,
+                overlapMeters: overlapM,
+                nRoadMeters: nRoadM
+            });
+        });
+    } else {
+        var fallbackPinned = enforceExactEndpointPinning([startLatLng, endLatLng], startLatLng, endLatLng);
+        return fallbackPinned;
     }
 
-    // Als we een alternatieve parallelroute willen naar het eerstvolgende doel-clubhuis,
-    // en de standaard server gaf nog geen tweede parallelroute terug:
-    // Bereken een slimme parallel-waypoint (linksom +90° en rechtsom -90° van de hoofdlijn)
-    if (wantAlternative && (!altCoords || altCoords.length < 2)) {
-        var pStart = waypointsLatLng[0];
-        var pTarget = waypointsLatLng[1];
-        var directDistMeters = getDistanceKm(pStart[0], pStart[1], pTarget[0], pTarget[1]) * 1000;
+    var shortestDirectMeters = candidates[0].distMeters;
+    var bestDirectOverlap = candidates[0].overlapMeters;
 
-        // Alleen zinvol als het doel-clubhuis tussen 250m en 15km ligt
-        if (directDistMeters >= 250 && directDistMeters <= 15000) {
-            var midLat = (pStart[0] + pTarget[0]) / 2;
-            var midLng = (pStart[1] + pTarget[1]) / 2;
-            var mainBearing = getBearing(pStart[0], pStart[1], pTarget[0], pTarget[1]);
-            // Kies een laterale offset van ~22% van de afstand (begrensd tussen 180m en 650m) om een parallelweg te pakken
-            var offsetMeters = Math.min(650, Math.max(180, Math.round(directDistMeters * 0.22)));
+    // Genereer lus-/parallel-kandidaten wanneer:
+    // A) De standaardroute dubbel loopt over een al gelopen weg (backtracking > 45m)
+    // B) We de alternatieve parallelroute (preferQuietParallel) berekenen en een echte parallelweg zoeken
+    var needLoopAlternatives = (bestDirectOverlap > 45) || preferQuietParallel;
 
+    if (needLoopAlternatives) {
+        var directDistMeters = getDistanceKm(startLatLng[0], startLatLng[1], endLatLng[0], endLatLng[1]) * 1000;
+        if (directDistMeters >= 120 && directDistMeters <= 18000) {
+            var midLat = (startLatLng[0] + endLatLng[0]) / 2;
+            var midLng = (startLatLng[1] + endLatLng[1]) / 2;
+            var mainBearing = getBearing(startLatLng[0], startLatLng[1], endLatLng[0], endLatLng[1]);
+
+            // Kies een zijwaartse offset om via een andere straat/pad het clubgebouw te verlaten of benaderen
+            var offsetMeters = Math.min(700, Math.max(160, Math.round(directDistMeters * 0.24)));
             var sideBearings = [(mainBearing + 90) % 360, (mainBearing + 270) % 360];
-            var primaryToFirstTargetDist = getPolylineLengthMeters(primaryCoords);
-            var bestCandidateCoords = null;
-            var bestCandidateScore = Infinity;
+
+            // Als het specifiek om backtracking bij vertrek vanaf een clubhuis gaat, plaats het via-punt iets dichter bij het vertrekpunt (35% van de etappe)
+            var pivotLat = (bestDirectOverlap > 45 && !preferQuietParallel)
+                ? (startLatLng[0] * 0.65 + endLatLng[0] * 0.35)
+                : midLat;
+            var pivotLng = (bestDirectOverlap > 45 && !preferQuietParallel)
+                ? (startLatLng[1] * 0.65 + endLatLng[1] * 0.35)
+                : midLng;
 
             for (var s = 0; s < sideBearings.length; s++) {
-                var viaPt = getDestinationLatLng(midLat, midLng, offsetMeters, sideBearings[s]);
-                var viaCoordStr = `${pStart[1]},${pStart[0]};${viaPt[1]},${viaPt[0]};${pTarget[1]},${pTarget[0]}`;
-                var viaUrl = `${usedEndpointBase}${viaCoordStr}?overview=full&geometries=geojson&steps=true`;
-
-                try {
-                    var ctrl2 = new AbortController();
-                    var tId2 = setTimeout(function() { ctrl2.abort(); }, 3200);
-                    var resVia = await fetch(viaUrl, { signal: ctrl2.signal });
-                    clearTimeout(tId2);
-
-                    if (resVia.ok) {
-                        var viaData = await resVia.json();
-                        if (viaData && viaData.routes && viaData.routes.length > 0) {
-                            var rVia = viaData.routes[0];
-                            var simpVia = simplifyRouteCoords(rVia.geometry.coordinates, 110);
-                            var viaDist = rVia.distance || getPolylineLengthMeters(simpVia);
-
-                            // Controleer of de parallelroute niet te ver om is (max 35% langer dan de directe route naar target 1)
-                            // én daadwerkelijk over een andere (parallel)weg loopt (minstens 85m afwijking)
-                            var separation = getRouteSeparationMeters(simpVia, primaryCoords);
-                            if (viaDist <= primaryToFirstTargetDist * 1.38 && separation >= 85) {
-                                var nRoadPen = calculateMainRoadPenalty(rVia);
-                                var candidateScore = viaDist + (nRoadPen * 3.5);
-                                if (candidateScore < bestCandidateScore) {
-                                    bestCandidateScore = candidateScore;
-                                    bestCandidateCoords = simpVia;
-                                }
-                            }
-                        }
-                    }
-                } catch (eVia) {}
-            }
-
-            if (bestCandidateCoords) {
-                altCoords = bestCandidateCoords;
+                var viaPt = getDestinationLatLng(pivotLat, pivotLng, offsetMeters, sideBearings[s]);
+                var viaCoordStr = `${startLatLng[1]},${startLatLng[0]};${viaPt[1]},${viaPt[0]};${endLatLng[1]},${endLatLng[0]}`;
+                var viaRoutes = await fetchOsrmFootRoutes(viaCoordStr, 3200);
+                if (viaRoutes && viaRoutes.length > 0) {
+                    var rVia = viaRoutes[0];
+                    var simpVia = simplifyRouteCoords(rVia.geometry.coordinates, 95, false);
+                    var pinnedVia = enforceExactEndpointPinning(simpVia, startLatLng, endLatLng);
+                    var viaDistM = getPolylineLengthMeters(pinnedVia);
+                    var viaOverlapM = computeRouteOverlapMeters(pinnedVia, avoidHistoryCoords);
+                    var viaNRoadM = calculateMainRoadPenalty(rVia);
+                    candidates.push({
+                        coords: pinnedVia,
+                        distMeters: viaDistM,
+                        overlapMeters: viaOverlapM,
+                        nRoadMeters: viaNRoadM
+                    });
+                }
             }
         }
     }
 
-    var result = {
-        primary: primaryCoords,
-        alternative: altCoords || []
+    // Selecteer de beste kandidaat op basis van de 15-minuten regel en parallel-eisen
+    var validCandidates = candidates.filter(function(c) {
+        var extraMeters = c.distMeters - shortestDirectMeters;
+        return extraMeters <= maxDetourMetersFor15Min;
+    });
+
+    if (validCandidates.length === 0) {
+        validCandidates = [candidates[0]];
+    }
+
+    if (preferQuietParallel && primaryReferenceRoute && primaryReferenceRoute.length >= 2) {
+        // Voor de alternatieve parallelroute: kies een kandidaat die daadwerkelijk afwijkt van de primaire route (>= 75m),
+        // N-wegen mijdt, niet dubbel loopt én binnen de redelijke omweg valt.
+        var separatedCandidates = validCandidates.filter(function(c) {
+            return getRouteSeparationMeters(c.coords, primaryReferenceRoute) >= 75;
+        });
+
+        var pool = separatedCandidates.length > 0 ? separatedCandidates : validCandidates;
+        pool.sort(function(a, b) {
+            var scoreA = a.distMeters + (a.overlapMeters * 4.5) + (a.nRoadMeters * 3.5);
+            var scoreB = b.distMeters + (b.overlapMeters * 4.5) + (b.nRoadMeters * 3.5);
+            return scoreA - scoreB;
+        });
+        return pool[0].coords;
+    }
+
+    // Voor de primaire route: vermijd dubbele wegen zolang de omweg <= 15 minuten kost!
+    validCandidates.sort(function(a, b) {
+        // Straf elke meter dubbel lopen zwaar af (factor 6), zodat een omweg zonder backtracking altijd wint binnen de 15-minuten grens
+        var scoreA = a.distMeters + (a.overlapMeters * 6.0);
+        var scoreB = b.distMeters + (b.overlapMeters * 6.0);
+        return scoreA - scoreB;
+    });
+
+    return validCandidates[0].coords;
+}
+
+/* Bouwt een volledige meertraps-wandelroute op langs alle opgegeven waypoints (RD -> Clubhuis 1 -> Clubhuis 2 -> ...),
+   waarbij elke etappe exact op het clubgebouw eindigt én onthoudt welke wegen in eerdere etappes al zijn gelopen
+   zodat ze bij vertrek niet over dezelfde weg teruglopen. */
+async function buildMultiStageWalkRoute(waypointsLatLng, initialHistoryCoords, speedKmh, wantAlternative) {
+    if (!waypointsLatLng || waypointsLatLng.length < 2) {
+        return { primary: [], alternative: [] };
+    }
+
+    var histSignature = (initialHistoryCoords && initialHistoryCoords.length > 0)
+        ? initialHistoryCoords.slice(-3).map(function(p) { return `${p[0].toFixed(4)},${p[1].toFixed(4)}`; }).join('|')
+        : 'NOHIST';
+
+    var speedBucket = Math.round((Number(speedKmh) || 6.5) * 2) / 2;
+    var cacheKey = waypointsLatLng.map(function(pt) {
+        return `${pt[0].toFixed(5)},${pt[1].toFixed(5)}`;
+    }).join('_') + `_H:${histSignature}_S:${speedBucket}_ALT:${wantAlternative ? 1 : 0}`;
+
+    if (walkingRouteCache[cacheKey]) {
+        return walkingRouteCache[cacheKey];
+    }
+
+    var primaryFullCoords = [];
+    var altFullCoords = [];
+
+    // Geheugen van reeds gelopen wegen voor de primaire route (start met de historische RD-route)
+    var primaryAvoidHistory = (initialHistoryCoords && initialHistoryCoords.length >= 2)
+        ? initialHistoryCoords.slice()
+        : [];
+
+    // Geheugen van reeds gelopen wegen voor de alternatieve parallelroute
+    var altAvoidHistory = (initialHistoryCoords && initialHistoryCoords.length >= 2)
+        ? initialHistoryCoords.slice()
+        : [];
+
+    var stagePrimaryRoutes = [];
+
+    // 1. Bouw de primaire route etappe voor etappe op
+    for (var i = 0; i < waypointsLatLng.length - 1; i++) {
+        var segStart = waypointsLatLng[i];
+        var segEnd = waypointsLatLng[i + 1];
+
+        var segPrimary = await getBestSegmentRoute(
+            segStart,
+            segEnd,
+            primaryAvoidHistory,
+            speedKmh,
+            false,
+            null
+        );
+
+        stagePrimaryRoutes.push(segPrimary);
+
+        if (primaryFullCoords.length === 0) {
+            primaryFullCoords = segPrimary.slice();
+        } else {
+            primaryFullCoords = primaryFullCoords.concat(segPrimary.slice(1));
+        }
+
+        // Voeg de zojuist gelopen aanlooproute naar dit clubgebouw toe aan het geheugen voor de volgende etappe!
+        primaryAvoidHistory = primaryAvoidHistory.concat(segPrimary);
+    }
+
+    // 2. Bouw (indien ingeschakeld) de alternatieve parallelroute over de VOLLEDIGE keten van clubgebouwen op
+    if (wantAlternative) {
+        var anyDifference = false;
+        for (var j = 0; j < waypointsLatLng.length - 1; j++) {
+            var altStart = waypointsLatLng[j];
+            var altEnd = waypointsLatLng[j + 1];
+            var refPrimarySeg = stagePrimaryRoutes[j];
+
+            var segAlt = await getBestSegmentRoute(
+                altStart,
+                altEnd,
+                altAvoidHistory,
+                speedKmh,
+                true,
+                refPrimarySeg
+            );
+
+            if (getRouteSeparationMeters(segAlt, refPrimarySeg) >= 50) {
+                anyDifference = true;
+            }
+
+            if (altFullCoords.length === 0) {
+                altFullCoords = segAlt.slice();
+            } else {
+                altFullCoords = altFullCoords.concat(segAlt.slice(1));
+            }
+
+            altAvoidHistory = altAvoidHistory.concat(segAlt);
+        }
+
+        if (!anyDifference) {
+            altFullCoords = [];
+        }
+    }
+
+    var finalResult = {
+        primary: simplifyRouteCoords(primaryFullCoords, 220, true),
+        alternative: altFullCoords.length >= 2 ? simplifyRouteCoords(altFullCoords, 220, true) : []
     };
-    walkingRouteCache[cacheKey] = result;
-    return result;
+
+    walkingRouteCache[cacheKey] = finalResult;
+    return finalResult;
+}
+
+/* Haalt de snelste wandelafstand in kilometers op tussen twee punten (met cache) voor de wandelroute-snelheidsberekening */
+async function getFastestWalkingDistanceKmBetweenPoints(lat1, lng1, lat2, lng2) {
+    var straightKm = getDistanceKm(lat1, lng1, lat2, lng2);
+    // Als twee punten vrijwel op elkaar liggen of onrealistisch ver uit elkaar (> 25 km), bespaar een API-call
+    if (straightKm < 0.03 || straightKm > 25.0) {
+        return straightKm;
+    }
+
+    var key = `${lat1.toFixed(5)},${lng1.toFixed(5)}_${lat2.toFixed(5)},${lng2.toFixed(5)}`;
+    if (segmentDistanceCache[key] !== undefined) {
+        return segmentDistanceCache[key];
+    }
+
+    var coordStr = `${lng1},${lat1};${lng2},${lat2}`;
+    var routes = await fetchOsrmFootRoutes(coordStr, 3000);
+    if (routes && routes.length > 0 && routes[0].distance > 0) {
+        var walkKm = routes[0].distance / 1000;
+        segmentDistanceCache[key] = walkKm;
+        return walkKm;
+    }
+
+    segmentDistanceCache[key] = straightKm;
+    return straightKm;
 }
 
 /* Berekent het exacte snijpunt waar een looproute en de rand van de groeiende cirkel elkaar ontmoeten */
@@ -681,8 +971,8 @@ function getPointTimestampMs(pt) {
     return pt.createdTimestamp || Date.now();
 }
 
-/* --- 2. SLIMME SNELHEIDSBEREKENING (MAX 7 KM/U FILTER & 50/50 WEGING) --- */
-function getValidSpeedSegments(pts) {
+/* --- 2. SLIMME SNELHEIDSBEREKENING (MAX 7 KM/U FILTER, 50/50 WEGING & WANDELROUTE-OPTIE) --- */
+async function getValidSpeedSegments(pts, useWalkRouteDistance) {
     var maxAllowedKmh = Number(adminSettings.maxWalkingSpeedKmh) || 7.0;
     var segments = [];
 
@@ -694,13 +984,20 @@ function getValidSpeedSegments(pts) {
 
         if (t2 <= t1) continue;
 
-        var distKm = getDistanceKm(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]);
         var hours = (t2 - t1) / 3600000;
-        if (hours > 0) {
-            var kmh = distKm / hours;
-            if (kmh <= maxAllowedKmh && kmh > 0) {
-                segments.push(kmh);
-            }
+        if (hours <= 0) continue;
+
+        var straightKm = getDistanceKm(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]);
+        // Als zelfs hemelsbreed al > 7.5 km/u is, kan een wandelroute alleen maar nóg sneller zijn -> direct overslaan
+        if ((straightKm / hours) > (maxAllowedKmh + 0.5)) continue;
+
+        var distKm = useWalkRouteDistance
+            ? await getFastestWalkingDistanceKmBetweenPoints(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1])
+            : straightKm;
+
+        var kmh = distKm / hours;
+        if (kmh <= maxAllowedKmh && kmh > 0) {
+            segments.push(kmh);
         }
     }
     return segments;
@@ -719,21 +1016,23 @@ function computeWeightedSpeedFromSegments(segments) {
     return (0.50 * lastSegSpeed) + (0.50 * avgPrev);
 }
 
-function calculateAreaWalkingSpeed(areaPoints) {
+async function calculateAreaWalkingSpeed(areaPoints) {
     var defaultKmh = Number(adminSettings.defaultSpeedKmh) || 6.5;
+    var useRoute = !!adminSettings.useRouteSpeedCalculation;
+    var modeSuffix = useRoute ? " • Route" : "";
 
     var huntPoints = areaPoints.filter(function(p) {
         return (p.pointType || p.baseName) === "Hunt";
     });
 
-    var huntSegments = getValidSpeedSegments(huntPoints);
+    var huntSegments = await getValidSpeedSegments(huntPoints, useRoute);
     if (huntSegments.length > 0) {
         var rawHuntSpeed = computeWeightedSpeedFromSegments(huntSegments);
         var clampedHunt = Math.min(7.0, Math.max(0.5, rawHuntSpeed));
         var displayHunt = Math.round(clampedHunt * 10) / 10;
         return {
             speedKmh: clampedHunt,
-            speedText: `~${displayHunt} km/u (Hunt)`
+            speedText: `~${displayHunt} km/u (Hunt${modeSuffix})`
         };
     }
 
@@ -742,14 +1041,14 @@ function calculateAreaWalkingSpeed(areaPoints) {
         return t === "Hunt" || t === "Hint";
     });
 
-    var combinedSegments = getValidSpeedSegments(huntAndHintPoints);
+    var combinedSegments = await getValidSpeedSegments(huntAndHintPoints, useRoute);
     if (combinedSegments.length > 0) {
         var rawCombinedSpeed = computeWeightedSpeedFromSegments(combinedSegments);
         var clampedCombined = Math.min(7.0, Math.max(0.5, rawCombinedSpeed));
         var displayCombined = Math.round(clampedCombined * 10) / 10;
         return {
             speedKmh: clampedCombined,
-            speedText: `~${displayCombined} km/u (incl. Hint)`
+            speedText: `~${displayCombined} km/u (incl. Hint${modeSuffix})`
         };
     }
 
@@ -783,6 +1082,8 @@ function updateAdminSettingsPanelStatus() {
     var subtextEl = document.getElementById('admin-max-hours-subtext');
     var altRouteDot = document.getElementById('admin-alt-route-status-dot');
     var altRouteToggle = document.getElementById('admin-alt-route-toggle');
+    var routeSpeedDot = document.getElementById('admin-route-speed-status-dot');
+    var routeSpeedToggle = document.getElementById('admin-route-speed-toggle');
     var areaStatusList = document.getElementById('admin-area-growth-list');
 
     if (!statusDot || !labelEl || !subtextEl) return;
@@ -796,7 +1097,6 @@ function updateAdminSettingsPanelStatus() {
         ? 'Maximale groeitijd is bereikt voor één of meer gebieden'
         : 'Groei actief (maximale groeitijd nog niet bereikt)';
 
-    // Tekstkleur: donkergrijs (#95a5a6) als max groeitijd nog niet gehaald is, lichtere grijstint (#dcdde1) als max bereikt is
     if (anyCapped) {
         labelEl.classList.add('capped-reached');
         subtextEl.classList.add('capped-reached');
@@ -814,7 +1114,18 @@ function updateAdminSettingsPanelStatus() {
         altRouteDot.title = adminSettings.showAltQuietRoute ? 'Alternatieve route ingeschakeld' : 'Alternatieve route uitgeschakeld';
     }
 
-    // 3. Overzicht per actief deelgebied met eigen groen/rood balletje én Doel-Clubhuis Lock dropdown
+    // 3. Balletje & checkbox voor Loopsnelheid o.b.v. snelste wandelroute (i.p.v. hemelsbreed)
+    if (routeSpeedToggle && document.activeElement !== routeSpeedToggle) {
+        routeSpeedToggle.checked = !!adminSettings.useRouteSpeedCalculation;
+    }
+    if (routeSpeedDot) {
+        routeSpeedDot.className = 'admin-status-dot ' + (adminSettings.useRouteSpeedCalculation ? 'status-dot-green' : 'status-dot-red');
+        routeSpeedDot.title = adminSettings.useRouteSpeedCalculation
+            ? 'Loopsnelheid o.b.v. wandelroute ingeschakeld'
+            : 'Loopsnelheid o.b.v. hemelsbrede afstand (standaard)';
+    }
+
+    // 4. Overzicht per actief deelgebied met eigen groen/rood balletje én Doel-Clubhuis Lock dropdown
     if (areaStatusList) {
         if (activeAreas.length === 0) {
             areaStatusList.style.display = 'none';
@@ -885,32 +1196,11 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             var lastPoint = points[points.length - 1];
             var lastPtMs = getPointTimestampMs(lastPoint);
 
-            var speedResult = calculateAreaWalkingSpeed(points);
+            var speedResult = await calculateAreaWalkingSpeed(points);
             var calculatedSpeedKmh = speedResult.speedKmh;
             var speedText = speedResult.speedText;
 
-            // 1. Bepaal de pure looprichting van de vossen op basis van hun RD-lijn (laatste 2 à 3 punten)
-            var lineMovementBearingDeg = null;
-            if (points.length >= 2) {
-                var mSin = 0, mCos = 0, mWeight = 0;
-                var pA = points[points.length - 2];
-                var pB = points[points.length - 1];
-                var b1 = getBearing(pA.latlng[0], pA.latlng[1], pB.latlng[0], pB.latlng[1]) * Math.PI / 180;
-                mSin += 0.80 * Math.sin(b1); mCos += 0.80 * Math.cos(b1); mWeight += 0.80;
-
-                if (points.length >= 3) {
-                    var pA2 = points[points.length - 3];
-                    var pB2 = points[points.length - 2];
-                    var b2 = getBearing(pA2.latlng[0], pA2.latlng[1], pB2.latlng[0], pB2.latlng[1]) * Math.PI / 180;
-                    mSin += 0.20 * Math.sin(b2); mCos += 0.20 * Math.cos(b2); mWeight += 0.20;
-                }
-                if (mWeight > 0) {
-                    var avgMoveRad = Math.atan2(mSin / mWeight, mCos / mWeight);
-                    lineMovementBearingDeg = ((avgMoveRad * 180 / Math.PI) + 360) % 360;
-                }
-            }
-
-            // 2. Splits de clubgebouwen van dit deelgebied in BEZOCHT en ONBEZOCHT
+            // 1. Splits de clubgebouwen van dit deelgebied in BEZOCHT en ONBEZOCHT
             var areaHouses = allLocations.filter(function(l) { return l.area === area; });
             var visitedHouses = [];
             var unvisitedHouses = [];
@@ -924,31 +1214,73 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 }
             });
 
-            // 3. Analyseer de al BEZOCHTE clubgebouwen (waar de vossen al langs zijn geweest voor hun tegenhunt-sticker)
-            var visitedContext = analyzeVisitedHousesContext(lastPoint.latlng, lastPtMs, visitedHouses);
+            // 2. Veranker bezochte clubgebouwen die langs het historische RD-spoor liggen
+            var historicalAnchoredCoords = buildHistoricalCoordsWithVisitedHouses(points, visitedHouses);
+
+            // 3. Bepaal de pure looprichting van de vossen op basis van hun RD-lijn (inclusief verankerde bezochte clubs)
+            var lineMovementBearingDeg = null;
+            if (historicalAnchoredCoords.length >= 2) {
+                var mSin = 0, mCos = 0, mWeight = 0;
+                var cA = historicalAnchoredCoords[historicalAnchoredCoords.length - 2];
+                var cB = historicalAnchoredCoords[historicalAnchoredCoords.length - 1];
+                var b1 = getBearing(cA[0], cA[1], cB[0], cB[1]) * Math.PI / 180;
+                mSin += 0.80 * Math.sin(b1); mCos += 0.80 * Math.cos(b1); mWeight += 0.80;
+
+                if (historicalAnchoredCoords.length >= 3) {
+                    var cA2 = historicalAnchoredCoords[historicalAnchoredCoords.length - 3];
+                    var cB2 = historicalAnchoredCoords[historicalAnchoredCoords.length - 2];
+                    var b2 = getBearing(cA2[0], cA2[1], cB2[0], cB2[1]) * Math.PI / 180;
+                    mSin += 0.20 * Math.sin(b2); mCos += 0.20 * Math.cos(b2); mWeight += 0.20;
+                }
+                if (mWeight > 0) {
+                    var avgMoveRad = Math.atan2(mSin / mWeight, mCos / mWeight);
+                    lineMovementBearingDeg = ((avgMoveRad * 180 / Math.PI) + 360) % 360;
+                }
+            }
+
+            // 4. Analyseer de al BEZOCHTE clubgebouwen (inclusief een eventueel bezocht clubgebouw vlak na/bij het laatste RD-punt)
+            var visitedContext = analyzeVisitedHousesContext(
+                lastPoint.latlng,
+                lastPtMs,
+                visitedHouses,
+                lineMovementBearingDeg,
+                historicalAnchoredCoords
+            );
+
+            // Bereken alvast de actuele cirkelstraal zodat de keten van doel-clubhuizen altijd voorbij de cirkel loopt
+            var isFuture = (lastPtMs > nowMs);
+            var rawSecondsPassed = isFuture ? 0 : Math.floor((nowMs - lastPtMs) / 1000);
+            var isCappedByAge = (!isFuture && rawSecondsPassed >= maxGrowthSeconds);
+            var effectiveSecondsPassed = isCappedByAge ? maxGrowthSeconds : rawSecondsPassed;
+
+            var effectiveSpeedKmh = calculatedSpeedKmh !== null ? calculatedSpeedKmh : 6.5;
+            var currentRadiusMeters = 1;
+            if (!isFuture) {
+                var metersPerSecond = (effectiveSpeedKmh * 1000) / 3600;
+                currentRadiusMeters = Math.max(1, Math.round(1 + (effectiveSecondsPassed * metersPerSecond)));
+            }
 
             // Controleer of er voor dit gebied een handmatig gelockt doel-clubhuis is ingesteld
             var lockedTargetName = (adminSettings.lockedTargets && adminSettings.lockedTargets[area])
                 ? adminSettings.lockedTargets[area]
                 : null;
 
-            // Als het gelockte clubhuis inmiddels op 'bezocht' is gezet, negeer de lock dan automatisch
             if (lockedTargetName && !unvisitedHouses.some(function(h) { return h.name === lockedTargetName; })) {
                 lockedTargetName = null;
             }
 
-            // Selecteer de semi-logische keten van onbezochte clubhuizen (rekening houdend met lock, RD-lijn én bezochte clubs)
+            // Selecteer de semi-logische keten van onbezochte clubhuizen (dekt altijd de volledige cirkelstraal + extra voorspellingsafstand)
             var targetHousesChain = selectSemiLogicalTargetHouses(
                 lastPoint.latlng,
                 lineMovementBearingDeg,
                 unvisitedHouses,
                 visitedContext,
-                lockedTargetName
+                lockedTargetName,
+                currentRadiusMeters + 2500
             );
             var primaryTargetHouse = targetHousesChain.length > 0 ? targetHousesChain[0] : null;
 
-            // 4. Bereken de gecombineerde richtingshoek voor de gradenhoek-pijlen op de cirkel
-            //    (Neemt nu óók de herkomst vanaf bezochte clubgebouwen mee!)
+            // 5. Bereken de gecombineerde richtingshoek voor de gradenhoek-pijlen op de cirkel
             var bearingDeg = null;
             if (points.length >= 2 || visitedContext.originBearingDeg !== null || primaryTargetHouse) {
                 var sumSin = 0, sumCos = 0, totalWeight = 0;
@@ -967,13 +1299,11 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                     sumSin += 0.10 * Math.sin(bPrev); sumCos += 0.10 * Math.cos(bPrev); totalWeight += 0.10;
                 }
 
-                // Neem de wegloop-richting vanaf reeds bezochte clubgebouwen mee voor 20%
                 if (visitedContext.originBearingDeg !== null) {
                     var bVisitedOrigin = visitedContext.originBearingDeg * Math.PI / 180;
                     sumSin += 0.20 * Math.sin(bVisitedOrigin); sumCos += 0.20 * Math.cos(bVisitedOrigin); totalWeight += 0.20;
                 }
 
-                // Neem de richting naar het voorspelde/gelockte onbezochte clubhuis mee voor 35%
                 if (primaryTargetHouse) {
                     var bHouse = getBearing(lastPoint.latlng[0], lastPoint.latlng[1], primaryTargetHouse.lat, primaryTargetHouse.lng) * Math.PI / 180;
                     sumSin += 0.35 * Math.sin(bHouse); sumCos += 0.35 * Math.cos(bHouse); totalWeight += 0.35;
@@ -1014,21 +1344,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 };
             });
 
-            var isFuture = (lastPtMs > nowMs);
-            var rawSecondsPassed = isFuture ? 0 : Math.floor((nowMs - lastPtMs) / 1000);
-
-            var isCappedByAge = (!isFuture && rawSecondsPassed >= maxGrowthSeconds);
-            var effectiveSecondsPassed = isCappedByAge ? maxGrowthSeconds : rawSecondsPassed;
-
-            var effectiveSpeedKmh = calculatedSpeedKmh !== null ? calculatedSpeedKmh : 6.5;
-            var currentRadiusMeters = 1;
-            if (!isFuture) {
-                var metersPerSecond = (effectiveSpeedKmh * 1000) / 3600;
-                currentRadiusMeters = Math.max(1, Math.round(1 + (effectiveSecondsPassed * metersPerSecond)));
-            }
-
             var baseAreaColor = areaColors[area] || "#e74c3c";
-            // Als de maximale groeitijd verstreken is, wordt de cirkel op de kaart grijs (#7f8c8d)
             var circleDisplayColor = isCappedByAge ? "#7f8c8d" : baseAreaColor;
 
             var distFormatted = currentRadiusMeters >= 1000
@@ -1059,7 +1375,8 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 });
             }
 
-            // 5. Bereken zowel de primaire voorspellende looproute als (indien ingeschakeld) de alternatieve parallelroute
+            // 6. Bereken zowel de primaire voorspellende looproute als de alternatieve parallelroute over de volledige keten
+            //    met Hard Waypoint Pinning op elk clubgebouw én 15-minuten backtracking-preventie
             var estimatedWalkRoute = [];
             var alternativeWalkRoute = [];
             var estimatedTargetHouseName = "";
@@ -1070,7 +1387,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
 
             if (targetHousesChain.length > 0) {
                 var waypoints = [lastPoint.latlng];
-                // Als een clubhuis ná het laatste RD-punt op bezocht is gezet, neem die dan mee als bevestigd tussenpunt!
+                // Als een clubhuis vlak bij of ná het laatste RD-punt op bezocht staat, veranker dit als eerste verplichte tussenpunt
                 if (visitedContext.recentVisitedAnchor) {
                     waypoints.push([visitedContext.recentVisitedAnchor.lat, visitedContext.recentVisitedAnchor.lng]);
                 }
@@ -1079,21 +1396,31 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 });
 
                 var lockPrefix = lockedTargetName ? "🔒 " : "";
-                estimatedTargetHouseName = lockPrefix + targetHousesChain.map(function(h) { return h.name; }).join(" ➔ ");
+                var chainLabelParts = [];
+                if (visitedContext.recentVisitedAnchor) {
+                    chainLabelParts.push("✔️ " + visitedContext.recentVisitedAnchor.name);
+                }
+                targetHousesChain.forEach(function(h) {
+                    chainLabelParts.push(h.name);
+                });
+                estimatedTargetHouseName = lockPrefix + chainLabelParts.join(" ➔ ");
 
-                var routesObj = await getPrimaryAndAlternativeWalkingRoutes(waypoints, !!adminSettings.showAltQuietRoute);
+                var routesObj = await buildMultiStageWalkRoute(
+                    waypoints,
+                    historicalAnchoredCoords,
+                    effectiveSpeedKmh,
+                    !!adminSettings.showAltQuietRoute
+                );
                 estimatedWalkRoute = routesObj.primary || [];
                 alternativeWalkRoute = routesObj.alternative || [];
 
                 if (!isFuture && estimatedWalkRoute && estimatedWalkRoute.length >= 2) {
-                    // A. Snijpunt waar de geschatte looproute en de groeiende cirkel elkaar kruisen
                     circleIntersectionPoint = findRouteCircleIntersection(
                         lastPoint.latlng,
                         currentRadiusMeters,
                         estimatedWalkRoute
                     );
 
-                    // B. Live verwachte positie van de vos langs de primaire wandelroute o.b.v. gemiddelde snelheid
                     var walkedPos = getPointAlongRouteByDistance(estimatedWalkRoute, currentRadiusMeters);
                     if (walkedPos && walkedPos.coord) {
                         liveExpectedFoxPoint = {
@@ -1108,7 +1435,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                     }
                 }
 
-                // C. Live verwachte positie op de alternatieve parallel/rustige route
                 if (!isFuture && alternativeWalkRoute && alternativeWalkRoute.length >= 2) {
                     var altWalkedPos = getPointAlongRouteByDistance(alternativeWalkRoute, currentRadiusMeters);
                     if (altWalkedPos && altWalkedPos.coord) {
@@ -1124,7 +1450,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
 
             computedAreas[area] = {
                 points: processedPoints,
-                routeCoords: points.length >= 2 ? points.map(function(p) { return p.latlng; }) : [],
+                routeCoords: historicalAnchoredCoords.length >= 2 ? historicalAnchoredCoords : [],
                 lineColor: (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000"),
                 geofence: {
                     center: lastPoint.latlng,
@@ -1233,7 +1559,7 @@ function injectAdminUI() {
             background: #2c3e50; color: #ecf0f1;
             border: 1px solid #4a6278; border-radius: 8px;
             box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-            width: 268px; max-width: 84vw;
+            width: 274px; max-width: 86vw;
             font-size: 0.8rem; user-select: none; touch-action: none;
             overflow: hidden;
         }
@@ -1258,8 +1584,6 @@ function injectAdminUI() {
         .admin-setting-label-wrap {
             display: flex; align-items: center; gap: 7px; flex: 1;
         }
-        /* Standaard donkergrijs (#95a5a6) wanneer max groeitijd nog NIET gehaald is;
-           wordt lichtere grijstint (#dcdde1) zodra max groeitijd bereikt is */
         .admin-setting-row label {
             font-size: 0.76rem; color: #95a5a6; font-weight: 600; line-height: 1.25;
             transition: color 0.2s ease; cursor: pointer;
@@ -1285,7 +1609,7 @@ function injectAdminUI() {
             font-size: 0.85rem; font-weight: bold; text-align: center; outline: none;
         }
         #admin-max-hours-input:focus { border-color: #3498db; }
-        #admin-alt-route-toggle {
+        #admin-alt-route-toggle, #admin-route-speed-toggle {
             width: 17px; height: 17px; cursor: pointer; accent-color: #2ecc71;
         }
         .admin-setting-subtext {
@@ -1466,7 +1790,20 @@ function injectAdminUI() {
                     <input type="checkbox" id="admin-alt-route-toggle" checked>
                 </div>
                 <div class="admin-setting-subtext">
-                    Berekent een 2e doelgerichte route die drukke N-wegen mijdt en parallelwegen kiest indien niet te ver om.
+                    Berekent een 2e doelgerichte route over de hele keten die N-wegen en dubbele wegen mijdt.
+                </div>
+
+                <hr class="admin-divider">
+
+                <div class="admin-setting-row">
+                    <div class="admin-setting-label-wrap">
+                        <span id="admin-route-speed-status-dot" class="admin-status-dot status-dot-red" title="Loopsnelheid o.b.v. hemelsbreed"></span>
+                        <label for="admin-route-speed-toggle" style="color:#bdc3c7;">🥾 Loopsnelheid o.b.v. wandelroute (i.p.v. hemelsbreed):</label>
+                    </div>
+                    <input type="checkbox" id="admin-route-speed-toggle">
+                </div>
+                <div class="admin-setting-subtext">
+                    Gebruikt de snelste wandelafstand over wegen/paden tussen RD-punten voor de 50/50 snelheidsberekening.
                 </div>
 
                 <div id="admin-area-growth-list"></div>
@@ -1514,6 +1851,19 @@ function injectAdminUI() {
             updateAdminSettingsPanelStatus();
             db.ref('adminSettings').update({
                 showAltQuietRoute: enabled,
+                updatedAt: Date.now()
+            }).then(function() {
+                window.calculateAndPublishMapState(true);
+            });
+        });
+
+        var routeSpeedToggle = document.getElementById('admin-route-speed-toggle');
+        routeSpeedToggle.addEventListener('change', function() {
+            var enabled = !!this.checked;
+            adminSettings.useRouteSpeedCalculation = enabled;
+            updateAdminSettingsPanelStatus();
+            db.ref('adminSettings').update({
+                useRouteSpeedCalculation: enabled,
                 updatedAt: Date.now()
             }).then(function() {
                 window.calculateAndPublishMapState(true);
@@ -1817,6 +2167,7 @@ window.clearRdPoints = function() {
     var pinInput = prompt("Voer de admin-pincode in om de RD-lijnen te wissen:", "");
     if (pinInput === "6546") {
         walkingRouteCache = {};
+        segmentDistanceCache = {};
         areaCappedStatus = {};
         updateAdminSettingsPanelStatus();
         db.ref('rdPoints').remove().then(function() {
@@ -1867,6 +2218,9 @@ window.initAdminEngine = function() {
         }
         if (val.showAltQuietRoute !== undefined) {
             adminSettings.showAltQuietRoute = !!val.showAltQuietRoute;
+        }
+        if (val.useRouteSpeedCalculation !== undefined) {
+            adminSettings.useRouteSpeedCalculation = !!val.useRouteSpeedCalculation;
         }
         adminSettings.lockedTargets = val.lockedTargets || {};
 
