@@ -93,15 +93,8 @@ function loadScript(src) {
 }
 
 async function loadAdminDependencies() {
-    // Voeg Leaflet Draw CSS toe
-    var link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css';
-    document.head.appendChild(link);
-
-    // Laad Proj4js, Leaflet Draw en vervolgens admin-engine.js
+    // Laad Proj4js en vervolgens admin-engine.js
     await loadScript('https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js');
-    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js');
     await loadScript('admin-engine.js');
 
     if (typeof window.initAdminEngine === 'function') {
@@ -152,6 +145,9 @@ async function keepScreenAwake() {
 document.addEventListener("visibilitychange", function() {
     if (document.visibilityState === 'visible') {
         keepScreenAwake();
+        if (!isAdmin && currentUserId) {
+            sendCurrentLocation();
+        }
     }
 });
 

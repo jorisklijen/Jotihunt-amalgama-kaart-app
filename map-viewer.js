@@ -44,6 +44,57 @@ function toggleDarkMode() {
     applyDarkMode(isDarkMode);
 }
 
+/* --- DYNAMISCHE MAATSTAAF (SCALE BAR) ONDERAAN DE KAART --- */
+var CustomScaleBar = L.Control.extend({
+    options: {
+        position: 'bottomleft',
+        maxWidth: 110
+    },
+    onAdd: function (mapInstance) {
+        var container = L.DomUtil.create('div', 'jh-scale-control leaflet-control');
+        this._textEl = L.DomUtil.create('span', 'jh-scale-text', container);
+        this._bracketEl = L.DomUtil.create('div', 'jh-scale-bracket', container);
+
+        mapInstance.on('zoomend moveend resize', this._update, this);
+        this._map = mapInstance;
+        this._update();
+        return container;
+    },
+    onRemove: function (mapInstance) {
+        mapInstance.off('zoomend moveend resize', this._update, this);
+    },
+    _update: function () {
+        if (!this._map) return;
+        var mapSize = this._map.getSize();
+        if (!mapSize || mapSize.y <= 0) return;
+
+        var y = mapSize.y / 2;
+        var maxWidthPx = this.options.maxWidth || 110;
+        var p1 = this._map.containerPointToLatLng([0, y]);
+        var p2 = this._map.containerPointToLatLng([maxWidthPx, y]);
+        var maxMeters = this._map.distance(p1, p2);
+
+        if (!maxMeters || maxMeters <= 0 || isNaN(maxMeters)) return;
+
+        var niceMeters = this._getRoundNum(maxMeters);
+        var ratio = niceMeters / maxMeters;
+        var barWidthPx = Math.max(24, Math.round(maxWidthPx * ratio));
+
+        this._bracketEl.style.width = barWidthPx + 'px';
+        this._textEl.innerText = niceMeters >= 1000 ? (niceMeters / 1000) + ' km' : niceMeters + ' m';
+    },
+    _getRoundNum: function (num) {
+        var pow10 = Math.pow(10, (Math.floor(num) + '').length - 1);
+        var d = num / pow10;
+        d = d >= 10 ? 10 :
+            d >= 5 ? 5 :
+            d >= 3 ? 3 :
+            d >= 2 ? 2 : 1;
+        return pow10 * d;
+    }
+});
+map.addControl(new CustomScaleBar());
+
 /* Kaartlagen */
 var fixedHouseLayer = new L.FeatureGroup().addTo(map);
 var drawnItems = new L.FeatureGroup().addTo(map);
@@ -94,22 +145,66 @@ var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180))
     L.marker([dir.lat, dir.lng], { icon: icon, interactive: false }).addTo(compassRoseLayer);
 });
 
-/* --- 450M TEGENHUNT CIRKEL PER CLUBGEBOUW --- */
+/* --- 450M TEGENHUNT CIRKEL & BEZOCHT-TIJDSTIP PER CLUBGEBOUW --- */
 var houseMarkersMap = {};
 var houseRadiusCircles = {};
 
+function formatTimestampLocalIso(tsMs) {
+    var d = (tsMs && tsMs > 1000) ? new Date(Number(tsMs)) : new Date();
+    if (isNaN(d.getTime())) d = new Date();
+    var yyyy = d.getFullYear();
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    var hh = String(d.getHours()).padStart(2, '0');
+    var min = String(d.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+function formatVisitedDisplayTime(rawVal) {
+    var ts = null;
+    if (typeof rawVal === 'number' && rawVal > 1000) ts = rawVal;
+    else if (typeof rawVal === 'object' && rawVal && rawVal.visitedAt) ts = Number(rawVal.visitedAt);
+
+    if (!ts || isNaN(ts)) return "";
+    var d = new Date(ts);
+    var dd = String(d.getDate()).padStart(2, '0');
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var hh = String(d.getHours()).padStart(2, '0');
+    var min = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}-${mm} ${hh}:${min}`;
+}
+
 function buildHousePopupHtml(loc) {
     var safeKey = loc.name.replace(/[.#$[\]]/g, '_');
-    var isVisited = !!houseVisitedStatus[safeKey];
+    var rawVisitedVal = houseVisitedStatus[safeKey];
+    var isVisited = !!rawVisitedVal;
     var hasActiveRadius = !!houseRadiusCircles[safeKey];
     var escapedName = loc.name.replace(/'/g, "\\'");
 
+    var visitedTimeFormatted = isVisited ? formatVisitedDisplayTime(rawVisitedVal) : "";
+    var existingTs = (typeof rawVisitedVal === 'number' && rawVisitedVal > 1000)
+        ? rawVisitedVal
+        : (rawVisitedVal && rawVisitedVal.visitedAt ? Number(rawVisitedVal.visitedAt) : null);
+    var defaultIsoVal = formatTimestampLocalIso(existingTs);
+
     var visitedBtnHtml = '';
     if (isAdmin) {
+        visitedBtnHtml = `
+            <hr style="margin:7px 0 5px 0; border:0; border-top:1px solid #4a627a;">
+            <label style="font-size:11px; color:#bdc3c7; font-weight:bold; display:block; margin-bottom:3px;">🕒 Bezoektijdstip (voor RD-looplijn):</label>
+            <input type="datetime-local" id="house_dt_${safeKey}" value="${defaultIsoVal}" style="width:100%; padding:4px 6px; font-size:11px; font-weight:bold; margin-bottom:4px;">
+        `;
         if (isVisited) {
-            visitedBtnHtml = `<button onclick="window.toggleHouseVisited('${escapedName}')" style="margin-top:6px; background:#e67e22; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">↩️ Zet op niet bezocht</button>`;
+            visitedBtnHtml += `
+                <div style="display:flex; gap:5px;">
+                    <button onclick="window.saveHouseVisitedWithTime('${escapedName}', 'house_dt_${safeKey}')" style="background:#27ae60; color:white; border:none; padding:5px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">💾 Update tijd</button>
+                    <button onclick="window.clearHouseVisited('${escapedName}')" style="background:#e67e22; color:white; border:none; padding:5px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">↩️ Niet bezocht</button>
+                </div>
+            `;
         } else {
-            visitedBtnHtml = `<button onclick="window.toggleHouseVisited('${escapedName}')" style="margin-top:6px; background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">✔️ Markeer als bezocht</button>`;
+            visitedBtnHtml += `
+                <button onclick="window.saveHouseVisitedWithTime('${escapedName}', 'house_dt_${safeKey}')" style="background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">✔️ Markeer als bezocht op tijdstip</button>
+            `;
         }
     }
 
@@ -117,7 +212,18 @@ function buildHousePopupHtml(loc) {
     var radiusBtnBg = hasActiveRadius ? "#c0392b" : "#8e44ad";
     var radiusBtnHtml = `<button onclick="window.toggleHouseRadius('${escapedName}', ${loc.lat}, ${loc.lng})" style="margin-top:6px; background:${radiusBtnBg}; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">${radiusBtnText}</button>`;
 
-    return `<b>${loc.name}</b><br>Deelgebied: ${loc.area}<br>Status: ${isVisited ? '<span style="color:#e67e22; font-weight:bold;">Bezocht (Tegenhunt)</span>' : '<span style="color:#2ecc71; font-weight:bold;">Niet bezocht</span>'}<br><button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>${radiusBtnHtml}${visitedBtnHtml}`;
+    var statusHtml = isVisited
+        ? `<span style="color:#e67e22; font-weight:bold;">Bezocht${visitedTimeFormatted ? ' (' + visitedTimeFormatted + ')' : ' (Tegenhunt)'}</span>`
+        : `<span style="color:#2ecc71; font-weight:bold;">Niet bezocht</span>`;
+
+    return `<div style="min-width:205px;">
+        <b>${loc.name}</b><br>
+        Deelgebied: ${loc.area}<br>
+        Status: ${statusHtml}<br>
+        <button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>
+        ${radiusBtnHtml}
+        ${visitedBtnHtml}
+    </div>`;
 }
 
 window.toggleHouseRadius = function (houseName, lat, lng) {
@@ -158,8 +264,9 @@ function renderFixedHouses() {
             var areaColor = areaColors[loc.area] || "#3498db";
             var isOscar = (loc.area === "Oscar");
             var safeKey = loc.name.replace(/[.#$[\]]/g, '_');
-            var isVisited = !!houseVisitedStatus[safeKey];
-            var opacity = isVisited ? 0.5 : 1.0;
+            var rawVisited = houseVisitedStatus[safeKey];
+            var isVisited = !!rawVisited;
+            var opacity = isVisited ? 0.55 : 1.0;
 
             var houseSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28" fill="${areaColor}" stroke="${isOscar ? "#003399" : "#000000"}" stroke-width="${isOscar ? 2 : 1}" style="opacity: ${opacity};">
                 <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
@@ -170,8 +277,11 @@ function renderFixedHouses() {
                 iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -14]
             });
 
+            var timeSuffix = isVisited ? formatVisitedDisplayTime(rawVisited) : "";
+            var tooltipLabel = loc.name + " (" + loc.area + ")" + (timeSuffix ? " • Bezocht " + timeSuffix : "");
+
             var marker = L.marker([loc.lat, loc.lng], { icon: customIcon });
-            marker.bindTooltip(loc.name + " (" + loc.area + ")", { permanent: false, direction: 'right', className: 'marker-label' });
+            marker.bindTooltip(tooltipLabel, { permanent: false, direction: 'right', className: 'marker-label' });
 
             marker.bindPopup(buildHousePopupHtml(loc));
 
@@ -216,22 +326,34 @@ var activeAltExpectedFoxMarkers = {};
 function createWalkerMarker(pt) {
     var isOscar = (pt.area === "Oscar");
     var strokeColor = isOscar ? "#003399" : "#000000";
-    var walkerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30" fill="${pt.color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1.5}" style="opacity: ${pt.opacity};">
-        <path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.2L6 8.3V13h2V9.6l1.8-.7z"/>
-    </svg>`;
+    var customIcon;
 
-    var customIcon = L.divIcon({
-        className: 'custom-walker-pin', html: walkerSvg,
-        iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15]
-    });
+    // Alleen het LAATSTE RD-punt van een deelgebied krijgt het lopende poppetje;
+    // oudere RD-punten (en losse 'Anders'-punten) worden getoond als een duidelijk puntje.
+    if (pt.isLatest) {
+        var walkerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30" fill="${pt.color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1.5}" style="opacity: ${pt.opacity};">
+            <path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.2L6 8.3V13h2V9.6l1.8-.7z"/>
+        </svg>`;
+
+        customIcon = L.divIcon({
+            className: 'custom-walker-pin', html: walkerSvg,
+            iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15]
+        });
+    } else {
+        var dotBorderColor = isOscar ? "#ffffff" : "#ffffff";
+        var dotHtml = `<div class="custom-rd-dot" style="background-color: ${pt.color}; border: 2px solid ${dotBorderColor}; opacity: ${pt.opacity};"></div>`;
+
+        customIcon = L.divIcon({
+            className: 'custom-rd-dot-wrapper', html: dotHtml,
+            iconSize: [12, 12], iconAnchor: [6, 6], popupAnchor: [0, -6]
+        });
+    }
 
     var timeLabelPart = pt.time ? " (" + pt.time + ")" : "";
     var labelText = pt.name + timeLabelPart + (pt.extraInfo ? " • " + pt.extraInfo : "");
     var marker = L.marker(pt.latlng, { icon: customIcon });
     marker.bindTooltip(labelText, { permanent: false, direction: 'right', className: 'marker-label' });
 
-    // Als dit het LAATSTE RD-punt van een deelgebied is én de gebruiker is Admin:
-    // toon een dropdown om direct vanuit deze popup een doel-clubhuis te locken of op Automatisch te zetten!
     var targetLockHtml = '';
     if (isAdmin && pt.isLatest && pt.area) {
         var areaHouses = allLocations.filter(function(l) { return l.area === pt.area; });
@@ -354,7 +476,7 @@ function renderComputedMapState(state) {
             }
         });
 
-        // 2. Teken voorberekende chronologische routelijn tussen RD-punten
+        // 2. Teken voorberekende chronologische routelijn tussen RD-punten & bezochte clubgebouwen
         if (areaObj.routeCoords && areaObj.routeCoords.length >= 2) {
             var polyline = L.polyline(areaObj.routeCoords, {
                 color: areaObj.lineColor || areaColors[area] || "#000000",
@@ -368,7 +490,7 @@ function renderComputedMapState(state) {
         // 3. Teken of update voorberekende Geofence, Pijlen, Voorspellende Looproutes & Live Verwachte Posities
         if (areaObj.geofence) {
             var gf = areaObj.geofence;
-            var circleColor = gf.color || "#7f8c8d"; // Wordt grijs (#7f8c8d) zodra max groeitijd is verstreken
+            var circleColor = gf.color || "#7f8c8d";
             var routeAreaColor = gf.areaColor || areaColors[area] || gf.color;
 
             if (activeGeofenceCircles[area]) {
@@ -638,22 +760,29 @@ function createUserIcon(isActive) {
     });
 }
 
-db.ref('liveUsers').on('value', function (snapshot) {
-    var users = snapshot.val();
+function renderLiveUsersOnMap() {
+    var users = cachedUsersData;
     var now = Date.now();
 
-    if (!users) {
-        cachedUsersData = {};
+    if (!users || Object.keys(users).length === 0) {
         usersLiveLayer.clearLayers();
         liveUserMarkers = {};
         return;
     }
 
-    cachedUsersData = users;
-
     Object.keys(users).forEach(function (userId) {
         var u = users[userId];
         if (!u || !u.lat || !u.lng) return;
+
+        // Als een admin deze inactieve gebruiker heeft verborgen, en er is sindsdien geen nieuwe GPS-update binnengekomen,
+        // verberg de gebruiker dan op de kaart. Zodra de gebruiker weer online komt (lastSeen > hiddenAt), verschijnt hij direct weer!
+        if (u.hiddenByAdmin && (!u.lastSeen || u.lastSeen <= (u.hiddenAt || 0))) {
+            if (liveUserMarkers[userId]) {
+                usersLiveLayer.removeLayer(liveUserMarkers[userId]);
+                delete liveUserMarkers[userId];
+            }
+            return;
+        }
 
         var isActive = (now - (u.lastSeen || 0)) <= (3 * 60 * 1000);
         var minutesAgo = Math.floor((now - (u.lastSeen || 0)) / 60000);
@@ -726,4 +855,13 @@ db.ref('liveUsers').on('value', function (snapshot) {
             delete liveUserMarkers[userId];
         }
     });
+}
+
+db.ref('liveUsers').on('value', function (snapshot) {
+    cachedUsersData = snapshot.val() || {};
+    renderLiveUsersOnMap();
 });
+
+// Evalueer elke 20 seconden lokaal of een gebruiker inmiddels > 3 minuten inactief is,
+// zodat de status en de knop 'Verberg inactieve gebruiker' voor Admins vanzelf verschijnen.
+setInterval(renderLiveUsersOnMap, 20000);
