@@ -292,11 +292,16 @@ function renderFixedHouses() {
 }
 
 /* --- CLUBGEBOUWEN (clubs.json) & BEZOCHT-STATUS --- */
+var lastComputedMapState = null;
+
 fetch('clubs.json')
     .then(function (response) { return response.json(); })
     .then(function (data) {
         allLocations = data;
         renderFixedHouses();
+        if (lastComputedMapState) {
+            renderComputedMapState(lastComputedMapState);
+        }
         if (isAdmin && typeof window.calculateAndPublishMapState === 'function') {
             window.calculateAndPublishMapState();
         }
@@ -308,6 +313,9 @@ fetch('clubs.json')
 db.ref('houseVisited').on('value', function (snapshot) {
     houseVisitedStatus = snapshot.val() || {};
     renderFixedHouses();
+    if (lastComputedMapState) {
+        renderComputedMapState(lastComputedMapState);
+    }
     if (isAdmin && typeof window.calculateAndPublishMapState === 'function') {
         window.calculateAndPublishMapState();
     }
@@ -400,10 +408,42 @@ function createWalkerMarker(pt) {
     return marker;
 }
 
+/* Hulpfunctie: Zoekt het laatst bezochte clubgebouw van een deelgebied als er nog geen RD-punten zijn */
+function getFallbackLatestVisitedHouseForArea(areaName) {
+    if (!allLocations || allLocations.length === 0) return null;
+    var areaHouses = allLocations.filter(function(l) { return l.area === areaName; });
+    var bestHouse = null;
+    var bestTs = -1;
+
+    areaHouses.forEach(function(h) {
+        var safeKey = h.name.replace(/[.#$[\]]/g, '_');
+        var rawVal = houseVisitedStatus[safeKey];
+        if (!rawVal) return;
+        var ts = 1;
+        if (typeof rawVal === 'number' && rawVal > 1000) ts = rawVal;
+        else if (typeof rawVal === 'object' && rawVal.visitedAt) ts = Number(rawVal.visitedAt);
+
+        if (ts >= bestTs) {
+            bestTs = ts;
+            bestHouse = h;
+        }
+    });
+
+    if (bestHouse) {
+        return {
+            latlng: [bestHouse.lat, bestHouse.lng],
+            marker: houseMarkersMap[bestHouse.name] || null,
+            isHouse: true,
+            houseName: bestHouse.name
+        };
+    }
+    return null;
+}
+
 // Luister naar de door Admin voorberekende kaartstatus
 db.ref('computedMapState').on('value', function (snapshot) {
-    var state = snapshot.val();
-    renderComputedMapState(state);
+    lastComputedMapState = snapshot.val();
+    renderComputedMapState(lastComputedMapState);
 });
 
 function renderComputedMapState(state) {
@@ -460,17 +500,48 @@ function renderComputedMapState(state) {
         var areaObj = areasData[area];
         if (!areaObj || !areaObj.points || areaObj.points.length === 0) return;
 
+        var latestRdMarker = null;
+        var latestRdLatLng = null;
+
         // 1. Teken voorberekende RD-punten van het deelgebied
         areaObj.points.forEach(function (pt) {
             var marker = createWalkerMarker(pt);
             rdPointsLayer.addLayer(marker);
             if (pt.isLatest) {
-                latestKnownAreaPoints[area] = {
-                    latlng: pt.latlng,
-                    marker: marker
-                };
+                latestRdMarker = marker;
+                latestRdLatLng = pt.latlng;
             }
         });
+
+        // Bepaal het ALLERLAATSTE punt van de lijn voor dit deelgebied (RD-punt óf laatst bezochte club!)
+        var lineTailLatLng = latestRdLatLng;
+        if (areaObj.geofence && Array.isArray(areaObj.geofence.center) && areaObj.geofence.center.length === 2) {
+            lineTailLatLng = areaObj.geofence.center;
+        } else if (areaObj.routeCoords && areaObj.routeCoords.length > 0) {
+            lineTailLatLng = areaObj.routeCoords[areaObj.routeCoords.length - 1];
+        }
+
+        if (lineTailLatLng) {
+            var matchedClub = allLocations.find(function (loc) {
+                return loc.area === area && getDistanceKm(lineTailLatLng[0], lineTailLatLng[1], loc.lat, loc.lng) <= 0.015;
+            });
+
+            if (matchedClub && houseMarkersMap[matchedClub.name]) {
+                latestKnownAreaPoints[area] = {
+                    latlng: [matchedClub.lat, matchedClub.lng],
+                    marker: houseMarkersMap[matchedClub.name],
+                    isHouse: true,
+                    houseName: matchedClub.name
+                };
+            } else {
+                var isSameAsLatestRd = latestRdLatLng && getDistanceKm(lineTailLatLng[0], lineTailLatLng[1], latestRdLatLng[0], latestRdLatLng[1]) <= 0.015;
+                latestKnownAreaPoints[area] = {
+                    latlng: lineTailLatLng,
+                    marker: isSameAsLatestRd ? latestRdMarker : null,
+                    isHouse: false
+                };
+            }
+        }
 
         // 2. Teken voorberekende chronologische routelijn tussen RD-punten & bezochte clubgebouwen
         if (areaObj.routeCoords && areaObj.routeCoords.length >= 2) {
@@ -707,6 +778,18 @@ function renderComputedMapState(state) {
             }
         }
     });
+
+    // Als een deelgebied nog geen RD-punt heeft, maar al wél een bezocht clubgebouw, gebruik dat clubgebouw als laatste punt!
+    targetAreas.forEach(function (areaName) {
+        if (!latestKnownAreaPoints[areaName]) {
+            var fallbackClub = getFallbackLatestVisitedHouseForArea(areaName);
+            if (fallbackClub) {
+                latestKnownAreaPoints[areaName] = fallbackClub;
+            }
+        }
+    });
+
+    renderLiveUsersOnMap();
 }
 
 /* --- PUSHMELDING BIJ NIEUW GEPLAATST RD-PUNT --- */
@@ -796,7 +879,8 @@ function renderLiveUsersOnMap() {
                 var pt = latestKnownAreaPoints[areaName];
                 var dist = getDistanceKm(u.lat, u.lng, pt.latlng[0], pt.latlng[1]).toFixed(1);
                 var eta = Math.round((dist / 45) * 60);
-                vossenOptions += `<option value="${pt.latlng[0]},${pt.latlng[1]}">🎯 Laatste RD: ${areaName} (${dist} km - ~${eta} min)</option>`;
+                var typePrefix = pt.isHouse ? "🏠 Laatste punt (Club)" : "🎯 Laatste punt (RD)";
+                vossenOptions += `<option value="${pt.latlng[0]},${pt.latlng[1]}">${typePrefix}: ${areaName} (${dist} km - ~${eta} min)</option>`;
             }
         });
 
@@ -953,18 +1037,34 @@ function injectFoxStatusPanel() {
     renderFoxStatusButtons();
 }
 
-/* Dubbelklik-actie: Zoom automatisch in op de laatst bekende vossenplek van het deelgebied */
+/* Dubbelklik / Dubbel-tik actie:
+   Zoomt automatisch in op het ALLERLAATSTE punt in de lijn van het deelgebied
+   (ook wanneer dit een laatst bezocht clubgebouw is!) en opent de bijbehorende popup. */
 window.zoomToLatestFoxArea = function(areaName) {
-    if (latestKnownAreaPoints[areaName] && latestKnownAreaPoints[areaName].latlng) {
-        var pt = latestKnownAreaPoints[areaName];
-        map.flyTo(pt.latlng, 15, { animate: true, duration: 1.1 });
-        if (pt.marker) {
+    var targetPt = latestKnownAreaPoints[areaName] || getFallbackLatestVisitedHouseForArea(areaName);
+
+    if (targetPt && targetPt.latlng) {
+        map.flyTo(targetPt.latlng, 15, { animate: true, duration: 1.0 });
+        if (targetPt.marker) {
             setTimeout(function() {
-                pt.marker.openPopup();
+                targetPt.marker.openPopup();
             }, 650);
         }
     } else {
-        alert("Nog geen laatst bekende vossenplek (RD-punt) voor deelgebied " + areaName + ".");
+        alert("Nog geen bekend punt (RD-punt of bezochte club) voor deelgebied " + areaName + ".");
+    }
+};
+
+/* Ondersteunt zowel dubbelklik (PC) als dubbel-tikken op touchscreens (Mobiel) */
+var lastFoxTapTimeByArea = {};
+window.handleFoxAreaBtnClick = function(areaName) {
+    var now = Date.now();
+    var lastTap = lastFoxTapTimeByArea[areaName] || 0;
+    if (now - lastTap < 420) {
+        lastFoxTapTimeByArea[areaName] = 0;
+        window.zoomToLatestFoxArea(areaName);
+    } else {
+        lastFoxTapTimeByArea[areaName] = now;
     }
 };
 
@@ -994,8 +1094,8 @@ window.renderFoxStatusButtons = function() {
             <button type="button"
                 class="fox-area-status-btn status-color-${colorKey}"
                 style="background-color: ${cfg.bg}; border-color: ${cfg.border}; color: ${cfg.text};"
-                ondblclick="window.zoomToLatestFoxArea('${areaName}')"
-                title="Status: ${cfg.label}${stObj.timeFormatted ? ' (' + stObj.timeFormatted + ')' : ''} — Dubbelklik om in te zoomen op laatste vossenplek">
+                onclick="window.handleFoxAreaBtnClick('${areaName}')"
+                title="Status: ${cfg.label}${stObj.timeFormatted ? ' (' + stObj.timeFormatted + ')' : ''} — Dubbelklik / dubbel-tik om in te zoomen op het laatste punt in de lijn">
                 <span class="fox-btn-name">${areaName}</span>
                 ${timeBadge}
             </button>
