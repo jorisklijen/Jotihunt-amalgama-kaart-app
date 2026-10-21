@@ -14,9 +14,9 @@
    - Volledige keten-opbouw voor zowel primaire als alternatieve parallelroute (voorbij cirkel)
    - Handmatige Doel-Clubhuis Lock per deelgebied (via laatste RD-punt popup én Admin-menu)
    - Live Verwachte Vos-positie langs de wandelroute + Snijpunt met cirkelrand
-   - Beheer van zichtbare Telegram Vossenstatussen (Groen, Rood, Oranje, Geel, Blauw, Grijs)
-   - Centrale Master-berekening voor Vossen Status Info (Reistijd/afstand over de weg per
-     gebruiker, dichtstbijzijnde online hunter & status-duur)
+   - Regenboog-gesorteerde Telegram Vossenstatussen (Rood, Oranje, Geel, Groen, Blauw, Grijs)
+   - Gebruikerswachtwoord beheer in Firebase met automatische globale logout voor hunters
+   - Centrale Master-berekening voor Vossen Status Info (met 12-uurs timer limiet)
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
@@ -567,14 +567,12 @@ async function fetchOsrmFootRoutes(coordString, timeoutMs) {
     return null;
 }
 
-/* Haalt rij-afstand (over de weg) en reistijd op voor auto/hunter -> vossenlocatie */
 async function getDrivingDistanceAndTime(fromLat, fromLng, toLat, toLng) {
     var straightKm = getDistanceKm(fromLat, fromLng, toLat, toLng);
     if (straightKm < 0.05) {
         return { distKm: 0.1, durationMin: 1, isRoad: true };
     }
 
-    // Rond coördinaten af op ~100m voor efficiënte caching
     var cacheKey = `${fromLat.toFixed(3)},${fromLng.toFixed(3)}_${toLat.toFixed(3)},${toLng.toFixed(3)}`;
     var now = Date.now();
     if (drivingRouteMetricsCache[cacheKey] && (now - drivingRouteMetricsCache[cacheKey].ts) < 90000) {
@@ -608,7 +606,6 @@ async function getDrivingDistanceAndTime(fromLat, fromLng, toLat, toLng) {
         } catch (err) {}
     }
 
-    // Fallback als OSRM tijdelijk niet reageert: schat wegafstand (~1.28x hemelsbreed) & 48 km/u
     var estRoadKm = Math.max(0.1, Math.round((straightKm * 1.28) * 10) / 10);
     var estMin = Math.max(1, Math.round((estRoadKm / 48) * 60));
     return { distKm: estRoadKm, durationMin: estMin, isRoad: false };
@@ -1272,10 +1269,13 @@ function updateAdminSettingsPanelStatus() {
     }
 }
 
-/* Hulpfunctie: Formatteer duur (ms) naar leesbare tekst (bijv. "1u 14m" of "23m") */
+/* Hulpfunctie: Formatteer duur (ms) naar leesbare tekst, gemaximeerd op 12 uur */
 function formatDurationShort(ms) {
     if (!ms || ms < 0) return "0m";
     var totalSec = Math.floor(ms / 1000);
+    if (totalSec >= 12 * 3600) {
+        return "12u 00m (max 12u)";
+    }
     var hours = Math.floor(totalSec / 3600);
     var mins = Math.floor((totalSec % 3600) / 60);
     if (hours > 0) {
@@ -1284,13 +1284,10 @@ function formatDurationShort(ms) {
     return `${mins}m`;
 }
 
-/* Hulpfunctie: Bepaalt per deelgebied de geschatte live locatie van de vos en berekent voor
-   alle actieve gebruikers de wegafstand/reistijd én wie er online het dichtstbij is. */
 async function computeFoxStatusMetricsForAllUsers(computedAreas, nowMs) {
     var metricsByArea = {};
     var usersObj = (typeof cachedUsersData === 'object' && cachedUsersData) ? cachedUsersData : {};
 
-    // Filter op ingelogde én online gebruikers (laatste GPS-update <= 3 minuten geleden)
     var onlineUserIds = Object.keys(usersObj).filter(function(uid) {
         var u = usersObj[uid];
         if (!u || !u.lat || !u.lng) return false;
@@ -1298,7 +1295,6 @@ async function computeFoxStatusMetricsForAllUsers(computedAreas, nowMs) {
         return (nowMs - (u.lastSeen || 0)) <= (3 * 60 * 1000);
     });
 
-    // Alle bekende gebruikers met een geldige GPS-positie (zodat elke gebruiker zijn eigen afstand ziet)
     var allValidUserIds = Object.keys(usersObj).filter(function(uid) {
         var u = usersObj[uid];
         return u && typeof u.lat === 'number' && typeof u.lng === 'number';
@@ -1321,10 +1317,6 @@ async function computeFoxStatusMetricsForAllUsers(computedAreas, nowMs) {
 
         var statusDurationText = statusUpdatedAt ? formatDurationShort(nowMs - statusUpdatedAt) : "Onbekend";
 
-        // Bepaal de beste geschatte live locatie van de vos voor dit deelgebied:
-        // 1. Live Verwachte Vos-positie op de wandelroute
-        // 2. Laatste punt van de keten (geofence center: laatste RD-punt of laatst bezochte clubhuis)
-        // 3. Fallback: laatst bezochte clubhuis indien er nog geen RD-punten zijn
         var targetCoord = null;
         var targetLocationLabel = "Nog geen locatie bekend";
 
@@ -1351,7 +1343,6 @@ async function computeFoxStatusMetricsForAllUsers(computedAreas, nowMs) {
         var closestOnlineHunter = null;
 
         if (targetCoord) {
-            // Bereken voor iedere gebruiker de afstand & reistijd over de weg vanaf diens eigen locatie
             for (var uIdx = 0; uIdx < allValidUserIds.length; uIdx++) {
                 var uid = allValidUserIds[uIdx];
                 var uData = usersObj[uid];
@@ -1365,7 +1356,6 @@ async function computeFoxStatusMetricsForAllUsers(computedAreas, nowMs) {
                 };
             }
 
-            // Bepaal welke ingelogde én online gebruiker het dichtst bij de geschatte live locatie is
             onlineUserIds.forEach(function(onlineUid) {
                 var rInfo = userRoutes[onlineUid];
                 if (!rInfo) return;
@@ -1739,7 +1729,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             };
         });
 
-        // Bereken centraal op de Master Engine alle Vossen Status Info (afstanden, reistijd, dichtstbijzijnde hunter & timers)
         var foxStatusMetrics = await computeFoxStatusMetricsForAllUsers(computedAreas, nowMs);
 
         await db.ref('computedMapState').set({
@@ -1819,7 +1808,7 @@ function injectAdminUI() {
             background: #2c3e50; color: #ecf0f1;
             border: 1px solid #4a6278; border-radius: 8px;
             box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-            width: 274px; max-width: 86vw;
+            width: 280px; max-width: 88vw;
             font-size: 0.8rem; user-select: none; touch-action: none;
             overflow: hidden;
         }
@@ -1898,6 +1887,31 @@ function injectAdminUI() {
             width: 100%; padding: 4px 6px; font-size: 0.72rem;
             background: #34495e; color: #ecf0f1; border: 1px solid #4a6278;
             border-radius: 4px; font-weight: 600; outline: none; cursor: pointer;
+        }
+        /* Nette 3x2 grid voor de 6 regenboog statuskleuren */
+        .admin-fox-colors-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            width: 100%;
+        }
+        .admin-fox-color-pill {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.73rem;
+            color: #ecf0f1;
+            cursor: pointer;
+            background: #34495e;
+            padding: 5px 6px;
+            border-radius: 4px;
+            border: 1px solid #4a6278;
+            font-weight: 600;
+            justify-content: flex-start;
+        }
+        .admin-fox-color-pill input {
+            margin: 0;
+            cursor: pointer;
         }
     `;
     document.head.appendChild(style);
@@ -2192,7 +2206,7 @@ function injectAdminUI() {
     injectAdminFoxStatusControls();
 }
 
-/* --- 4B. BEHEER INSTELLINGEN VOOR VOSSEN STATUS FILTERS (GROEN, ROOD, ORANJE, GEEL, BLAUW, GRIJS) --- */
+/* --- 4B. BEHEER INSTELLINGEN: VOSSEN STATUS FILTERS (REGENBOOG 3x2 GRID) & GEBRUIKERSWACHTWOORD --- */
 function injectAdminFoxStatusControls() {
     var settingsBody = document.getElementById('admin-settings-body');
     if (!settingsBody || document.getElementById('admin-fox-status-filter-section')) return;
@@ -2203,13 +2217,19 @@ function injectAdminFoxStatusControls() {
     filterSection.style.flexDirection = 'column';
     filterSection.style.gap = '6px';
 
-    var colorCheckboxesHtml = Object.keys(foxStatusConfig).map(function(colorKey) {
+    // Gebruik de vaste regenboogvolgorde: Rood, Oranje, Geel, Groen, Blauw, Grijs
+    var orderedColorKeys = (typeof foxStatusOrder !== 'undefined' && Array.isArray(foxStatusOrder))
+        ? foxStatusOrder
+        : ["rood", "oranje", "geel", "groen", "blauw", "grijs"];
+
+    var colorCheckboxesHtml = orderedColorKeys.map(function(colorKey) {
         var cfg = foxStatusConfig[colorKey];
+        if (!cfg) return '';
         var isChecked = visibleFoxStatusColors[colorKey] !== false ? 'checked' : '';
         return `
-            <label style="display:flex; align-items:center; gap:5px; font-size:0.74rem; color:#ecf0f1; cursor:pointer; background:#34495e; padding:4px 7px; border-radius:4px; border:1px solid #4a6278;">
-                <input type="checkbox" class="admin-fox-color-cb" data-color="${colorKey}" ${isChecked} style="accent-color:${cfg.bg}; cursor:pointer;">
-                <span style="width:10px; height:10px; border-radius:50%; background:${cfg.bg}; display:inline-block;"></span>
+            <label class="admin-fox-color-pill">
+                <input type="checkbox" class="admin-fox-color-cb" data-color="${colorKey}" ${isChecked} style="accent-color:${cfg.bg};">
+                <span style="width:9px; height:9px; border-radius:50%; background:${cfg.bg}; display:inline-block; flex-shrink:0;"></span>
                 <span>${cfg.label}</span>
             </label>
         `;
@@ -2220,16 +2240,20 @@ function injectAdminFoxStatusControls() {
             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:0.73rem;">
                 <span style="font-weight:600; color:#bdc3c7;">${areaName}:</span>
                 <select class="admin-target-lock-select admin-manual-fox-status" data-area="${areaName}" style="width:120px; padding:2px 5px;">
-                    <option value="groen">🟢 Groen</option>
                     <option value="rood">🔴 Rood</option>
                     <option value="oranje">🟠 Oranje</option>
                     <option value="geel">🟡 Geel</option>
+                    <option value="groen">🟢 Groen</option>
                     <option value="blauw">🔵 Blauw</option>
                     <option value="grijs" selected>⚪ Grijs</option>
                 </select>
             </div>
         `;
     }).join('');
+
+    var currentUserPwdVal = (typeof firebaseAuthConfig !== 'undefined' && firebaseAuthConfig.userPassword)
+        ? firebaseAuthConfig.userPassword
+        : "1111";
 
     filterSection.innerHTML = `
         <hr class="admin-divider">
@@ -2239,11 +2263,11 @@ function injectAdminFoxStatusControls() {
                 <label id="admin-fox-filter-label" style="color:#dcdde1;">🦊 Toon statussen in Vossen-menu:</label>
             </div>
         </div>
-        <div style="display:flex; flex-wrap:wrap; gap:5px;">
+        <div class="admin-fox-colors-grid">
             ${colorCheckboxesHtml}
         </div>
         <div class="admin-setting-subtext">
-            Vink aan welke Telegram-statuskleuren zichtbaar zijn in het Vossen Status-menu (venster groeit/krimpt automatisch).
+            Vink aan welke Telegram-statuskleuren zichtbaar zijn in het Vossen Status-menu (gesorteerd op regenboogvolgorde).
         </div>
 
         <details style="margin-top:4px; background:#243342; padding:6px 8px; border-radius:5px; border:1px solid #3d566e;">
@@ -2252,6 +2276,21 @@ function injectAdminFoxStatusControls() {
                 ${manualOverrideRowsHtml}
             </div>
         </details>
+
+        <hr class="admin-divider">
+        <div class="admin-setting-row">
+            <div class="admin-setting-label-wrap">
+                <span class="admin-status-dot status-dot-green"></span>
+                <label for="admin-user-password-input" style="color:#dcdde1;">🔑 Gebruikerswachtwoord (Hunters):</label>
+            </div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+            <input type="text" id="admin-user-password-input" value="${currentUserPwdVal.replace(/"/g, '&quot;')}" placeholder="Nieuw wachtwoord" style="flex:1; padding:5px 8px; border-radius:4px; border:1px solid #4a6278; background:#34495e; color:#ffffff; font-size:0.78rem; font-weight:bold; outline:none;">
+            <button type="button" id="admin-save-user-password-btn" style="padding:5px 10px; border-radius:4px; border:none; background:#27ae60; color:#ffffff; font-size:0.75rem; font-weight:bold; cursor:pointer;">Opslaan</button>
+        </div>
+        <div class="admin-setting-subtext">
+            Bij wijzigen worden alle ingelogde gebruikers automatisch uitgelogd en moeten zij met het nieuwe wachtwoord inloggen.
+        </div>
     `;
 
     settingsBody.appendChild(filterSection);
@@ -2287,6 +2326,38 @@ function injectAdminFoxStatusControls() {
             });
         });
     });
+
+    var saveUserPwdBtn = document.getElementById('admin-save-user-password-btn');
+    var userPwdInput = document.getElementById('admin-user-password-input');
+    if (saveUserPwdBtn && userPwdInput) {
+        saveUserPwdBtn.addEventListener('click', async function() {
+            if (!isAdmin) return;
+            var newPwd = userPwdInput.value.trim();
+            if (!newPwd) {
+                alert("Voer een geldig wachtwoord in voor de gebruikers.");
+                return;
+            }
+            if (firebaseAuthConfig.adminPassword && newPwd === firebaseAuthConfig.adminPassword) {
+                alert("Kies voor de gebruikers een ander wachtwoord dan het Admin-wachtwoord.");
+                return;
+            }
+
+            var snap = await db.ref('authSettings').once('value');
+            var cur = snap.val() || {};
+            var nextVersion = (Number(cur.userSessionVersion) || 1) + 1;
+
+            await db.ref('authSettings').update({
+                userPassword: newPwd,
+                userSessionVersion: nextVersion,
+                updatedAt: Date.now()
+            });
+
+            // Verwijder alle actieve gebruikers van de kaart zodat ze opnieuw moeten aanmelden
+            await db.ref('liveUsers').remove();
+
+            alert("✅ Gebruikerswachtwoord gewijzigd naar '" + newPwd + "'. Alle ingelogde gebruikers zijn automatisch uitgelogd.");
+        });
+    }
 
     window.syncAdminFoxFilterCheckboxes();
 }
@@ -2584,8 +2655,12 @@ window.deleteRdPointPopup = function(key) {
 
 window.clearRdPoints = function() {
     if (!isAdmin) return;
-    var pinInput = prompt("Voer de admin-pincode in om de RD-lijnen te wissen:", "");
-    if (pinInput === "6546") {
+    var pinInput = prompt("Voer het Admin-wachtwoord in om de RD-lijnen te wissen:", "");
+    var validAdminPwd = (typeof firebaseAuthConfig !== 'undefined' && firebaseAuthConfig.adminPassword)
+        ? firebaseAuthConfig.adminPassword
+        : "6546";
+
+    if (pinInput === validAdminPwd) {
         walkingRouteCache = {};
         segmentDistanceCache = {};
         drivingRouteMetricsCache = {};
@@ -2596,7 +2671,9 @@ window.clearRdPoints = function() {
             db.ref('computedMapState').remove();
             alert("RD-punten succesvol gewist.");
         });
-    } else if (pinInput !== null) { alert("Onjuiste pincode!"); }
+    } else if (pinInput !== null) {
+        alert("Onjuist Admin-wachtwoord!");
+    }
 };
 
 window.removeInactiveUser = function(userId, userName) {

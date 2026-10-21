@@ -32,12 +32,15 @@ var areaColors = {
     "Oscar": "#003399"
 };
 
-/* Kleuren en labels voor de 6 Telegram Vossenstatussen (incl. Groen) */
+/* Vaste regenboogvolgorde voor de 6 Telegram Vossenstatussen */
+var foxStatusOrder = ["rood", "oranje", "geel", "groen", "blauw", "grijs"];
+
+/* Kleuren en labels voor de 6 Telegram Vossenstatussen (gesorteerd op regenboogvolgorde) */
 var foxStatusConfig = {
-    "groen":  { label: "Groen",  bg: "#2ecc71", border: "#27ae60", text: "#ffffff" },
     "rood":   { label: "Rood",   bg: "#e74c3c", border: "#c0392b", text: "#ffffff" },
     "oranje": { label: "Oranje", bg: "#e67e22", border: "#d35400", text: "#ffffff" },
     "geel":   { label: "Geel",   bg: "#f1c40f", border: "#d4ac0d", text: "#1a252f" },
+    "groen":  { label: "Groen",  bg: "#2ecc71", border: "#27ae60", text: "#ffffff" },
     "blauw":  { label: "Blauw",  bg: "#3498db", border: "#2980b9", text: "#ffffff" },
     "grijs":  { label: "Grijs",  bg: "#7f8c8d", border: "#636e72", text: "#ffffff" }
 };
@@ -45,12 +48,20 @@ var foxStatusConfig = {
 /* Gedeelde state voor Vossenstatussen en zichtbaarheidsfilters */
 var currentFoxStatuses = {};
 var visibleFoxStatusColors = {
-    "groen": true,
     "rood": true,
     "oranje": true,
     "geel": true,
+    "groen": true,
     "blauw": true,
     "grijs": true
+};
+
+/* Gedeelde state voor Firebase Authenticatie-instellingen */
+var firebaseAuthConfig = {
+    adminPassword: null,
+    userPassword: null,
+    userSessionVersion: 1,
+    loaded: false
 };
 
 /* Amalgama Clubgebouw Coördinaten */

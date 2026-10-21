@@ -4,8 +4,8 @@
    toont het live Telegram Vossen Status menu ('foxStatuses') met:
    - Gecentreerde deelgebied-namen (zonder tijdlabel op de knop)
    - Enkele klik: dynamisch uitklapbaar info-venster onder de naam met
-     status-duur timer, eigen reistijd/afstand over de weg & dichtstbijzijnde
-     online hunter (centraal berekend door de Master Engine)
+     status-duur timer (max 12u), eigen reistijd/afstand over de weg &
+     dichtstbijzijnde online hunter (zonder knipperen bij live updates!)
    - Dubbelklik / dubbel-tik: direct inzoomen op het laatste punt in de lijn
    ========================================================================== */
 
@@ -509,7 +509,6 @@ function renderComputedMapState(state) {
         var latestRdMarker = null;
         var latestRdLatLng = null;
 
-        // 1. Teken voorberekende RD-punten van het deelgebied
         areaObj.points.forEach(function (pt) {
             var marker = createWalkerMarker(pt);
             rdPointsLayer.addLayer(marker);
@@ -519,7 +518,6 @@ function renderComputedMapState(state) {
             }
         });
 
-        // Bepaal het ALLERLAATSTE punt van de lijn voor dit deelgebied (RD-punt óf laatst bezochte club!)
         var lineTailLatLng = latestRdLatLng;
         if (areaObj.geofence && Array.isArray(areaObj.geofence.center) && areaObj.geofence.center.length === 2) {
             lineTailLatLng = areaObj.geofence.center;
@@ -549,7 +547,6 @@ function renderComputedMapState(state) {
             }
         }
 
-        // 2. Teken voorberekende chronologische routelijn tussen RD-punten & bezochte clubgebouwen
         if (areaObj.routeCoords && areaObj.routeCoords.length >= 2) {
             var polyline = L.polyline(areaObj.routeCoords, {
                 color: areaObj.lineColor || areaColors[area] || "#000000",
@@ -560,7 +557,6 @@ function renderComputedMapState(state) {
             rdRouteLayer.addLayer(polyline);
         }
 
-        // 3. Teken of update voorberekende Geofence, Pijlen, Voorspellende Looproutes & Live Verwachte Posities
         if (areaObj.geofence) {
             var gf = areaObj.geofence;
             var circleColor = gf.color || "#7f8c8d";
@@ -622,7 +618,6 @@ function renderComputedMapState(state) {
                 });
             }
 
-            // 4A. Teken primaire voorspellende wandelroute richting onbezochte clubhuizen (Stippellijn)
             if (activeEstimatedRoutes[area]) {
                 geofenceLayer.removeLayer(activeEstimatedRoutes[area]);
                 delete activeEstimatedRoutes[area];
@@ -642,7 +637,6 @@ function renderComputedMapState(state) {
                 activeEstimatedRoutes[area] = walkLine;
             }
 
-            // 4B. Teken alternatieve parallelroute (mijdt N-wegen / drukke wegen) indien aanwezig
             if (activeAlternativeRoutes[area]) {
                 geofenceLayer.removeLayer(activeAlternativeRoutes[area]);
                 delete activeAlternativeRoutes[area];
@@ -661,7 +655,6 @@ function renderComputedMapState(state) {
                 activeAlternativeRoutes[area] = altLine;
             }
 
-            // 5. Teken klein maar zichtbaar puntje waar de geschatte looproute en de groeiende cirkel elkaar kruisen
             if (activeIntersectionDots[area]) {
                 geofenceLayer.removeLayer(activeIntersectionDots[area]);
                 delete activeIntersectionDots[area];
@@ -695,7 +688,6 @@ function renderComputedMapState(state) {
                 activeIntersectionDots[area] = dotMarker;
             }
 
-            // 6A. Teken LIVE Verwachte Positie van de vos óp de primaire voorspelde looplijn
             if (activeLiveExpectedFoxMarkers[area]) {
                 geofenceLayer.removeLayer(activeLiveExpectedFoxMarkers[area]);
                 delete activeLiveExpectedFoxMarkers[area];
@@ -743,7 +735,6 @@ function renderComputedMapState(state) {
                 activeLiveExpectedFoxMarkers[area] = liveFoxMarker;
             }
 
-            // 6B. Teken LIVE Verwachte Positie op de alternatieve parallelroute (indien ingeschakeld)
             if (activeAltExpectedFoxMarkers[area]) {
                 geofenceLayer.removeLayer(activeAltExpectedFoxMarkers[area]);
                 delete activeAltExpectedFoxMarkers[area];
@@ -785,7 +776,6 @@ function renderComputedMapState(state) {
         }
     });
 
-    // Als een deelgebied nog geen RD-punt heeft, maar al wél een bezocht clubgebouw, gebruik dat clubgebouw als laatste punt!
     targetAreas.forEach(function (areaName) {
         if (!latestKnownAreaPoints[areaName]) {
             var fallbackClub = getFallbackLatestVisitedHouseForArea(areaName);
@@ -956,6 +946,7 @@ setInterval(renderLiveUsersOnMap, 20000);
 var expandedFoxStatusArea = null;
 var singleClickFoxTimerByArea = {};
 var lastFoxTapTimeByArea = {};
+var MAX_STATUS_TIMER_SECONDS = 12 * 3600; // Maximaal 12 uur tellen
 
 function injectFoxStatusPanel() {
     var mapWrapper = document.getElementById('map-wrapper');
@@ -979,7 +970,6 @@ function injectFoxStatusPanel() {
         L.DomEvent.disableScrollPropagation(panel);
     }
 
-    // Minimaliseren & Maximaliseren
     var minBtn = document.getElementById('fox-status-min-btn');
     var bodyEl = document.getElementById('fox-status-body');
     minBtn.addEventListener('click', function() {
@@ -992,7 +982,6 @@ function injectFoxStatusPanel() {
         }
     });
 
-    // Vrij verslepen over de kaart (muis & touch)
     var headerEl = document.getElementById('fox-status-header');
     var isDraggingFoxPanel = false, dragStartX = 0, dragStartY = 0;
 
@@ -1048,9 +1037,6 @@ function injectFoxStatusPanel() {
     renderFoxStatusButtons();
 }
 
-/* Dubbelklik / Dubbel-tik actie:
-   Zoomt automatisch in op het ALLERLAATSTE punt in de lijn van het deelgebied
-   (ook wanneer dit een laatst bezochte clubgebouw is!) en opent de bijbehorende popup. */
 window.zoomToLatestFoxArea = function(areaName) {
     var targetPt = latestKnownAreaPoints[areaName] || getFallbackLatestVisitedHouseForArea(areaName);
 
@@ -1066,9 +1052,6 @@ window.zoomToLatestFoxArea = function(areaName) {
     }
 };
 
-/* Enkele klik vs. Dubbelklik / Dubbel-tikken:
-   - 1x klikken/tikken: opent of sluit het dynamische info-venster direct onder de naam
-   - 2x snel klikken/tikken: zoomt in op het laatste punt in de lijn */
 window.handleFoxAreaBtnClick = function(areaName) {
     var now = Date.now();
     var lastTap = lastFoxTapTimeByArea[areaName] || 0;
@@ -1097,12 +1080,16 @@ window.handleFoxAreaBtnClick = function(areaName) {
     }
 };
 
-/* Formatteert de live timer voor hoelang een deelgebied al op de huidige status staat */
+/* Formatteert de live timer voor hoelang een deelgebied al op de huidige status staat.
+   Stopt met optellen zodra 12 uur (43.200 seconden) is bereikt, tot er een nieuwe statuswijziging is. */
 function formatLiveStatusTimer(updatedAtMs, fallbackText) {
     if (!updatedAtMs || isNaN(updatedAtMs)) {
         return fallbackText || "Onbekend";
     }
     var diffSec = Math.max(0, Math.floor((Date.now() - Number(updatedAtMs)) / 1000));
+    if (diffSec >= MAX_STATUS_TIMER_SECONDS) {
+        return "12u 00m 00s (max 12u)";
+    }
     var hours = Math.floor(diffSec / 3600);
     var mins = Math.floor((diffSec % 3600) / 60);
     var secs = diffSec % 60;
@@ -1114,9 +1101,8 @@ function formatLiveStatusTimer(updatedAtMs, fallbackText) {
     return `${mins}m ${ssStr}s`;
 }
 
-/* Bouwt de HTML voor het dynamische info-venster onder een aangeklikte vossenstatus-knop
-   (gevoed door de berekeningen van de Master Engine in Firebase) */
-function buildFoxStatusInfoBoxHtml(areaName, colorKey, cfg, stObj) {
+/* Berekent de actuele inhoud voor een uitgeklapt info-venster zodat deze zonder knipperen geüpdatet kan worden */
+function getFoxStatusInfoBoxData(areaName, colorKey, cfg, stObj) {
     var masterMetrics = (lastComputedMapState && lastComputedMapState.foxStatusMetrics && lastComputedMapState.foxStatusMetrics[areaName])
         ? lastComputedMapState.foxStatusMetrics[areaName]
         : null;
@@ -1132,8 +1118,8 @@ function buildFoxStatusInfoBoxHtml(areaName, colorKey, cfg, stObj) {
 
     var timerStr = formatLiveStatusTimer(statusUpdatedAt, masterMetrics ? masterMetrics.statusDurationText : "");
     var sinceStr = stObj.timeFormatted ? ` (sinds ${stObj.timeFormatted})` : '';
+    var statusTitleText = `⏱️ Op status ${cfg.label}${sinceStr}:`;
 
-    // 1. Reistijd & afstand vanaf jouw eigen live GPS-positie (berekend door Master Engine)
     var myTravelHtml = `<span style="color:#95a5a6;">Wachten op jouw GPS / vossenpunt...</span>`;
     if (masterMetrics && masterMetrics.estimatedCoord) {
         if (currentUserId && masterMetrics.userRoutes && masterMetrics.userRoutes[currentUserId]) {
@@ -1148,7 +1134,6 @@ function buildFoxStatusInfoBoxHtml(areaName, colorKey, cfg, stObj) {
         myTravelHtml = `<span style="color:#95a5a6;">Nog geen vossenlocatie bekend</span>`;
     }
 
-    // 2. Dichtstbijzijnde ingelogde én online gebruiker bij de geschatte live locatie (berekend door Master Engine)
     var closestUserHtml = `<span style="color:#95a5a6;">Geen online hunter in de buurt</span>`;
     if (masterMetrics && masterMetrics.estimatedCoord) {
         if (masterMetrics.closestOnlineUser && masterMetrics.closestOnlineUser.name) {
@@ -1161,38 +1146,25 @@ function buildFoxStatusInfoBoxHtml(areaName, colorKey, cfg, stObj) {
         closestUserHtml = `<span style="color:#95a5a6;">Nog geen vossenlocatie bekend</span>`;
     }
 
-    var navBtnHtml = '';
-    if (masterMetrics && Array.isArray(masterMetrics.estimatedCoord) && masterMetrics.estimatedCoord.length === 2) {
-        var cLat = masterMetrics.estimatedCoord[0];
-        var cLng = masterMetrics.estimatedCoord[1];
-        navBtnHtml = `
-            <button type="button" class="fox-info-nav-btn" onclick="window.navigateToAreaPoint(${cLat}, ${cLng})">
-                📍 Navigeer naar live schatting
-            </button>
-        `;
-    }
+    var hasCoord = !!(masterMetrics && Array.isArray(masterMetrics.estimatedCoord) && masterMetrics.estimatedCoord.length === 2);
+    var cLat = hasCoord ? masterMetrics.estimatedCoord[0] : null;
+    var cLng = hasCoord ? masterMetrics.estimatedCoord[1] : null;
 
-    return `
-        <div class="fox-area-info-box" style="border-left: 3px solid ${cfg.bg};">
-            <div class="fox-info-row">
-                <span class="fox-info-label">⏱️ Op status ${cfg.label}${sinceStr}:</span>
-                <span class="fox-info-val fox-live-timer-val" data-updated-at="${statusUpdatedAt || ''}">${timerStr}</span>
-            </div>
-            <div class="fox-info-row">
-                <span class="fox-info-label">🚗 Jouw afstand & reistijd:</span>
-                <span class="fox-info-val">${myTravelHtml}</span>
-            </div>
-            <div class="fox-info-row">
-                <span class="fox-info-label">🥇 Dichtstbijzijnde hunter:</span>
-                <span class="fox-info-val">${closestUserHtml}</span>
-            </div>
-            ${navBtnHtml}
-        </div>
-    `;
+    return {
+        statusTitleText: statusTitleText,
+        statusUpdatedAt: statusUpdatedAt || '',
+        timerStr: timerStr,
+        myTravelHtml: myTravelHtml,
+        closestUserHtml: closestUserHtml,
+        hasCoord: hasCoord,
+        cLat: cLat,
+        cLng: cLng,
+        borderColor: cfg.bg
+    };
 }
 
-/* Rendert de knoppen per deelgebied (naam gecentreerd, zonder tijd op de knop)
-   en toont het dynamische info-venster onder de naam als erop is geklikt */
+/* Rendert en updatet de knoppen + het info-venster IN-PLACE zonder de DOM opnieuw op te bouwen.
+   Hierdoor knippert/flikkert het uitgeklapte venster nooit meer tijdens achtergrond-updates! */
 window.renderFoxStatusButtons = function() {
     var listEl = document.getElementById('fox-status-buttons-list');
     if (!listEl) return;
@@ -1208,36 +1180,130 @@ window.renderFoxStatusButtons = function() {
         return;
     }
 
-    listEl.innerHTML = visibleAreas.map(function(areaName) {
+    var emptyMsg = listEl.querySelector('.fox-status-empty');
+    if (emptyMsg) emptyMsg.remove();
+
+    // Verwijder knoppen van gebieden die niet meer zichtbaar zijn volgens het filter
+    var existingWraps = listEl.querySelectorAll('.fox-area-status-item-wrap');
+    existingWraps.forEach(function(wrap) {
+        var aName = wrap.getAttribute('data-area');
+        if (!visibleAreas.includes(aName)) {
+            wrap.remove();
+        }
+    });
+
+    visibleAreas.forEach(function(areaName) {
         var stObj = currentFoxStatuses[areaName] || {};
         var colorKey = stObj.status ? normalizeFoxStatusKey(stObj.status) : "grijs";
         var cfg = foxStatusConfig[colorKey] || foxStatusConfig["grijs"];
         var isExpanded = (expandedFoxStatusArea === areaName);
-        var infoBoxHtml = isExpanded ? buildFoxStatusInfoBoxHtml(areaName, colorKey, cfg, stObj) : '';
 
-        return `
-            <div class="fox-area-status-item-wrap">
+        var wrapEl = listEl.querySelector(`.fox-area-status-item-wrap[data-area="${areaName}"]`);
+        if (!wrapEl) {
+            wrapEl = document.createElement('div');
+            wrapEl.className = 'fox-area-status-item-wrap';
+            wrapEl.setAttribute('data-area', areaName);
+            wrapEl.innerHTML = `
                 <button type="button"
-                    class="fox-area-status-btn status-color-${colorKey} ${isExpanded ? 'is-expanded' : ''}"
-                    style="background-color: ${cfg.bg}; border-color: ${cfg.border}; color: ${cfg.text};"
+                    class="fox-area-status-btn"
                     onclick="window.handleFoxAreaBtnClick('${areaName}')"
                     title="1x klikken: Toon live info • Dubbelklik: Zoom in op laatste punt">
                     <span class="fox-btn-name">${areaName}</span>
                 </button>
-                ${infoBoxHtml}
-            </div>
-        `;
-    }).join('');
+            `;
+        }
+        // Zorg dat de volgorde altijd exact overeenkomt met targetAreas
+        listEl.appendChild(wrapEl);
+
+        var btnEl = wrapEl.querySelector('.fox-area-status-btn');
+        if (btnEl) {
+            btnEl.className = `fox-area-status-btn status-color-${colorKey}` + (isExpanded ? ' is-expanded' : '');
+            btnEl.style.backgroundColor = cfg.bg;
+            btnEl.style.borderColor = cfg.border;
+            btnEl.style.color = cfg.text;
+        }
+
+        var existingInfoBox = wrapEl.querySelector('.fox-area-info-box');
+
+        if (isExpanded) {
+            var infoData = getFoxStatusInfoBoxData(areaName, colorKey, cfg, stObj);
+
+            if (!existingInfoBox) {
+                existingInfoBox = document.createElement('div');
+                existingInfoBox.className = 'fox-area-info-box';
+                existingInfoBox.innerHTML = `
+                    <div class="fox-info-row">
+                        <span class="fox-info-label fox-info-status-label"></span>
+                        <span class="fox-info-val fox-live-timer-val"></span>
+                    </div>
+                    <div class="fox-info-row">
+                        <span class="fox-info-label">🚗 Jouw afstand & reistijd:</span>
+                        <span class="fox-info-val fox-info-my-travel"></span>
+                    </div>
+                    <div class="fox-info-row">
+                        <span class="fox-info-label">🥇 Dichtstbijzijnde hunter:</span>
+                        <span class="fox-info-val fox-info-closest-hunter"></span>
+                    </div>
+                    <button type="button" class="fox-info-nav-btn" style="display:none;">
+                        📍 Navigeer naar live schatting
+                    </button>
+                `;
+                wrapEl.appendChild(existingInfoBox);
+            }
+
+            existingInfoBox.style.borderLeft = `3px solid ${infoData.borderColor}`;
+
+            var statusLabelEl = existingInfoBox.querySelector('.fox-info-status-label');
+            if (statusLabelEl && statusLabelEl.textContent !== infoData.statusTitleText) {
+                statusLabelEl.textContent = infoData.statusTitleText;
+            }
+
+            var timerValEl = existingInfoBox.querySelector('.fox-live-timer-val');
+            if (timerValEl) {
+                timerValEl.setAttribute('data-updated-at', String(infoData.statusUpdatedAt));
+                if (timerValEl.textContent !== infoData.timerStr) {
+                    timerValEl.textContent = infoData.timerStr;
+                }
+            }
+
+            var myTravelEl = existingInfoBox.querySelector('.fox-info-my-travel');
+            if (myTravelEl && myTravelEl.innerHTML !== infoData.myTravelHtml) {
+                myTravelEl.innerHTML = infoData.myTravelHtml;
+            }
+
+            var closestEl = existingInfoBox.querySelector('.fox-info-closest-hunter');
+            if (closestEl && closestEl.innerHTML !== infoData.closestUserHtml) {
+                closestEl.innerHTML = infoData.closestUserHtml;
+            }
+
+            var navBtnEl = existingInfoBox.querySelector('.fox-info-nav-btn');
+            if (navBtnEl) {
+                if (infoData.hasCoord) {
+                    navBtnEl.style.display = 'block';
+                    navBtnEl.onclick = function() {
+                        window.navigateToAreaPoint(infoData.cLat, infoData.cLng);
+                    };
+                } else {
+                    navBtnEl.style.display = 'none';
+                }
+            }
+        } else if (existingInfoBox) {
+            existingInfoBox.remove();
+        }
+    });
 };
 
-// Update elke seconde de live status-timer in het uitgeklapte info-venster zonder heel het menu te hertekenen
+// Update elke seconde alleen de tekst van de status-timer (stopt automatisch bij 12 uur)
 setInterval(function() {
     if (!expandedFoxStatusArea) return;
     var timerEls = document.querySelectorAll('.fox-live-timer-val');
     timerEls.forEach(function(el) {
         var ts = parseInt(el.getAttribute('data-updated-at'), 10);
         if (ts && !isNaN(ts)) {
-            el.innerText = formatLiveStatusTimer(ts, "");
+            var nextText = formatLiveStatusTimer(ts, "");
+            if (el.textContent !== nextText) {
+                el.textContent = nextText;
+            }
         }
     });
 }, 1000);

@@ -27,10 +27,13 @@
     <div id="auth-overlay">
         <div id="auth-box">
             <h2>Inloggen</h2>
-            <input type="password" id="pin-input" placeholder="Pincode" maxlength="4" autofocus>
+            <div id="auth-setup-hint" style="display:none; font-size:0.76rem; color:#f1c40f; font-weight:600; line-height:1.3;">
+                ⚠️ Nog geen wachtwoord in Firebase gevonden. Het eerste wachtwoord dat je nu invoert wordt direct ingesteld als <b>Admin-wachtwoord</b>!
+            </div>
+            <input type="password" id="pin-input" placeholder="Wachtwoord / Pincode" maxlength="32" autofocus>
             <input type="text" id="username-input" placeholder="Naam" style="display:none;" maxlength="24">
             <button onclick="checkPin()">Inloggen</button>
-            <div id="auth-error">Onjuiste pincode of naam ontbreekt</div>
+            <div id="auth-error">Onjuist wachtwoord of naam ontbreekt</div>
         </div>
     </div>
 
@@ -74,6 +77,6 @@
     <script src="config.js"></script>
     <script src="map-viewer.js"></script>
     <script src="auth-gps.js"></script>
-    <!-- Let op: admin-engine.js, proj4.js en leaflet.draw.js worden automatisch ingeladen zodra een Admin inlogt! -->
+    <!-- Let op: admin-engine.js en proj4.js worden automatisch ingeladen zodra een Admin inlogt! -->
 </body>
 </html>
