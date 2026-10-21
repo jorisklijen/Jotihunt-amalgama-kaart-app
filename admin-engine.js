@@ -10,34 +10,28 @@
    - Hard Waypoint Pinning tot exact op het coördinaat van elk clubgebouw
    - Chronologische opname van bezochte clubgebouwen (met datum/tijd-picker) in de RD-looplijn
      waarbij BEIDE looproutes altijd vertrekken vanaf het allerlaatste punt van de RD-lijn
-     (ook als dit een laatst bezocht clubgebouw is!)
    - Geen caching van rechte fallback-lijnen bij OSRM rate-limits + automatische retry
    - Volledige keten-opbouw voor zowel primaire als alternatieve parallelroute (voorbij cirkel)
    - Handmatige Doel-Clubhuis Lock per deelgebied (via laatste RD-punt popup én Admin-menu)
    - Live Verwachte Vos-positie langs de wandelroute + Snijpunt met cirkelrand
-   - Zwevend Admin-paneel waarbij ALLE opties (labels + subteksten + gebieden)
-     donkergrijs (#95a5a6) zijn bij een groen bolletje en lichtgrijs (#dcdde1) bij een rood bolletje.
+   - Beheer van zichtbare Telegram Vossenstatussen (Rood, Oranje, Grijs, Geel, Blauw)
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
-var rawOtherPoints = []; // Voor punten met type "Anders" (zonder deelgebied en tijdstip)
+var rawOtherPoints = [];
 var currentEditingRdKey = null;
 
-/* Cache voor opgehaalde wandelroutes en segmentafstanden zodat we niet onnodig API-calls doen */
 var walkingRouteCache = {};
 var segmentDistanceCache = {};
-
-/* Houdt per deelgebied bij of de max groeitijd is bereikt voor de UI-statusballetjes */
 var areaCappedStatus = {};
 
-/* Instellingen voor snelheidsberekening, cirkelgroei, alternatieve routes, wandelroute-snelheid & locked targets */
 var adminSettings = {
     maxCircleGrowthHours: 3,
     maxWalkingSpeedKmh: 7.0,
     defaultSpeedKmh: 6.5,
     showAltQuietRoute: true,
     useRouteSpeedCalculation: false,
-    lockedTargets: {} // { "Alpha": "Naam van Clubhuis", ... }
+    lockedTargets: {}
 };
 
 /* --- 0. MULTI-ADMIN LEADER ELECTION (MASTER LOCK) --- */
@@ -83,7 +77,6 @@ function evaluateMasterRole() {
     }
 }
 
-/* Kleine pauze-hulpfunctie om OSRM rate-limiting te voorkomen bij meerdere verzoeken */
 function sleepMs(ms) {
     return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
@@ -97,7 +90,6 @@ function getBearing(lat1, lon1, lat2, lon2) {
     return (brng + 360) % 360;
 }
 
-/* Kleinste hoekverschil (0 tot 180 graden) tussen twee kompasrichtingen */
 function getAngleDifferenceDeg(angleA, angleB) {
     var diff = Math.abs(angleA - angleB) % 360;
     return diff > 180 ? 360 - diff : diff;
@@ -117,7 +109,6 @@ function getDestinationLatLng(lat, lng, distMeters, bearingDeg) {
     return [endLat * 180 / Math.PI, endLng * 180 / Math.PI];
 }
 
-/* Kortste afstand in km van een punt P tot een lijnstuk A-B */
 function getPointToSegmentDistanceKm(pLat, pLng, aLat, aLng, bLat, bLng) {
     var dAB = getDistanceKm(aLat, aLng, bLat, bLng);
     if (dAB < 0.001) return getDistanceKm(pLat, pLng, aLat, aLng);
@@ -140,22 +131,15 @@ function getPointToSegmentDistanceKm(pLat, pLng, aLat, aLng, bLat, bLng) {
     return getDistanceKm(pLat, pLng, projLat, projLng);
 }
 
-/* Hulpfunctie: Geeft de timestamp terug waarop een clubhuis als bezocht is gemarkeerd (of 1 als alleen boolean 'true') */
 function getHouseVisitedTimestamp(houseName) {
     var safeKey = houseName.replace(/[.#$[\]]/g, '_');
     var val = houseVisitedStatus[safeKey];
     if (!val) return null;
     if (typeof val === 'number' && val > 1000) return val;
     if (typeof val === 'object' && val.visitedAt) return Number(val.visitedAt);
-    return 1; // Standaard boolean true
+    return 1;
 }
 
-/* Chronologische opbouw van de RD-looplijn inclusief bezochte clubgebouwen:
-   - Elk bezocht clubhuis met een gekozen datum/tijdstip (via de datetime-picker) wordt op exacte chronologische volgorde
-     toegevoegd aan de RD-looplijn (voor, tussen of na de RD-punten).
-   - Bezochte clubhuizen zonder specifiek tijdstip (legacy boolean) worden ruimtelijk tussen RD-segmenten gehangen als ze op de route liggen,
-     óf aan het einde gekoppeld als ze vlak bij het laatste RD-punt liggen.
-   - Geeft zowel de volledige coördinatenketen terug als informatie over het allerlaatste chronologische punt. */
 function buildHistoricalChainWithVisitedHouses(sortedPoints, visitedHouses) {
     if ((!sortedPoints || sortedPoints.length === 0) && (!visitedHouses || visitedHouses.length === 0)) {
         return {
@@ -200,8 +184,6 @@ function buildHistoricalChainWithVisitedHouses(sortedPoints, visitedHouses) {
         });
     }
 
-    // Sorteer alle RD-punten en bezochte clubgebouwen met tijdstip puur chronologisch.
-    // Bij exact gelijke minuut-timestamp krijgt een bezocht clubgebouw voorrang als laatste punt.
     timelineEvents.sort(function(a, b) {
         if (a.ts !== b.ts) return a.ts - b.ts;
         if (a.type !== b.type) return a.type === 'house' ? 1 : -1;
@@ -252,8 +234,6 @@ function buildHistoricalChainWithVisitedHouses(sortedPoints, visitedHouses) {
         orderedEvents.push(evB);
     }
 
-    // Als er nog een bezocht clubgebouw zonder tijdstip vlak bij het laatste punt ligt (<= 550m),
-    // voeg deze dan toe als het allerlaatste punt van de RD-lijn!
     if (untimedHouses.length > 0) {
         var currentTail = orderedEvents[orderedEvents.length - 1];
         var prevTail = orderedEvents.length >= 2 ? orderedEvents[orderedEvents.length - 2] : null;
@@ -300,8 +280,6 @@ function buildHistoricalChainWithVisitedHouses(sortedPoints, visitedHouses) {
     };
 }
 
-/* Analyseert de reeds BEZOCHTE clubgebouwen in het deelgebied om te bepalen
-   vanuit welke sector/club de vossen zijn gekomen (zodat de route logisch vooruit loopt, weg van bezochte clubs) */
 function analyzeVisitedHousesContext(effectiveLastLatLng, visitedHouses, lineMovementBearingDeg) {
     if (!visitedHouses || visitedHouses.length === 0) {
         return {
@@ -320,7 +298,6 @@ function analyzeVisitedHousesContext(effectiveLastLatLng, visitedHouses, lineMov
     var nearestVisited = sortedByDistance[0];
     var nearestDistKm = getDistanceKm(effectiveLastLatLng[0], effectiveLastLatLng[1], nearestVisited.lat, nearestVisited.lng);
 
-    // Bereken het gewogen zwaartepunt (centroid) van de bezochte clubhuizen om de "reeds afgewerkte sector" te kennen
     var sumLat = 0, sumLng = 0, totalW = 0;
     visitedHouses.forEach(function(h) {
         var d = Math.max(0.2, getDistanceKm(effectiveLastLatLng[0], effectiveLastLatLng[1], h.lat, h.lng));
@@ -345,8 +322,6 @@ function analyzeVisitedHousesContext(effectiveLastLatLng, visitedHouses, lineMov
     };
 }
 
-/* Bepaalt een semi-logische keten van nog niet bezochte clubhuizen vanaf het laatste punt van de RD-lijn
-   (effectiveStartLatLng), die altijd ver genoeg doorloopt om de cirkelstraal + extra voorspellingsafstand te dekken. */
 function selectSemiLogicalTargetHouses(effectiveStartLatLng, movementBearingDeg, unvisitedHouses, visitedContext, lockedHouseName, minRequiredChainMeters) {
     if (!unvisitedHouses || unvisitedHouses.length === 0) return [];
 
@@ -358,7 +333,6 @@ function selectSemiLogicalTargetHouses(effectiveStartLatLng, movementBearingDeg,
     var currentBearing = movementBearingDeg;
     var accumulatedDistKm = 0;
 
-    // 1. Eerste doel-clubhuis (check eerst of Admin handmatig een target heeft gelockt)
     var firstTarget = null;
     if (lockedHouseName) {
         firstTarget = remaining.find(function(h) { return h.name === lockedHouseName; }) || null;
@@ -403,7 +377,6 @@ function selectSemiLogicalTargetHouses(effectiveStartLatLng, movementBearingDeg,
     currentPos = [firstTarget.lat, firstTarget.lng];
     remaining = remaining.filter(function(h) { return h.name !== firstTarget.name; });
 
-    // 2. Bouw de keten door (minimaal 2 clubhuizen indien beschikbaar, en ga door tot voorbij de cirkelstraal, max 4 etappes)
     while (remaining.length > 0 && (chain.length < 2 || accumulatedDistKm < requiredDistKm) && chain.length < 4) {
         var scoredNext = remaining.map(function(h) {
             var distKm = getDistanceKm(currentPos[0], currentPos[1], h.lat, h.lng);
@@ -426,7 +399,6 @@ function selectSemiLogicalTargetHouses(effectiveStartLatLng, movementBearingDeg,
     return chain;
 }
 
-/* Hulpfunctie om een route-array netjes te comprimeren voor Firebase */
 function simplifyRouteCoords(rawCoords, maxPoints, alreadyLatLng) {
     if (!rawCoords || rawCoords.length === 0) return [];
     var limit = maxPoints || 160;
@@ -454,8 +426,6 @@ function simplifyRouteCoords(rawCoords, maxPoints, alreadyLatLng) {
     return coords;
 }
 
-/* Hard Waypoint Pinning: Dwingt een berekend routepad om exact op het start- én eindcoördinaat
-   (bijv. het clubgebouw in een zijstraatje/bospad) te beginnen en eindigen. */
 function enforceExactEndpointPinning(coordsLatLng, exactStartLatLng, exactEndLatLng) {
     var pinned = (coordsLatLng && coordsLatLng.length > 0) ? coordsLatLng.slice() : [];
     var sPt = [Math.round(exactStartLatLng[0] * 100000) / 100000, Math.round(exactStartLatLng[1] * 100000) / 100000];
@@ -483,7 +453,6 @@ function enforceExactEndpointPinning(coordsLatLng, exactStartLatLng, exactEndLat
     return pinned;
 }
 
-/* Berekent de totale lengte van een polyline in meters */
 function getPolylineLengthMeters(coords) {
     if (!coords || coords.length < 2) return 0;
     var total = 0;
@@ -493,7 +462,6 @@ function getPolylineLengthMeters(coords) {
     return total;
 }
 
-/* Controleert hoeveel meter een OSRM-route over N-wegen / drukke provinciale wegen loopt */
 function calculateMainRoadPenalty(osrmRouteObj) {
     if (!osrmRouteObj || !osrmRouteObj.legs) return 0;
     var nRoadMeters = 0;
@@ -511,7 +479,6 @@ function calculateMainRoadPenalty(osrmRouteObj) {
     return nRoadMeters;
 }
 
-/* Berekent de maximale afwijking in meters tussen twee routes om te zien of het echt een andere parallelweg is */
 function getRouteSeparationMeters(routeA, routeB) {
     if (!routeA || !routeB || routeA.length < 2 || routeB.length < 2) return 0;
     var sampleFractions = [0.15, 0.30, 0.50, 0.70, 0.85];
@@ -530,7 +497,6 @@ function getRouteSeparationMeters(routeA, routeB) {
     return maxMinDist;
 }
 
-/* Berekent hoeveel meter van candidateCoords dubbel loopt (backtracking / overlap) over avoidHistoryCoords */
 function computeRouteOverlapMeters(candidateCoords, avoidHistoryCoords) {
     if (!candidateCoords || candidateCoords.length < 2 || !avoidHistoryCoords || avoidHistoryCoords.length < 2) {
         return 0;
@@ -567,7 +533,6 @@ function computeRouteOverlapMeters(candidateCoords, avoidHistoryCoords) {
     return overlapMeters;
 }
 
-/* Hulpfunctie om een OSRM-wandelroute op te halen voor een coördinaten-string (met retry en hogere timeout) */
 async function fetchOsrmFootRoutes(coordString, timeoutMs) {
     var endpoints = [
         `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coordString}?overview=full&geometries=geojson&alternatives=true&steps=true`,
@@ -590,9 +555,7 @@ async function fetchOsrmFootRoutes(coordString, timeoutMs) {
                 } else if (res.status === 429) {
                     await sleepMs(350);
                 }
-            } catch (err) {
-                // Probeer volgende endpoint of volgende poging
-            }
+            } catch (err) {}
         }
         if (attempt === 0) {
             await sleepMs(250);
@@ -601,8 +564,6 @@ async function fetchOsrmFootRoutes(coordString, timeoutMs) {
     return null;
 }
 
-/* Berekent één etappe met Hard Waypoint Pinning, de 15-minuten backtracking-regel én slimme parallelroute-opbouw.
-   Geeft { coords, isFallback } terug zodat mislukte netwerkcalls nooit in de cache belanden. */
 async function getBestSegmentRoute(startLatLng, endLatLng, avoidHistoryCoords, speedKmh, preferQuietParallel, primaryReferenceRoute) {
     var effSpeed = Math.max(2.0, Number(speedKmh) || 6.5);
     var maxDetourMetersFor15Min = (effSpeed * (15 / 60)) * 1000;
@@ -733,8 +694,6 @@ async function getBestSegmentRoute(startLatLng, endLatLng, avoidHistoryCoords, s
     };
 }
 
-/* Bouwt een volledige meertraps-wandelroute op langs alle opgegeven waypoints.
-   Slaat alléén in de cache op als alle segmenten daadwerkelijk door OSRM zijn berekend (geen rechte noodlijn). */
 async function buildMultiStageWalkRoute(waypointsLatLng, initialHistoryCoords, speedKmh, wantAlternative) {
     if (!waypointsLatLng || waypointsLatLng.length < 2) {
         return { primary: [], alternative: [] };
@@ -839,7 +798,6 @@ async function buildMultiStageWalkRoute(waypointsLatLng, initialHistoryCoords, s
         alternative: (wantAlternative && altFullCoords.length >= 2) ? simplifyRouteCoords(altFullCoords, 220, true) : []
     };
 
-    // Sla ALLEEN op in de cache als OSRM daadwerkelijk alle etappes heeft berekend (geen rechte noodlijn)
     if (!anyFallbackUsed && finalResult.primary.length > waypointsLatLng.length) {
         walkingRouteCache[cacheKey] = finalResult;
     }
@@ -847,7 +805,6 @@ async function buildMultiStageWalkRoute(waypointsLatLng, initialHistoryCoords, s
     return finalResult;
 }
 
-/* Haalt de snelste wandelafstand in kilometers op tussen twee RD-punten (met cache, maar cachet nooit een mislukte call) */
 async function getFastestWalkingDistanceKmBetweenPoints(lat1, lng1, lat2, lng2) {
     var straightKm = getDistanceKm(lat1, lng1, lat2, lng2);
     if (straightKm < 0.03 || straightKm > 25.0) {
@@ -870,7 +827,6 @@ async function getFastestWalkingDistanceKmBetweenPoints(lat1, lng1, lat2, lng2) 
     return straightKm;
 }
 
-/* Berekent het exacte snijpunt waar een looproute en de rand van de groeiende cirkel elkaar ontmoeten */
 function findRouteCircleIntersection(centerLatLng, radiusMeters, routeCoords) {
     if (!routeCoords || routeCoords.length < 2 || radiusMeters <= 0) return null;
 
@@ -901,7 +857,6 @@ function findRouteCircleIntersection(centerLatLng, radiusMeters, routeCoords) {
     return null;
 }
 
-/* Berekent waar de vos zich LIVE op de wandelroute bevindt */
 function getPointAlongRouteByDistance(routeCoords, targetDistanceMeters) {
     if (!routeCoords || routeCoords.length === 0) return null;
     if (routeCoords.length === 1 || targetDistanceMeters <= 0) {
@@ -1060,7 +1015,7 @@ function getPointTimestampMs(pt) {
     return pt.createdTimestamp || Date.now();
 }
 
-/* --- 2. SLIMME SNELHEIDSBEREKENING (ALLEEN OP BASIS VAN RD-PUNTEN, NIET BEZOCHTE HUISJES) --- */
+/* --- 2. SLIMME SNELHEIDSBEREKENING --- */
 async function getValidSpeedSegments(pts, useWalkRouteDistance) {
     var maxAllowedKmh = Number(adminSettings.maxWalkingSpeedKmh) || 7.0;
     var segments = [];
@@ -1146,7 +1101,6 @@ async function calculateAreaWalkingSpeed(areaPoints) {
     };
 }
 
-/* Handmatig een specifiek doel-clubhuis locken (of op Automatisch zetten) */
 window.setAreaLockedTarget = function(area, houseName) {
     if (!isAdmin || !area) return;
     var cleanTarget = (houseName && houseName.trim() !== "") ? houseName.trim() : null;
@@ -1164,9 +1118,6 @@ window.setAreaLockedTarget = function(area, houseName) {
     });
 };
 
-/* Update het Admin Instellingen Paneel:
-   Elke optie (en bijbehorende subtekst) is donkergrijs (#95a5a6) wanneer het statusbolletje GROEN is,
-   en verandert naar lichtgrijs (#dcdde1 via class 'capped-reached') zodra het statusbolletje ROOD is! */
 function updateAdminSettingsPanelStatus() {
     var statusDot = document.getElementById('admin-max-hours-status-dot');
     var labelEl = document.getElementById('admin-max-hours-label');
@@ -1186,7 +1137,6 @@ function updateAdminSettingsPanelStatus() {
 
     if (!statusDot || !labelEl || !subtextEl) return;
 
-    // 1. Max. groeitijd cirkel: Groen = niet bereikt (donker), Rood = max bereikt (lichter grijs)
     var activeAreas = Object.keys(areaCappedStatus);
     var anyCapped = activeAreas.some(function(a) { return areaCappedStatus[a].isCapped; });
 
@@ -1198,7 +1148,6 @@ function updateAdminSettingsPanelStatus() {
     labelEl.classList.toggle('capped-reached', anyCapped);
     subtextEl.classList.toggle('capped-reached', anyCapped);
 
-    // 2. Alternatieve parallelroute: Groen = ingeschakeld (donker), Rood = uitgeschakeld (lichter grijs)
     var altEnabled = !!adminSettings.showAltQuietRoute;
     var isAltRed = !altEnabled;
 
@@ -1216,7 +1165,6 @@ function updateAdminSettingsPanelStatus() {
         altRouteSubtext.classList.toggle('capped-reached', isAltRed);
     }
 
-    // 3. Loopsnelheid o.b.v. wandelroute: Groen = ingeschakeld (donker), Rood = uitgeschakeld (lichter grijs)
     var routeSpeedEnabled = !!adminSettings.useRouteSpeedCalculation;
     var isRouteSpeedRed = !routeSpeedEnabled;
 
@@ -1224,7 +1172,7 @@ function updateAdminSettingsPanelStatus() {
         routeSpeedToggle.checked = routeSpeedEnabled;
     }
     if (routeSpeedDot) {
-        routeSpeedDot.className = 'admin-status-dot ' + (isRouteSpeedRed ? 'status-dot-red' : 'status-dot-green');
+        altRouteDot && (routeSpeedDot.className = 'admin-status-dot ' + (isRouteSpeedRed ? 'status-dot-red' : 'status-dot-green'));
         routeSpeedDot.title = routeSpeedEnabled
             ? 'Loopsnelheid o.b.v. wandelroute ingeschakeld'
             : 'Loopsnelheid o.b.v. hemelsbrede afstand (standaard)';
@@ -1236,7 +1184,6 @@ function updateAdminSettingsPanelStatus() {
         routeSpeedSubtext.classList.toggle('capped-reached', isRouteSpeedRed);
     }
 
-    // 4. Per deelgebied status: Groen = groeit (donker), Rood = max bereikt (lichter grijs)
     if (areaStatusList) {
         if (activeAreas.length === 0) {
             areaStatusList.style.display = 'none';
@@ -1323,7 +1270,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             var calculatedSpeedKmh = speedResult.speedKmh;
             var speedText = speedResult.speedText;
 
-            // 1. Splits de clubgebouwen van dit deelgebied in BEZOCHT en ONBEZOCHT
             var areaHouses = allLocations.filter(function(l) { return l.area === area; });
             var visitedHouses = [];
             var unvisitedHouses = [];
@@ -1341,12 +1287,10 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 unvisitedHouses = areaHouses.slice();
             }
 
-            // 2. Voeg de bezochte clubgebouwen op chronologische volgorde toe aan de RD-looplijn
             var historyChainObj = buildHistoricalChainWithVisitedHouses(points, visitedHouses);
             var historicalAnchoredCoords = historyChainObj.coords;
             var lastChainEvent = historyChainObj.lastEvent;
 
-            // Het allerlaatste punt van de RD-lijn (kan het laatste RD-punt zijn ÓF een clubgebouw dat als laatste is bezocht!)
             var effectiveLastCoord = (historicalAnchoredCoords && historicalAnchoredCoords.length > 0)
                 ? historicalAnchoredCoords[historicalAnchoredCoords.length - 1]
                 : lastPoint.latlng;
@@ -1355,7 +1299,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 ? lastChainEvent.ts
                 : lastRdPtMs;
 
-            // 3. Bepaal de looprichting op basis van de chronologische RD-looplijn (inclusief bezochte clubgebouwen)
             var lineMovementBearingDeg = null;
             if (historicalAnchoredCoords.length >= 2) {
                 var mSin = 0, mCos = 0, mWeight = 0;
@@ -1376,14 +1319,12 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 }
             }
 
-            // 4. Analyseer de al BEZOCHTE clubgebouwen vanaf het einde van de RD-lijn
             var visitedContext = analyzeVisitedHousesContext(
                 effectiveLastCoord,
                 visitedHouses,
                 lineMovementBearingDeg
             );
 
-            // Bereken de actuele cirkelstraal vanaf het laatste chronologische punt op de RD-lijn (effectiveLastCoord)
             var isFuture = (effectiveLastMs > nowMs);
             var rawSecondsPassed = isFuture ? 0 : Math.floor((nowMs - effectiveLastMs) / 1000);
             var isCappedByAge = (!isFuture && rawSecondsPassed >= maxGrowthSeconds);
@@ -1404,7 +1345,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 lockedTargetName = null;
             }
 
-            // Selecteer de keten van onbezochte clubhuizen vanaf het allerlaatste punt op de RD-lijn (effectiveLastCoord)
             var targetHousesChain = selectSemiLogicalTargetHouses(
                 effectiveLastCoord,
                 lineMovementBearingDeg,
@@ -1415,7 +1355,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             );
             var primaryTargetHouse = targetHousesChain.length > 0 ? targetHousesChain[0] : null;
 
-            // 5. Bereken de gecombineerde richtingshoek voor de gradenhoek-pijlen op de cirkel (vanaf effectiveLastCoord)
             var bearingDeg = null;
             if (historicalAnchoredCoords.length >= 2 || visitedContext.originBearingDeg !== null || primaryTargetHouse) {
                 var sumSin = 0, sumCos = 0, totalWeight = 0;
@@ -1510,7 +1449,6 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 });
             }
 
-            // 6. Bereken zowel de primaire voorspellende looproute als de alternatieve parallelroute over de volledige keten.
             var estimatedWalkRoute = [];
             var alternativeWalkRoute = [];
             var estimatedTargetHouseName = "";
@@ -1651,7 +1589,6 @@ function injectAdminUI() {
 
     var style = document.createElement('style');
     style.innerHTML = `
-        /* Modal voor RD-punten toevoegen/bewerken */
         #rd-modal-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(26, 37, 47, 0.85); backdrop-filter: blur(3px);
@@ -2018,7 +1955,6 @@ function injectAdminUI() {
             });
         });
 
-        // Zet direct bij initialisatie de juiste grijs-tinten op basis van de statusbolletjes
         updateAdminSettingsPanelStatus();
 
         var sHeader = document.getElementById('admin-settings-header');
@@ -2073,7 +2009,123 @@ function injectAdminUI() {
             document.removeEventListener('touchend', onPanelTouchEnd);
         }
     }
+
+    injectAdminFoxStatusControls();
 }
+
+/* --- 4B. BEHEER INSTELLINGEN VOOR VOSSEN STATUS FILTERS (ROOD, ORANJE, GRIJS, GEEL, BLAUW) --- */
+function injectAdminFoxStatusControls() {
+    var settingsBody = document.getElementById('admin-settings-body');
+    if (!settingsBody || document.getElementById('admin-fox-status-filter-section')) return;
+
+    var filterSection = document.createElement('div');
+    filterSection.id = 'admin-fox-status-filter-section';
+    filterSection.style.display = 'flex';
+    filterSection.style.flexDirection = 'column';
+    filterSection.style.gap = '6px';
+
+    var colorCheckboxesHtml = Object.keys(foxStatusConfig).map(function(colorKey) {
+        var cfg = foxStatusConfig[colorKey];
+        var isChecked = visibleFoxStatusColors[colorKey] !== false ? 'checked' : '';
+        return `
+            <label style="display:flex; align-items:center; gap:5px; font-size:0.74rem; color:#ecf0f1; cursor:pointer; background:#34495e; padding:4px 7px; border-radius:4px; border:1px solid #4a6278;">
+                <input type="checkbox" class="admin-fox-color-cb" data-color="${colorKey}" ${isChecked} style="accent-color:${cfg.bg}; cursor:pointer;">
+                <span style="width:10px; height:10px; border-radius:50%; background:${cfg.bg}; display:inline-block;"></span>
+                <span>${cfg.label}</span>
+            </label>
+        `;
+    }).join('');
+
+    var manualOverrideRowsHtml = targetAreas.map(function(areaName) {
+        return `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:0.73rem;">
+                <span style="font-weight:600; color:#bdc3c7;">${areaName}:</span>
+                <select class="admin-target-lock-select admin-manual-fox-status" data-area="${areaName}" style="width:120px; padding:2px 5px;">
+                    <option value="rood">🔴 Rood</option>
+                    <option value="oranje">🟠 Oranje</option>
+                    <option value="grijs" selected>⚪ Grijs</option>
+                    <option value="geel">🟡 Geel</option>
+                    <option value="blauw">🔵 Blauw</option>
+                </select>
+            </div>
+        `;
+    }).join('');
+
+    filterSection.innerHTML = `
+        <hr class="admin-divider">
+        <div class="admin-setting-row">
+            <div class="admin-setting-label-wrap">
+                <span id="admin-fox-filter-dot" class="admin-status-dot status-dot-green"></span>
+                <label id="admin-fox-filter-label" style="color:#dcdde1;">🦊 Toon statussen in Vossen-menu:</label>
+            </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:5px;">
+            ${colorCheckboxesHtml}
+        </div>
+        <div class="admin-setting-subtext">
+            Vink aan welke Telegram-statuskleuren zichtbaar zijn in het Vossen Status-menu (venster groeit/krimpt automatisch).
+        </div>
+
+        <details style="margin-top:4px; background:#243342; padding:6px 8px; border-radius:5px; border:1px solid #3d566e;">
+            <summary style="font-size:0.74rem; font-weight:bold; color:#85c1e9; cursor:pointer;">🛠️ Handmatig vossenstatus wijzigen</summary>
+            <div style="display:flex; flex-direction:column; gap:4px; margin-top:6px;">
+                ${manualOverrideRowsHtml}
+            </div>
+        </details>
+    `;
+
+    settingsBody.appendChild(filterSection);
+
+    var checkboxes = filterSection.querySelectorAll('.admin-fox-color-cb');
+    checkboxes.forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            var colorKey = this.getAttribute('data-color');
+            visibleFoxStatusColors[colorKey] = !!this.checked;
+            claimMasterLockNow();
+            db.ref('adminSettings/visibleFoxStatuses').set(visibleFoxStatusColors);
+        });
+    });
+
+    var manualSelects = filterSection.querySelectorAll('.admin-manual-fox-status');
+    manualSelects.forEach(function(sel) {
+        sel.addEventListener('change', function() {
+            if (!isAdmin) return;
+            var areaName = this.getAttribute('data-area');
+            var chosenColor = this.value;
+            var now = Date.now();
+            var d = new Date(now);
+            var timeStr = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+
+            claimMasterLockNow();
+            db.ref('foxStatuses/' + areaName).set({
+                area: areaName,
+                status: chosenColor,
+                rawStatus: chosenColor,
+                updatedAt: now,
+                timeFormatted: timeStr,
+                rawMessage: "Handmatig ingesteld door Admin"
+            });
+        });
+    });
+
+    window.syncAdminFoxFilterCheckboxes();
+}
+
+window.syncAdminFoxFilterCheckboxes = function() {
+    var checkboxes = document.querySelectorAll('.admin-fox-color-cb');
+    checkboxes.forEach(function(cb) {
+        var cKey = cb.getAttribute('data-color');
+        cb.checked = (visibleFoxStatusColors[cKey] !== false);
+    });
+
+    var selects = document.querySelectorAll('.admin-manual-fox-status');
+    selects.forEach(function(sel) {
+        var aName = sel.getAttribute('data-area');
+        if (currentFoxStatuses[aName] && currentFoxStatuses[aName].status) {
+            sel.value = normalizeFoxStatusKey(currentFoxStatuses[aName].status);
+        }
+    });
+};
 
 function openRdModal(mode, existingKey, existingData) {
     injectAdminUI();
@@ -2366,8 +2418,6 @@ window.clearRdPoints = function() {
     } else if (pinInput !== null) { alert("Onjuiste pincode!"); }
 };
 
-/* Verbergt een inactieve gebruiker van de kaart. Zodra de gebruiker weer online komt,
-   overschrijft zijn GPS-update dit direct en verschijnt hij automatisch weer op de kaart. */
 window.removeInactiveUser = function(userId, userName) {
     if (!isAdmin || !userId) return;
     db.ref('liveUsers/' + userId).remove().then(function() {
@@ -2407,7 +2457,14 @@ window.initAdminEngine = function() {
         adminSettings.lockedTargets = val.lockedTargets || {};
 
         updateAdminSettingsPanelStatus();
+        window.syncAdminFoxFilterCheckboxes();
         window.calculateAndPublishMapState(false);
+    });
+
+    db.ref('foxStatuses').on('value', function() {
+        if (typeof window.syncAdminFoxFilterCheckboxes === 'function') {
+            window.syncAdminFoxFilterCheckboxes();
+        }
     });
 
     db.ref('computedMapState').on('value', function(snapshot) {

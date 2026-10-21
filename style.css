@@ -104,7 +104,6 @@ html, body {
 .leaflet-container {
     width: 100%;
     height: 100%;
-    /* Achtergrondkleur passend bij de site i.p.v. wit bij in- en uitzoomen */
     background-color: #1a252f !important;
     transform: translateZ(0);
     will-change: transform;
@@ -115,14 +114,12 @@ html, body {
     background-color: #121a21 !important;
 }
 
-/* Verberg de Leaflet Draw werkbalk/legenda-opties (lijn, pin, bewerken, prullenbak) */
 .leaflet-draw,
 .leaflet-draw-toolbar,
 .leaflet-draw-section {
     display: none !important;
 }
 
-/* Styling van de +/- zoomknoppen passend bij de site */
 .leaflet-bar {
     border: 1px solid #4a6278 !important;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4) !important;
@@ -168,7 +165,6 @@ html, body {
     transform: translateZ(0);
 }
 
-/* Oudere RD-punten worden getoond als een duidelijk puntje i.p.v. een lopend poppetje */
 .custom-rd-dot {
     width: 12px;
     height: 12px;
@@ -178,7 +174,6 @@ html, body {
     transform: translateZ(0);
 }
 
-/* Klein zichtbaar puntje waar de geschatte looproute en de cirkel elkaar kruisen */
 .fox-intersection-dot {
     width: 12px;
     height: 12px;
@@ -189,7 +184,6 @@ html, body {
     transform: translateZ(0);
 }
 
-/* Live verwachte positie van de vos OP de primaire voorspelde looplijn */
 .fox-live-route-marker {
     position: relative;
     width: 16px;
@@ -213,7 +207,6 @@ html, body {
     pointer-events: none;
 }
 
-/* Verwachte positie op de alternatieve parallelroute (ruitvormig met gestippelde/witte rand) */
 .fox-alt-route-marker {
     width: 13px;
     height: 13px;
@@ -242,7 +235,6 @@ html, body {
     line-height: 1;
     pointer-events: none;
     user-select: none;
-    /* Lichte modus: passend bij de site-kleur (#2c3e50) op een subtiel paneeltje */
     background: rgba(236, 240, 241, 0.88);
     border: 1px solid rgba(44, 62, 80, 0.35);
     color: #2c3e50;
@@ -266,7 +258,6 @@ html, body {
     transition: width 0.12s ease, border-color 0.2s ease;
 }
 
-/* Darkmode maatstaaf: duidelijke lichtgrijze kleur */
 #map.dark-mode-map .jh-scale-control {
     background: rgba(26, 37, 47, 0.85);
     border-color: rgba(189, 195, 199, 0.35);
@@ -298,7 +289,6 @@ html, body {
 .leaflet-tooltip-left.marker-label::before { border-left-color: #34495e !important; }
 .leaflet-tooltip-right.marker-label::before { border-right-color: #34495e !important; }
 
-/* Labels voor GPS-gebruikers (auto's) */
 .user-gps-label-active {
     background: #27ae60 !important;
     color: #ffffff !important;
@@ -311,7 +301,6 @@ html, body {
     border-color: #95a5a6 !important;
 }
 
-/* Kompasroos & Geofence Badges */
 .compass-label {
     background: #2c3e50;
     color: #ffffff;
@@ -339,7 +328,7 @@ html, body {
     text-align: center;
 }
 
-/* --- 5. LEAFLET POPUP STYLING (IN APP-THEMA: DONKERBLAUW / GRIJS) --- */
+/* --- 5. LEAFLET POPUP STYLING --- */
 .leaflet-popup-content-wrapper {
     background-color: #2c3e50 !important;
     color: #ecf0f1 !important;
@@ -474,4 +463,111 @@ html, body {
     color: #ff7675;
     font-size: 0.8rem;
     font-weight: 600;
+}
+
+/* --- 7. ZWEVEND VOSSEN STATUS MENU (GELIJK AAN BEHEER INSTELLINGEN MENU) --- */
+#fox-status-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 950;
+    background: #2c3e50;
+    color: #ecf0f1;
+    border: 1px solid #4a6278;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    width: 175px;
+    max-width: 80vw;
+    font-size: 0.8rem;
+    user-select: none;
+    touch-action: none;
+    overflow: hidden;
+    transition: height 0.2s ease;
+}
+
+#fox-status-header {
+    background: #1a252f;
+    color: #ffffff;
+    padding: 7px 10px;
+    font-weight: bold;
+    font-size: 0.82rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: move;
+    border-bottom: 1px solid #4a6278;
+}
+
+#fox-status-min-btn {
+    background: #34495e;
+    color: #ecf0f1;
+    border: 1px solid #4a6278;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 1px 7px;
+    line-height: 1.2;
+}
+
+#fox-status-body {
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: auto;
+    max-height: 75vh;
+    overflow-y: auto;
+}
+
+#fox-status-buttons-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    height: auto;
+}
+
+.fox-area-status-btn {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+    transition: transform 0.1s ease, filter 0.15s ease;
+}
+
+.fox-area-status-btn:hover {
+    filter: brightness(1.08);
+}
+
+.fox-area-status-btn:active {
+    transform: scale(0.98);
+}
+
+.fox-btn-name {
+    letter-spacing: 0.3px;
+}
+
+.fox-btn-time {
+    font-size: 0.68rem;
+    font-weight: 600;
+    opacity: 0.9;
+    background: rgba(0, 0, 0, 0.22);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+.fox-status-empty {
+    font-size: 0.73rem;
+    color: #95a5a6;
+    text-align: center;
+    padding: 4px 0;
+    font-style: italic;
 }

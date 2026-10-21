@@ -1,7 +1,7 @@
 /* ==========================================================================
    3. MAP-VIEWER.JS - LICHTGEWICHT KAARTWEERGAVE (VOOR HUNTERS & ADMIN)
-   Leest kant-en-klare berekeningen uit Firebase ('computedMapState') zonder
-   lokale CPU-belasting op mobiele telefoons.
+   Leest kant-en-klare berekeningen uit Firebase ('computedMapState') én
+   toont het live Telegram Vossen Status menu ('foxStatuses').
    ========================================================================== */
 
 var map = L.map('map', {
@@ -328,8 +328,6 @@ function createWalkerMarker(pt) {
     var strokeColor = isOscar ? "#003399" : "#000000";
     var customIcon;
 
-    // Alleen het LAATSTE RD-punt van een deelgebied krijgt het lopende poppetje;
-    // oudere RD-punten (en losse 'Anders'-punten) worden getoond als een duidelijk puntje.
     if (pt.isLatest) {
         var walkerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30" fill="${pt.color}" stroke="${strokeColor}" stroke-width="${isOscar ? 2 : 1.5}" style="opacity: ${pt.opacity};">
             <path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.2L6 8.3V13h2V9.6l1.8-.7z"/>
@@ -340,7 +338,7 @@ function createWalkerMarker(pt) {
             iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15]
         });
     } else {
-        var dotBorderColor = isOscar ? "#ffffff" : "#ffffff";
+        var dotBorderColor = "#ffffff";
         var dotHtml = `<div class="custom-rd-dot" style="background-color: ${pt.color}; border: 2px solid ${dotBorderColor}; opacity: ${pt.opacity};"></div>`;
 
         customIcon = L.divIcon({
@@ -416,7 +414,6 @@ function renderComputedMapState(state) {
     var areasData = (state && state.areas) ? state.areas : {};
     var otherPoints = (state && state.otherPoints) ? state.otherPoints : [];
 
-    // Teken eerst eventuele losse 'Anders'-punten (zonder deelgebied/tijd)
     if (Array.isArray(otherPoints)) {
         otherPoints.forEach(function (pt) {
             var marker = createWalkerMarker(pt);
@@ -424,7 +421,6 @@ function renderComputedMapState(state) {
         });
     }
 
-    // Verwijder geofences, geschatte routes en markers van deelgebieden die gewist zijn
     Object.keys(activeGeofenceCircles).forEach(function (area) {
         if (!areasData[area]) {
             geofenceLayer.removeLayer(activeGeofenceCircles[area]);
@@ -774,8 +770,6 @@ function renderLiveUsersOnMap() {
         var u = users[userId];
         if (!u || !u.lat || !u.lng) return;
 
-        // Als een admin deze inactieve gebruiker heeft verborgen, en er is sindsdien geen nieuwe GPS-update binnengekomen,
-        // verberg de gebruiker dan op de kaart. Zodra de gebruiker weer online komt (lastSeen > hiddenAt), verschijnt hij direct weer!
         if (u.hiddenByAdmin && (!u.lastSeen || u.lastSeen <= (u.hiddenAt || 0))) {
             if (liveUserMarkers[userId]) {
                 usersLiveLayer.removeLayer(liveUserMarkers[userId]);
@@ -862,6 +856,201 @@ db.ref('liveUsers').on('value', function (snapshot) {
     renderLiveUsersOnMap();
 });
 
-// Evalueer elke 20 seconden lokaal of een gebruiker inmiddels > 3 minuten inactief is,
-// zodat de status en de knop 'Verberg inactieve gebruiker' voor Admins vanzelf verschijnen.
 setInterval(renderLiveUsersOnMap, 20000);
+
+/* ==========================================================================
+   VOSSEN STATUS MENU (VOOR GEBRUIKERS & ADMINS) - TELEGRAM & FIREBASE SYNC
+   ========================================================================== */
+
+function injectFoxStatusPanel() {
+    var mapWrapper = document.getElementById('map-wrapper');
+    if (!mapWrapper || document.getElementById('fox-status-panel')) return;
+
+    var panel = document.createElement('div');
+    panel.id = 'fox-status-panel';
+    panel.innerHTML = `
+        <div id="fox-status-header">
+            <span>🦊 Vossen Status</span>
+            <button type="button" id="fox-status-min-btn" title="Minimaliseren / Maximaliseren">-</button>
+        </div>
+        <div id="fox-status-body">
+            <div id="fox-status-buttons-list"></div>
+        </div>
+    `;
+    mapWrapper.appendChild(panel);
+
+    if (typeof L !== 'undefined' && L.DomEvent) {
+        L.DomEvent.disableClickPropagation(panel);
+        L.DomEvent.disableScrollPropagation(panel);
+    }
+
+    // Minimaliseren & Maximaliseren
+    var minBtn = document.getElementById('fox-status-min-btn');
+    var bodyEl = document.getElementById('fox-status-body');
+    minBtn.addEventListener('click', function() {
+        if (bodyEl.style.display === 'none') {
+            bodyEl.style.display = 'flex';
+            minBtn.innerText = '-';
+        } else {
+            bodyEl.style.display = 'none';
+            minBtn.innerText = '+';
+        }
+    });
+
+    // Vrij verslepen over de kaart (muis & touch)
+    var headerEl = document.getElementById('fox-status-header');
+    var isDraggingFoxPanel = false, dragStartX = 0, dragStartY = 0;
+
+    headerEl.addEventListener('mousedown', function(e) {
+        if (e.target.tagName === 'BUTTON') return;
+        isDraggingFoxPanel = true;
+        dragStartX = e.clientX - panel.offsetLeft;
+        dragStartY = e.clientY - panel.offsetTop;
+        document.addEventListener('mousemove', onFoxMouseMove);
+        document.addEventListener('mouseup', onFoxMouseUp);
+    });
+
+    headerEl.addEventListener('touchstart', function(e) {
+        if (e.target.tagName === 'BUTTON') return;
+        isDraggingFoxPanel = true;
+        var touch = e.touches[0];
+        dragStartX = touch.clientX - panel.offsetLeft;
+        dragStartY = touch.clientY - panel.offsetTop;
+        document.addEventListener('touchmove', onFoxTouchMove, { passive: false });
+        document.addEventListener('touchend', onFoxTouchEnd);
+    });
+
+    function moveFoxPanel(clientX, clientY) {
+        var maxX = Math.max(0, window.innerWidth - panel.offsetWidth);
+        var maxY = Math.max(0, mapWrapper.clientHeight - panel.offsetHeight);
+        var newX = Math.max(0, Math.min(clientX - dragStartX, maxX));
+        var newY = Math.max(0, Math.min(clientY - dragStartY, maxY));
+        panel.style.left = newX + 'px';
+        panel.style.top = newY + 'px';
+        panel.style.right = 'auto';
+    }
+
+    function onFoxMouseMove(e) {
+        if (isDraggingFoxPanel) moveFoxPanel(e.clientX, e.clientY);
+    }
+    function onFoxTouchMove(e) {
+        if (isDraggingFoxPanel) {
+            e.preventDefault();
+            moveFoxPanel(e.touches[0].clientX, e.touches[0].clientY);
+        }
+    }
+    function onFoxMouseUp() {
+        isDraggingFoxPanel = false;
+        document.removeEventListener('mousemove', onFoxMouseMove);
+        document.removeEventListener('mouseup', onFoxMouseUp);
+    }
+    function onFoxTouchEnd() {
+        isDraggingFoxPanel = false;
+        document.removeEventListener('touchmove', onFoxTouchMove);
+        document.removeEventListener('touchend', onFoxTouchEnd);
+    }
+
+    renderFoxStatusButtons();
+}
+
+/* Dubbelklik-actie: Zoom automatisch in op de laatst bekende vossenplek van het deelgebied */
+window.zoomToLatestFoxArea = function(areaName) {
+    if (latestKnownAreaPoints[areaName] && latestKnownAreaPoints[areaName].latlng) {
+        var pt = latestKnownAreaPoints[areaName];
+        map.flyTo(pt.latlng, 15, { animate: true, duration: 1.1 });
+        if (pt.marker) {
+            setTimeout(function() {
+                pt.marker.openPopup();
+            }, 650);
+        }
+    } else {
+        alert("Nog geen laatst bekende vossenplek (RD-punt) voor deelgebied " + areaName + ".");
+    }
+};
+
+/* Rendert de knoppen per deelgebied en laat het venster automatisch groeien/krimpen */
+window.renderFoxStatusButtons = function() {
+    var listEl = document.getElementById('fox-status-buttons-list');
+    if (!listEl) return;
+
+    var visibleAreas = targetAreas.filter(function(areaName) {
+        var stObj = currentFoxStatuses[areaName];
+        var colorKey = stObj && stObj.status ? normalizeFoxStatusKey(stObj.status) : "grijs";
+        return visibleFoxStatusColors[colorKey] !== false;
+    });
+
+    if (visibleAreas.length === 0) {
+        listEl.innerHTML = `<div class="fox-status-empty">Geen statussen geselecteerd</div>`;
+        return;
+    }
+
+    listEl.innerHTML = visibleAreas.map(function(areaName) {
+        var stObj = currentFoxStatuses[areaName] || {};
+        var colorKey = stObj.status ? normalizeFoxStatusKey(stObj.status) : "grijs";
+        var cfg = foxStatusConfig[colorKey] || foxStatusConfig["grijs"];
+        var timeBadge = stObj.timeFormatted ? `<span class="fox-btn-time">${stObj.timeFormatted}</span>` : '';
+
+        return `
+            <button type="button"
+                class="fox-area-status-btn status-color-${colorKey}"
+                style="background-color: ${cfg.bg}; border-color: ${cfg.border}; color: ${cfg.text};"
+                ondblclick="window.zoomToLatestFoxArea('${areaName}')"
+                title="Status: ${cfg.label}${stObj.timeFormatted ? ' (' + stObj.timeFormatted + ')' : ''} — Dubbelklik om in te zoomen op laatste vossenplek">
+                <span class="fox-btn-name">${areaName}</span>
+                ${timeBadge}
+            </button>
+        `;
+    }).join('');
+};
+
+// Initialiseer het menu zodra de pagina laadt
+injectFoxStatusPanel();
+
+// 1. Luister real-time naar statuswijzigingen vanuit Telegram in Firebase ('foxStatuses')
+var isInitialFoxStatusLoad = true;
+var prevFoxStatusMap = {};
+
+db.ref('foxStatuses').on('value', function(snapshot) {
+    var data = snapshot.val() || {};
+    currentFoxStatuses = data;
+    window.renderFoxStatusButtons();
+
+    targetAreas.forEach(function(areaName) {
+        var curr = data[areaName] ? normalizeFoxStatusKey(data[areaName].status) : "grijs";
+        if (!isInitialFoxStatusLoad && prevFoxStatusMap[areaName] && prevFoxStatusMap[areaName] !== curr) {
+            var cfg = foxStatusConfig[curr] || foxStatusConfig["grijs"];
+            if ('vibrate' in navigator) navigator.vibrate([250, 100, 250]);
+            if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+                navigator.serviceWorker.ready.then(function(reg) {
+                    reg.showNotification("🦊 Status " + areaName + ": " + cfg.label, {
+                        body: "Status van " + areaName + " is via Telegram gewijzigd in " + cfg.label + "!",
+                        icon: 'icon-192.png',
+                        badge: 'icon-192.png',
+                        tag: 'fox-status-' + areaName,
+                        renotify: true
+                    });
+                });
+            }
+        }
+        prevFoxStatusMap[areaName] = curr;
+    });
+    isInitialFoxStatusLoad = false;
+});
+
+// 2. Luister real-time naar de ingestelde status-filters vanuit het Beheer Instellingen menu
+db.ref('adminSettings/visibleFoxStatuses').on('value', function(snapshot) {
+    var val = snapshot.val();
+    if (val && typeof val === 'object') {
+        Object.keys(foxStatusConfig).forEach(function(k) {
+            visibleFoxStatusColors[k] = (val[k] !== false);
+        });
+    } else {
+        Object.keys(foxStatusConfig).forEach(function(k) {
+            visibleFoxStatusColors[k] = true;
+        });
+    }
+    window.renderFoxStatusButtons();
+    if (typeof window.syncAdminFoxFilterCheckboxes === 'function') {
+        window.syncAdminFoxFilterCheckboxes();
+    }
+});

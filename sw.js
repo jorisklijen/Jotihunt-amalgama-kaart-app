@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jotihunt-amalgama-v9';
+const CACHE_NAME = 'jotihunt-amalgama-v10';
 
 self.addEventListener('install', function(event) {
     self.skipWaiting();
@@ -23,10 +23,11 @@ self.addEventListener('activate', function(event) {
 self.addEventListener('fetch', function(event) {
     const url = event.request.url;
 
-    // Laat Firebase, PDOK/OSM adres-geocoding en OSRM wandelroutes volledig buiten de Service Worker cache
+    // Laat Firebase, Cloudflare Worker, PDOK/OSM adres-geocoding en OSRM wandelroutes buiten de Service Worker cache
     if (
         url.includes('firebaseio.com') ||
         url.includes('firebasedatabase.app') ||
+        url.includes('workers.dev') ||
         url.includes('api.pdok.nl') ||
         url.includes('nominatim.openstreetmap.org') ||
         url.includes('routing.openstreetmap.de') ||
