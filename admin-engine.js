@@ -14,7 +14,7 @@
    - Volledige keten-opbouw voor zowel primaire als alternatieve parallelroute (voorbij cirkel)
    - Handmatige Doel-Clubhuis Lock per deelgebied (via laatste RD-punt popup én Admin-menu)
    - Live Verwachte Vos-positie langs de wandelroute + Snijpunt met cirkelrand
-   - Beheer van zichtbare Telegram Vossenstatussen (Rood, Oranje, Grijs, Geel, Blauw)
+   - Beheer van zichtbare Telegram Vossenstatussen (Groen, Rood, Oranje, Geel, Blauw, Grijs)
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
@@ -1172,7 +1172,7 @@ function updateAdminSettingsPanelStatus() {
         routeSpeedToggle.checked = routeSpeedEnabled;
     }
     if (routeSpeedDot) {
-        altRouteDot && (routeSpeedDot.className = 'admin-status-dot ' + (isRouteSpeedRed ? 'status-dot-red' : 'status-dot-green'));
+        routeSpeedDot.className = 'admin-status-dot ' + (isRouteSpeedRed ? 'status-dot-red' : 'status-dot-green');
         routeSpeedDot.title = routeSpeedEnabled
             ? 'Loopsnelheid o.b.v. wandelroute ingeschakeld'
             : 'Loopsnelheid o.b.v. hemelsbrede afstand (standaard)';
@@ -2013,7 +2013,7 @@ function injectAdminUI() {
     injectAdminFoxStatusControls();
 }
 
-/* --- 4B. BEHEER INSTELLINGEN VOOR VOSSEN STATUS FILTERS (ROOD, ORANJE, GRIJS, GEEL, BLAUW) --- */
+/* --- 4B. BEHEER INSTELLINGEN VOOR VOSSEN STATUS FILTERS (GROEN, ROOD, ORANJE, GEEL, BLAUW, GRIJS) --- */
 function injectAdminFoxStatusControls() {
     var settingsBody = document.getElementById('admin-settings-body');
     if (!settingsBody || document.getElementById('admin-fox-status-filter-section')) return;
@@ -2041,11 +2041,12 @@ function injectAdminFoxStatusControls() {
             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:0.73rem;">
                 <span style="font-weight:600; color:#bdc3c7;">${areaName}:</span>
                 <select class="admin-target-lock-select admin-manual-fox-status" data-area="${areaName}" style="width:120px; padding:2px 5px;">
+                    <option value="groen">🟢 Groen</option>
                     <option value="rood">🔴 Rood</option>
                     <option value="oranje">🟠 Oranje</option>
-                    <option value="grijs" selected>⚪ Grijs</option>
                     <option value="geel">🟡 Geel</option>
                     <option value="blauw">🔵 Blauw</option>
+                    <option value="grijs" selected>⚪ Grijs</option>
                 </select>
             </div>
         `;

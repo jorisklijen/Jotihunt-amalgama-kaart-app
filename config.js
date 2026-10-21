@@ -32,23 +32,25 @@ var areaColors = {
     "Oscar": "#003399"
 };
 
-/* Kleuren en labels voor de 5 Telegram Vossenstatussen */
+/* Kleuren en labels voor de 6 Telegram Vossenstatussen (incl. Groen) */
 var foxStatusConfig = {
+    "groen":  { label: "Groen",  bg: "#2ecc71", border: "#27ae60", text: "#ffffff" },
     "rood":   { label: "Rood",   bg: "#e74c3c", border: "#c0392b", text: "#ffffff" },
     "oranje": { label: "Oranje", bg: "#e67e22", border: "#d35400", text: "#ffffff" },
-    "grijs":  { label: "Grijs",  bg: "#7f8c8d", border: "#636e72", text: "#ffffff" },
     "geel":   { label: "Geel",   bg: "#f1c40f", border: "#d4ac0d", text: "#1a252f" },
-    "blauw":  { label: "Blauw",  bg: "#3498db", border: "#2980b9", text: "#ffffff" }
+    "blauw":  { label: "Blauw",  bg: "#3498db", border: "#2980b9", text: "#ffffff" },
+    "grijs":  { label: "Grijs",  bg: "#7f8c8d", border: "#636e72", text: "#ffffff" }
 };
 
 /* Gedeelde state voor Vossenstatussen en zichtbaarheidsfilters */
 var currentFoxStatuses = {};
 var visibleFoxStatusColors = {
+    "groen": true,
     "rood": true,
     "oranje": true,
-    "grijs": true,
     "geel": true,
-    "blauw": true
+    "blauw": true,
+    "grijs": true
 };
 
 /* Amalgama Clubgebouw Coördinaten */
@@ -61,14 +63,15 @@ var allLocations = [];
 var houseVisitedStatus = {};
 var latestKnownAreaPoints = {};
 
-/* Hulpfunctie: Vertaalt elke ruwe status (red, orange, grey, yellow, blue, etc.) naar 1 van de 5 sleutels */
+/* Hulpfunctie: Vertaalt elke ruwe status (green, red, orange, grey, yellow, blue, etc.) naar 1 van de 6 sleutels */
 function normalizeFoxStatusKey(rawStatus) {
     var s = String(rawStatus || "").toLowerCase().trim();
+    if (s.includes("green") || s.includes("groen") || s.includes("vrij") || s.includes("actief")) return "groen";
     if (s.includes("red") || s.includes("rood") || s.includes("inactief") || s.includes("gevangen")) return "rood";
     if (s.includes("orange") || s.includes("oranje")) return "oranje";
-    if (s.includes("grey") || s.includes("gray") || s.includes("grijs")) return "grijs";
     if (s.includes("yellow") || s.includes("geel")) return "geel";
-    if (s.includes("blue") || s.includes("blauw") || s.includes("green") || s.includes("groen") || s.includes("vrij") || s.includes("actief")) return "blauw";
+    if (s.includes("blue") || s.includes("blauw")) return "blauw";
+    if (s.includes("grey") || s.includes("gray") || s.includes("grijs")) return "grijs";
     return "grijs";
 }
 
