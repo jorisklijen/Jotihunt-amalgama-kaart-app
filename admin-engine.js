@@ -15,6 +15,8 @@
    - Handmatige Doel-Clubhuis Lock per deelgebied (via laatste RD-punt popup én Admin-menu)
    - Live Verwachte Vos-positie langs de wandelroute + Snijpunt met cirkelrand
    - Beheer van zichtbare Telegram Vossenstatussen (Groen, Rood, Oranje, Geel, Blauw, Grijs)
+   - Centrale Master-berekening voor Vossen Status Info (Reistijd/afstand over de weg per
+     gebruiker, dichtstbijzijnde online hunter & status-duur)
    ========================================================================== */
 
 var rawRdPointsByArea = { "Alpha": [], "Bravo": [], "Delta": [], "Foxtrot": [], "Golf": [], "Hotel": [], "Oscar": [] };
@@ -23,6 +25,7 @@ var currentEditingRdKey = null;
 
 var walkingRouteCache = {};
 var segmentDistanceCache = {};
+var drivingRouteMetricsCache = {};
 var areaCappedStatus = {};
 
 var adminSettings = {
@@ -562,6 +565,53 @@ async function fetchOsrmFootRoutes(coordString, timeoutMs) {
         }
     }
     return null;
+}
+
+/* Haalt rij-afstand (over de weg) en reistijd op voor auto/hunter -> vossenlocatie */
+async function getDrivingDistanceAndTime(fromLat, fromLng, toLat, toLng) {
+    var straightKm = getDistanceKm(fromLat, fromLng, toLat, toLng);
+    if (straightKm < 0.05) {
+        return { distKm: 0.1, durationMin: 1, isRoad: true };
+    }
+
+    // Rond coördinaten af op ~100m voor efficiënte caching
+    var cacheKey = `${fromLat.toFixed(3)},${fromLng.toFixed(3)}_${toLat.toFixed(3)},${toLng.toFixed(3)}`;
+    var now = Date.now();
+    if (drivingRouteMetricsCache[cacheKey] && (now - drivingRouteMetricsCache[cacheKey].ts) < 90000) {
+        return drivingRouteMetricsCache[cacheKey].data;
+    }
+
+    var coordStr = `${fromLng},${fromLat};${toLng},${toLat}`;
+    var endpoints = [
+        `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coordStr}?overview=false`,
+        `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=false`
+    ];
+
+    for (var i = 0; i < endpoints.length; i++) {
+        try {
+            var controller = new AbortController();
+            var tId = setTimeout(function() { controller.abort(); }, 3200);
+            var res = await fetch(endpoints[i], { signal: controller.signal });
+            clearTimeout(tId);
+
+            if (res.ok) {
+                var data = await res.json();
+                if (data && data.routes && data.routes.length > 0) {
+                    var r = data.routes[0];
+                    var roadKm = Math.max(0.1, Math.round((r.distance / 1000) * 10) / 10);
+                    var roadMin = Math.max(1, Math.round(r.duration / 60));
+                    var result = { distKm: roadKm, durationMin: roadMin, isRoad: true };
+                    drivingRouteMetricsCache[cacheKey] = { ts: now, data: result };
+                    return result;
+                }
+            }
+        } catch (err) {}
+    }
+
+    // Fallback als OSRM tijdelijk niet reageert: schat wegafstand (~1.28x hemelsbreed) & 48 km/u
+    var estRoadKm = Math.max(0.1, Math.round((straightKm * 1.28) * 10) / 10);
+    var estMin = Math.max(1, Math.round((estRoadKm / 48) * 60));
+    return { distKm: estRoadKm, durationMin: estMin, isRoad: false };
 }
 
 async function getBestSegmentRoute(startLatLng, endLatLng, avoidHistoryCoords, speedKmh, preferQuietParallel, primaryReferenceRoute) {
@@ -1222,6 +1272,131 @@ function updateAdminSettingsPanelStatus() {
     }
 }
 
+/* Hulpfunctie: Formatteer duur (ms) naar leesbare tekst (bijv. "1u 14m" of "23m") */
+function formatDurationShort(ms) {
+    if (!ms || ms < 0) return "0m";
+    var totalSec = Math.floor(ms / 1000);
+    var hours = Math.floor(totalSec / 3600);
+    var mins = Math.floor((totalSec % 3600) / 60);
+    if (hours > 0) {
+        return `${hours}u ${mins}m`;
+    }
+    return `${mins}m`;
+}
+
+/* Hulpfunctie: Bepaalt per deelgebied de geschatte live locatie van de vos en berekent voor
+   alle actieve gebruikers de wegafstand/reistijd én wie er online het dichtstbij is. */
+async function computeFoxStatusMetricsForAllUsers(computedAreas, nowMs) {
+    var metricsByArea = {};
+    var usersObj = (typeof cachedUsersData === 'object' && cachedUsersData) ? cachedUsersData : {};
+
+    // Filter op ingelogde én online gebruikers (laatste GPS-update <= 3 minuten geleden)
+    var onlineUserIds = Object.keys(usersObj).filter(function(uid) {
+        var u = usersObj[uid];
+        if (!u || !u.lat || !u.lng) return false;
+        if (u.hiddenByAdmin && (!u.lastSeen || u.lastSeen <= (u.hiddenAt || 0))) return false;
+        return (nowMs - (u.lastSeen || 0)) <= (3 * 60 * 1000);
+    });
+
+    // Alle bekende gebruikers met een geldige GPS-positie (zodat elke gebruiker zijn eigen afstand ziet)
+    var allValidUserIds = Object.keys(usersObj).filter(function(uid) {
+        var u = usersObj[uid];
+        return u && typeof u.lat === 'number' && typeof u.lng === 'number';
+    });
+
+    for (var i = 0; i < targetAreas.length; i++) {
+        var areaName = targetAreas[i];
+        var stObj = currentFoxStatuses[areaName] || {};
+        var colorKey = stObj.status ? normalizeFoxStatusKey(stObj.status) : "grijs";
+        var cfg = foxStatusConfig[colorKey] || foxStatusConfig["grijs"];
+
+        var statusUpdatedAt = stObj.updatedAt || null;
+        if (!statusUpdatedAt && stObj.timeFormatted && stObj.timeFormatted.includes(':')) {
+            var tParts = stObj.timeFormatted.split(':');
+            var dTemp = new Date(nowMs);
+            dTemp.setHours(parseInt(tParts[0], 10) || 0, parseInt(tParts[1], 10) || 0, 0, 0);
+            if (dTemp.getTime() > nowMs) dTemp.setDate(dTemp.getDate() - 1);
+            statusUpdatedAt = dTemp.getTime();
+        }
+
+        var statusDurationText = statusUpdatedAt ? formatDurationShort(nowMs - statusUpdatedAt) : "Onbekend";
+
+        // Bepaal de beste geschatte live locatie van de vos voor dit deelgebied:
+        // 1. Live Verwachte Vos-positie op de wandelroute
+        // 2. Laatste punt van de keten (geofence center: laatste RD-punt of laatst bezochte clubhuis)
+        // 3. Fallback: laatst bezochte clubhuis indien er nog geen RD-punten zijn
+        var targetCoord = null;
+        var targetLocationLabel = "Nog geen locatie bekend";
+
+        var areaData = computedAreas[areaName];
+        if (areaData && areaData.geofence) {
+            if (areaData.geofence.liveExpectedFoxPoint && Array.isArray(areaData.geofence.liveExpectedFoxPoint.coord)) {
+                targetCoord = areaData.geofence.liveExpectedFoxPoint.coord;
+                targetLocationLabel = "Verwachte live looppositie";
+            } else if (Array.isArray(areaData.geofence.center) && areaData.geofence.center.length === 2) {
+                targetCoord = areaData.geofence.center;
+                targetLocationLabel = "Laatste punt in lijn";
+            }
+        }
+
+        if (!targetCoord && typeof getFallbackLatestVisitedHouseForArea === 'function') {
+            var fbClub = getFallbackLatestVisitedHouseForArea(areaName);
+            if (fbClub && Array.isArray(fbClub.latlng)) {
+                targetCoord = fbClub.latlng;
+                targetLocationLabel = "Laatst bezochte club (" + fbClub.houseName + ")";
+            }
+        }
+
+        var userRoutes = {};
+        var closestOnlineHunter = null;
+
+        if (targetCoord) {
+            // Bereken voor iedere gebruiker de afstand & reistijd over de weg vanaf diens eigen locatie
+            for (var uIdx = 0; uIdx < allValidUserIds.length; uIdx++) {
+                var uid = allValidUserIds[uIdx];
+                var uData = usersObj[uid];
+                var roadMetrics = await getDrivingDistanceAndTime(uData.lat, uData.lng, targetCoord[0], targetCoord[1]);
+
+                userRoutes[uid] = {
+                    name: uData.name || "Hunter",
+                    distKm: roadMetrics.distKm,
+                    durationMin: roadMetrics.durationMin,
+                    isRoad: roadMetrics.isRoad
+                };
+            }
+
+            // Bepaal welke ingelogde én online gebruiker het dichtst bij de geschatte live locatie is
+            onlineUserIds.forEach(function(onlineUid) {
+                var rInfo = userRoutes[onlineUid];
+                if (!rInfo) return;
+                if (!closestOnlineHunter || rInfo.distKm < closestOnlineHunter.distKm) {
+                    closestOnlineHunter = {
+                        userId: onlineUid,
+                        name: rInfo.name,
+                        distKm: rInfo.distKm,
+                        durationMin: rInfo.durationMin
+                    };
+                }
+            });
+        }
+
+        metricsByArea[areaName] = {
+            area: areaName,
+            statusKey: colorKey,
+            statusLabel: cfg.label,
+            statusUpdatedAt: statusUpdatedAt || null,
+            statusTimeFormatted: stObj.timeFormatted || "",
+            statusDurationText: statusDurationText,
+            estimatedCoord: targetCoord || null,
+            locationTypeLabel: targetLocationLabel,
+            closestOnlineUser: closestOnlineHunter,
+            userRoutes: userRoutes
+        };
+    }
+
+    return metricsByArea;
+}
+
 /* --- 3. CENTRALE BEREKENING & PUBLICATIE NAAR FIREBASE --- */
 var isCalculatingMapState = false;
 var pendingCalculationRequest = false;
@@ -1564,11 +1739,15 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             };
         });
 
+        // Bereken centraal op de Master Engine alle Vossen Status Info (afstanden, reistijd, dichtstbijzijnde hunter & timers)
+        var foxStatusMetrics = await computeFoxStatusMetricsForAllUsers(computedAreas, nowMs);
+
         await db.ref('computedMapState').set({
             updatedAt: Date.now(),
             masterId: adminSessionId,
             areas: computedAreas,
-            otherPoints: processedOtherPoints
+            otherPoints: processedOtherPoints,
+            foxStatusMetrics: foxStatusMetrics
         });
     } finally {
         isCalculatingMapState = false;
@@ -2409,6 +2588,7 @@ window.clearRdPoints = function() {
     if (pinInput === "6546") {
         walkingRouteCache = {};
         segmentDistanceCache = {};
+        drivingRouteMetricsCache = {};
         areaCappedStatus = {};
         updateAdminSettingsPanelStatus();
         claimMasterLockNow();
@@ -2466,6 +2646,11 @@ window.initAdminEngine = function() {
         if (typeof window.syncAdminFoxFilterCheckboxes === 'function') {
             window.syncAdminFoxFilterCheckboxes();
         }
+        window.calculateAndPublishMapState(false);
+    });
+
+    db.ref('liveUsers').on('value', function() {
+        window.calculateAndPublishMapState(false);
     });
 
     db.ref('computedMapState').on('value', function(snapshot) {
