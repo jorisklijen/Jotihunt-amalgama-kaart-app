@@ -1,12 +1,11 @@
 /* ==========================================================================
    3. MAP-VIEWER.JS - LICHTGEWICHT KAARTWEERGAVE (VOOR HUNTERS & ADMIN)
-   Leest kant-en-klare berekeningen uit Firebase ('computedMapState') én
-   toont het live Telegram Vossen Status menu ('foxStatuses') met:
-   - Gecentreerde deelgebied-namen (zonder tijdlabel op de knop)
-   - Enkele klik: dynamisch uitklapbaar info-venster onder de naam met
-     status-duur timer (max 12u), eigen reistijd/afstand over de weg &
-     dichtstbijzijnde online hunter (zonder knipperen bij live updates!)
-   - Dubbelklik / dubbel-tik: direct inzoomen op het laatste punt in de lijn
+   Inclusief:
+   - Vast Vossen Info-Venster (100% flikkervrij, los van de knoppenlijst)
+   - Duidelijke In-App Melding + Geluid wanneer een deelgebied weer op GROEN springt
+   - Centrale TEGENHUNT Popup midden op het scherm met grote aftel-timer,
+     windrichting, tijdstip + automatisch inzoomen op Scouting Amalgama
+   - Snellere 10-seconden kaart-refresh
    ========================================================================== */
 
 var map = L.map('map', {
@@ -47,6 +46,46 @@ applyDarkMode(isDarkMode);
 function toggleDarkMode() {
     isDarkMode = !isDarkMode;
     applyDarkMode(isDarkMode);
+}
+
+/* --- GELUIDSSIGNAAL HULPFUNCTIE (WEB AUDIO API - GEEN EXTERNE MP3 NODIG) --- */
+function playAlertSound(type) {
+    try {
+        var AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        var ctx = new AudioCtx();
+
+        if (type === 'counterhunt') {
+            // Urgent alarm-signaal voor Tegenhunt
+            [0, 0.25, 0.5, 0.75].forEach(function(offset, idx) {
+                var osc = ctx.createOscillator();
+                var gain = ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(idx % 2 === 0 ? 880 : 620, ctx.currentTime + offset);
+                gain.gain.setValueAtTime(0.22, ctx.currentTime + offset);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + offset + 0.22);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(ctx.currentTime + offset);
+                osc.stop(ctx.currentTime + offset + 0.23);
+            });
+        } else if (type === 'green' || type === 'foiled') {
+            // Positief oplopend signaal voor Vossen Groen / Tegenhunt Verijdeld
+            [523.25, 659.25, 783.99, 1046.5].forEach(function(freq, idx) {
+                var osc = ctx.createOscillator();
+                var gain = ctx.createGain();
+                osc.type = 'triangle';
+                var startT = ctx.currentTime + (idx * 0.12);
+                osc.frequency.setValueAtTime(freq, startT);
+                gain.gain.setValueAtTime(0.2, startT);
+                gain.gain.exponentialRampToValueAtTime(0.008, startT + 0.22);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(startT);
+                osc.stop(startT + 0.24);
+            });
+        }
+    } catch (e) {}
 }
 
 /* --- DYNAMISCHE MAATSTAAF (SCALE BAR) ONDERAAN DE KAART --- */
@@ -108,6 +147,7 @@ var rdRouteLayer = new L.FeatureGroup().addTo(map);
 var usersLiveLayer = new L.FeatureGroup().addTo(map);
 var geofenceLayer = new L.FeatureGroup().addTo(map);
 var compassRoseLayer = new L.FeatureGroup();
+var counterHuntHighlightLayer = new L.FeatureGroup().addTo(map);
 
 var liveUserMarkers = {};
 var cachedUsersData = {};
@@ -128,10 +168,10 @@ map.on('zoomend', checkZoomLevel);
 checkZoomLevel();
 
 /* --- AMALGAMA CLUBGEBOUW & 450M STRAAL --- */
-L.circle([amalgamaLat, amalgamaLng], {
+var amalgamaBaseCircle = L.circle([amalgamaLat, amalgamaLng], {
     radius: radiusMeters, color: '#e67e22', weight: 2, dashArray: '5, 5',
     fillColor: '#e67e22', fillOpacity: 0.12
-}).addTo(map).bindTooltip("450m Straal Amalgama", { direction: 'top' });
+}).addTo(map).bindTooltip("450m Straal Scouting Amalgama", { direction: 'top' });
 
 var latOffset = radiusMeters / 111320;
 var lngOffset = radiusMeters / (111320 * Math.cos(amalgamaLat * (Math.PI / 180)));
@@ -413,7 +453,6 @@ function createWalkerMarker(pt) {
     return marker;
 }
 
-/* Hulpfunctie: Zoekt het laatst bezochte clubgebouw van een deelgebied als er nog geen RD-punten zijn */
 function getFallbackLatestVisitedHouseForArea(areaName) {
     if (!allLocations || allLocations.length === 0) return null;
     var areaHouses = allLocations.filter(function(l) { return l.area === areaName; });
@@ -819,7 +858,7 @@ db.ref('rdPoints').on('child_added', function (snapshot) {
     }
 });
 
-/* --- LIVE GEBRUIKERS & HUNTERS OP DE KAART --- */
+/* --- LIVE GEBRUIKERS & HUNTERS OP DE KAART (VERSNELD NAAR 10 SEC) --- */
 function createUserIcon(isActive) {
     var fillColor = isActive ? "#2ecc71" : "#7f8c8d";
     var strokeColor = isActive ? "#ffffff" : "#e74c3c";
@@ -934,16 +973,17 @@ function renderLiveUsersOnMap() {
 db.ref('liveUsers').on('value', function (snapshot) {
     cachedUsersData = snapshot.val() || {};
     renderLiveUsersOnMap();
-    window.renderFoxStatusButtons();
+    window.updateFoxFixedDetailCard();
 });
 
-setInterval(renderLiveUsersOnMap, 20000);
+// Versneld van 20 seconden naar 10 seconden
+setInterval(renderLiveUsersOnMap, 10000);
 
 /* ==========================================================================
-   VOSSEN STATUS MENU (VOOR GEBRUIKERS & ADMINS) - TELEGRAM & FIREBASE SYNC
+   VOSSEN STATUS MENU MET VAST INFO-VENSTER (100% FLIKKERVRIJ)
    ========================================================================== */
 
-var expandedFoxStatusArea = null;
+var selectedFoxInfoArea = null;
 var singleClickFoxTimerByArea = {};
 var lastFoxTapTimeByArea = {};
 var MAX_STATUS_TIMER_SECONDS = 12 * 3600; // Maximaal 12 uur tellen
@@ -965,10 +1005,54 @@ function injectFoxStatusPanel() {
     `;
     mapWrapper.appendChild(panel);
 
+    // VAST LOSSTAAND INFO-VENSTER (zodat knoppen nooit meer verspringen of flikkeren)
+    var detailCard = document.createElement('div');
+    detailCard.id = 'fox-fixed-detail-card';
+    detailCard.style.display = 'none';
+    detailCard.innerHTML = `
+        <div id="fox-detail-header">
+            <div style="display:flex; align-items:center; gap:7px;">
+                <span id="fox-detail-color-dot"></span>
+                <span id="fox-detail-title">Deelgebied</span>
+            </div>
+            <button type="button" id="fox-detail-close-btn" title="Sluiten">✕</button>
+        </div>
+        <div id="fox-detail-body">
+            <div class="fox-info-row">
+                <span class="fox-info-label" id="fox-detail-status-label">⏱️ Op status:</span>
+                <span class="fox-info-val" id="fox-detail-timer-val" data-updated-at="">--</span>
+            </div>
+            <div class="fox-info-row">
+                <span class="fox-info-label">🚗 Jouw afstand & reistijd:</span>
+                <span class="fox-info-val" id="fox-detail-my-travel">--</span>
+            </div>
+            <div class="fox-info-row">
+                <span class="fox-info-label">🥇 Dichtstbijzijnde hunter:</span>
+                <span class="fox-info-val" id="fox-detail-closest-hunter">--</span>
+            </div>
+            <div class="fox-detail-actions">
+                <button type="button" id="fox-detail-zoom-btn" class="fox-info-zoom-btn">
+                    🔍 Zoom op kaart
+                </button>
+                <button type="button" id="fox-detail-nav-btn" class="fox-info-nav-btn" style="display:none;">
+                    📍 Navigeer naar schatting
+                </button>
+            </div>
+        </div>
+    `;
+    mapWrapper.appendChild(detailCard);
+
     if (typeof L !== 'undefined' && L.DomEvent) {
         L.DomEvent.disableClickPropagation(panel);
         L.DomEvent.disableScrollPropagation(panel);
+        L.DomEvent.disableClickPropagation(detailCard);
+        L.DomEvent.disableScrollPropagation(detailCard);
     }
+
+    document.getElementById('fox-detail-close-btn').addEventListener('click', function() {
+        selectedFoxInfoArea = null;
+        window.renderFoxStatusButtons();
+    });
 
     var minBtn = document.getElementById('fox-status-min-btn');
     var bodyEl = document.getElementById('fox-status-body');
@@ -1012,6 +1096,7 @@ function injectFoxStatusPanel() {
         panel.style.left = newX + 'px';
         panel.style.top = newY + 'px';
         panel.style.right = 'auto';
+        positionFoxDetailCard();
     }
 
     function onFoxMouseMove(e) {
@@ -1034,7 +1119,38 @@ function injectFoxStatusPanel() {
         document.removeEventListener('touchend', onFoxTouchEnd);
     }
 
+    window.addEventListener('resize', positionFoxDetailCard);
     renderFoxStatusButtons();
+}
+
+/* Positioneert het vaste info-venster netjes links (of rechts) naast het Vossen Status paneel */
+function positionFoxDetailCard() {
+    var panel = document.getElementById('fox-status-panel');
+    var card = document.getElementById('fox-fixed-detail-card');
+    if (!panel || !card || card.style.display === 'none') return;
+
+    var panelRect = panel.getBoundingClientRect();
+    var wrapperEl = document.getElementById('map-wrapper');
+    var wrapRect = wrapperEl ? wrapperEl.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+
+    var cardWidth = 235;
+    var leftCandidate = (panelRect.left - wrapRect.left) - cardWidth - 8;
+    var rightCandidate = (panelRect.right - wrapRect.left) + 8;
+
+    if (leftCandidate >= 8) {
+        card.style.left = leftCandidate + 'px';
+        card.style.right = 'auto';
+        card.style.top = Math.max(8, (panelRect.top - wrapRect.top)) + 'px';
+    } else if (rightCandidate + cardWidth <= wrapRect.width - 8) {
+        card.style.left = rightCandidate + 'px';
+        card.style.right = 'auto';
+        card.style.top = Math.max(8, (panelRect.top - wrapRect.top)) + 'px';
+    } else {
+        // Op smalle telefoonschermen: strak linksboven/middenboven naast het paneel of eronder
+        card.style.left = Math.max(8, wrapRect.width - cardWidth - 12) + 'px';
+        card.style.right = 'auto';
+        card.style.top = Math.min(wrapRect.height - 210, (panelRect.bottom - wrapRect.top) + 6) + 'px';
+    }
 }
 
 window.zoomToLatestFoxArea = function(areaName) {
@@ -1070,18 +1186,16 @@ window.handleFoxAreaBtnClick = function(areaName) {
         }
         singleClickFoxTimerByArea[areaName] = setTimeout(function() {
             delete singleClickFoxTimerByArea[areaName];
-            if (expandedFoxStatusArea === areaName) {
-                expandedFoxStatusArea = null;
+            if (selectedFoxInfoArea === areaName) {
+                selectedFoxInfoArea = null;
             } else {
-                expandedFoxStatusArea = areaName;
+                selectedFoxInfoArea = areaName;
             }
             window.renderFoxStatusButtons();
-        }, 260);
+        }, 240);
     }
 };
 
-/* Formatteert de live timer voor hoelang een deelgebied al op de huidige status staat.
-   Stopt met optellen zodra 12 uur (43.200 seconden) is bereikt, tot er een nieuwe statuswijziging is. */
 function formatLiveStatusTimer(updatedAtMs, fallbackText) {
     if (!updatedAtMs || isNaN(updatedAtMs)) {
         return fallbackText || "Onbekend";
@@ -1101,7 +1215,6 @@ function formatLiveStatusTimer(updatedAtMs, fallbackText) {
     return `${mins}m ${ssStr}s`;
 }
 
-/* Berekent de actuele inhoud voor een uitgeklapt info-venster zodat deze zonder knipperen geüpdatet kan worden */
 function getFoxStatusInfoBoxData(areaName, colorKey, cfg, stObj) {
     var masterMetrics = (lastComputedMapState && lastComputedMapState.foxStatusMetrics && lastComputedMapState.foxStatusMetrics[areaName])
         ? lastComputedMapState.foxStatusMetrics[areaName]
@@ -1163,8 +1276,85 @@ function getFoxStatusInfoBoxData(areaName, colorKey, cfg, stObj) {
     };
 }
 
-/* Rendert en updatet de knoppen + het info-venster IN-PLACE zonder de DOM opnieuw op te bouwen.
-   Hierdoor knippert/flikkert het uitgeklapte venster nooit meer tijdens achtergrond-updates! */
+/* Updatet het vaste detail-venster in-place (zonder enige DOM-herbouw) */
+window.updateFoxFixedDetailCard = function() {
+    var card = document.getElementById('fox-fixed-detail-card');
+    if (!card) return;
+
+    if (!selectedFoxInfoArea) {
+        if (card.style.display !== 'none') card.style.display = 'none';
+        return;
+    }
+
+    var areaName = selectedFoxInfoArea;
+    var stObj = currentFoxStatuses[areaName] || {};
+    var colorKey = stObj.status ? normalizeFoxStatusKey(stObj.status) : "grijs";
+    var cfg = foxStatusConfig[colorKey] || foxStatusConfig["grijs"];
+
+    var infoData = getFoxStatusInfoBoxData(areaName, colorKey, cfg, stObj);
+
+    if (card.style.display === 'none') {
+        card.style.display = 'flex';
+        positionFoxDetailCard();
+    }
+
+    card.style.borderTop = `4px solid ${cfg.bg}`;
+
+    var dotEl = document.getElementById('fox-detail-color-dot');
+    if (dotEl) dotEl.style.backgroundColor = cfg.bg;
+
+    var titleEl = document.getElementById('fox-detail-title');
+    var expectedTitle = `${areaName} (${cfg.label})`;
+    if (titleEl && titleEl.textContent !== expectedTitle) {
+        titleEl.textContent = expectedTitle;
+    }
+
+    var statusLabelEl = document.getElementById('fox-detail-status-label');
+    if (statusLabelEl && statusLabelEl.textContent !== infoData.statusTitleText) {
+        statusLabelEl.textContent = infoData.statusTitleText;
+    }
+
+    var timerValEl = document.getElementById('fox-detail-timer-val');
+    if (timerValEl) {
+        timerValEl.setAttribute('data-updated-at', String(infoData.statusUpdatedAt));
+        if (timerValEl.textContent !== infoData.timerStr) {
+            timerValEl.textContent = infoData.timerStr;
+        }
+    }
+
+    var myTravelEl = document.getElementById('fox-detail-my-travel');
+    if (myTravelEl && myTravelEl._lastHtml !== infoData.myTravelHtml) {
+        myTravelEl.innerHTML = infoData.myTravelHtml;
+        myTravelEl._lastHtml = infoData.myTravelHtml;
+    }
+
+    var closestEl = document.getElementById('fox-detail-closest-hunter');
+    if (closestEl && closestEl._lastHtml !== infoData.closestUserHtml) {
+        closestEl.innerHTML = infoData.closestUserHtml;
+        closestEl._lastHtml = infoData.closestUserHtml;
+    }
+
+    var zoomBtn = document.getElementById('fox-detail-zoom-btn');
+    if (zoomBtn) {
+        zoomBtn.onclick = function() {
+            window.zoomToLatestFoxArea(areaName);
+        };
+    }
+
+    var navBtn = document.getElementById('fox-detail-nav-btn');
+    if (navBtn) {
+        if (infoData.hasCoord) {
+            navBtn.style.display = 'block';
+            navBtn.onclick = function() {
+                window.navigateToAreaPoint(infoData.cLat, infoData.cLng);
+            };
+        } else {
+            navBtn.style.display = 'none';
+        }
+    }
+};
+
+/* Rendert de vossen-knoppen 100% flikkervrij (geen appendChild op bestaande knoppen!) */
 window.renderFoxStatusButtons = function() {
     var listEl = document.getElementById('fox-status-buttons-list');
     if (!listEl) return;
@@ -1177,27 +1367,16 @@ window.renderFoxStatusButtons = function() {
 
     if (visibleAreas.length === 0) {
         listEl.innerHTML = `<div class="fox-status-empty">Geen statussen geselecteerd</div>`;
+        selectedFoxInfoArea = null;
+        window.updateFoxFixedDetailCard();
         return;
     }
 
     var emptyMsg = listEl.querySelector('.fox-status-empty');
     if (emptyMsg) emptyMsg.remove();
 
-    // Verwijder knoppen van gebieden die niet meer zichtbaar zijn volgens het filter
-    var existingWraps = listEl.querySelectorAll('.fox-area-status-item-wrap');
-    existingWraps.forEach(function(wrap) {
-        var aName = wrap.getAttribute('data-area');
-        if (!visibleAreas.includes(aName)) {
-            wrap.remove();
-        }
-    });
-
-    visibleAreas.forEach(function(areaName) {
-        var stObj = currentFoxStatuses[areaName] || {};
-        var colorKey = stObj.status ? normalizeFoxStatusKey(stObj.status) : "grijs";
-        var cfg = foxStatusConfig[colorKey] || foxStatusConfig["grijs"];
-        var isExpanded = (expandedFoxStatusArea === areaName);
-
+    // Bouw de knoppen éénmalig in vaste volgorde voor alle targetAreas en verberg alleen wat gefilterd is
+    targetAreas.forEach(function(areaName) {
         var wrapEl = listEl.querySelector(`.fox-area-status-item-wrap[data-area="${areaName}"]`);
         if (!wrapEl) {
             wrapEl = document.createElement('div');
@@ -1207,109 +1386,117 @@ window.renderFoxStatusButtons = function() {
                 <button type="button"
                     class="fox-area-status-btn"
                     onclick="window.handleFoxAreaBtnClick('${areaName}')"
-                    title="1x klikken: Toon live info • Dubbelklik: Zoom in op laatste punt">
+                    title="1x klikken: Open vast info-venster • Dubbelklik: Zoom in op laatste punt">
                     <span class="fox-btn-name">${areaName}</span>
                 </button>
             `;
+            listEl.appendChild(wrapEl);
         }
-        // Zorg dat de volgorde altijd exact overeenkomt met targetAreas
-        listEl.appendChild(wrapEl);
+
+        var isVisible = visibleAreas.includes(areaName);
+        var desiredDisplay = isVisible ? 'flex' : 'none';
+        if (wrapEl.style.display !== desiredDisplay) {
+            wrapEl.style.display = desiredDisplay;
+        }
+
+        if (!isVisible && selectedFoxInfoArea === areaName) {
+            selectedFoxInfoArea = null;
+        }
+
+        var stObj = currentFoxStatuses[areaName] || {};
+        var colorKey = stObj.status ? normalizeFoxStatusKey(stObj.status) : "grijs";
+        var cfg = foxStatusConfig[colorKey] || foxStatusConfig["grijs"];
+        var isSelected = (selectedFoxInfoArea === areaName);
 
         var btnEl = wrapEl.querySelector('.fox-area-status-btn');
         if (btnEl) {
-            btnEl.className = `fox-area-status-btn status-color-${colorKey}` + (isExpanded ? ' is-expanded' : '');
-            btnEl.style.backgroundColor = cfg.bg;
-            btnEl.style.borderColor = cfg.border;
-            btnEl.style.color = cfg.text;
-        }
-
-        var existingInfoBox = wrapEl.querySelector('.fox-area-info-box');
-
-        if (isExpanded) {
-            var infoData = getFoxStatusInfoBoxData(areaName, colorKey, cfg, stObj);
-
-            if (!existingInfoBox) {
-                existingInfoBox = document.createElement('div');
-                existingInfoBox.className = 'fox-area-info-box';
-                existingInfoBox.innerHTML = `
-                    <div class="fox-info-row">
-                        <span class="fox-info-label fox-info-status-label"></span>
-                        <span class="fox-info-val fox-live-timer-val"></span>
-                    </div>
-                    <div class="fox-info-row">
-                        <span class="fox-info-label">🚗 Jouw afstand & reistijd:</span>
-                        <span class="fox-info-val fox-info-my-travel"></span>
-                    </div>
-                    <div class="fox-info-row">
-                        <span class="fox-info-label">🥇 Dichtstbijzijnde hunter:</span>
-                        <span class="fox-info-val fox-info-closest-hunter"></span>
-                    </div>
-                    <button type="button" class="fox-info-nav-btn" style="display:none;">
-                        📍 Navigeer naar live schatting
-                    </button>
-                `;
-                wrapEl.appendChild(existingInfoBox);
-            }
-
-            existingInfoBox.style.borderLeft = `3px solid ${infoData.borderColor}`;
-
-            var statusLabelEl = existingInfoBox.querySelector('.fox-info-status-label');
-            if (statusLabelEl && statusLabelEl.textContent !== infoData.statusTitleText) {
-                statusLabelEl.textContent = infoData.statusTitleText;
-            }
-
-            var timerValEl = existingInfoBox.querySelector('.fox-live-timer-val');
-            if (timerValEl) {
-                timerValEl.setAttribute('data-updated-at', String(infoData.statusUpdatedAt));
-                if (timerValEl.textContent !== infoData.timerStr) {
-                    timerValEl.textContent = infoData.timerStr;
-                }
-            }
-
-            var myTravelEl = existingInfoBox.querySelector('.fox-info-my-travel');
-            if (myTravelEl && myTravelEl.innerHTML !== infoData.myTravelHtml) {
-                myTravelEl.innerHTML = infoData.myTravelHtml;
-            }
-
-            var closestEl = existingInfoBox.querySelector('.fox-info-closest-hunter');
-            if (closestEl && closestEl.innerHTML !== infoData.closestUserHtml) {
-                closestEl.innerHTML = infoData.closestUserHtml;
-            }
-
-            var navBtnEl = existingInfoBox.querySelector('.fox-info-nav-btn');
-            if (navBtnEl) {
-                if (infoData.hasCoord) {
-                    navBtnEl.style.display = 'block';
-                    navBtnEl.onclick = function() {
-                        window.navigateToAreaPoint(infoData.cLat, infoData.cLng);
-                    };
-                } else {
-                    navBtnEl.style.display = 'none';
-                }
-            }
-        } else if (existingInfoBox) {
-            existingInfoBox.remove();
+            var nextClass = `fox-area-status-btn status-color-${colorKey}` + (isSelected ? ' is-selected-area' : '');
+            if (btnEl.className !== nextClass) btnEl.className = nextClass;
+            if (btnEl.style.backgroundColor !== cfg.bg) btnEl.style.backgroundColor = cfg.bg;
+            if (btnEl.style.borderColor !== cfg.border) btnEl.style.borderColor = cfg.border;
+            if (btnEl.style.color !== cfg.text) btnEl.style.color = cfg.text;
         }
     });
+
+    window.updateFoxFixedDetailCard();
 };
 
-// Update elke seconde alleen de tekst van de status-timer (stopt automatisch bij 12 uur)
+// Update elke seconde alleen de tekst van de status-timer in het vaste venster
 setInterval(function() {
-    if (!expandedFoxStatusArea) return;
-    var timerEls = document.querySelectorAll('.fox-live-timer-val');
-    timerEls.forEach(function(el) {
-        var ts = parseInt(el.getAttribute('data-updated-at'), 10);
+    if (!selectedFoxInfoArea) return;
+    var timerEl = document.getElementById('fox-detail-timer-val');
+    if (timerEl) {
+        var ts = parseInt(timerEl.getAttribute('data-updated-at'), 10);
         if (ts && !isNaN(ts)) {
             var nextText = formatLiveStatusTimer(ts, "");
-            if (el.textContent !== nextText) {
-                el.textContent = nextText;
+            if (timerEl.textContent !== nextText) {
+                timerEl.textContent = nextText;
             }
         }
-    });
+    }
 }, 1000);
 
-// Initialiseer het menu zodra de pagina laadt
 injectFoxStatusPanel();
+
+/* ==========================================================================
+   DUIDELIJKE IN-APP MELDING BIJ VOSSEN OP GROEN ("WEER GEHUNT MAG WORDEN")
+   ========================================================================== */
+
+var greenAlertTimeout = null;
+
+function ensureGreenHuntBannerUI() {
+    if (document.getElementById('green-hunt-alert-toast')) return;
+    var mapWrapper = document.getElementById('map-wrapper') || document.body;
+    var toast = document.createElement('div');
+    toast.id = 'green-hunt-alert-toast';
+    toast.style.display = 'none';
+    toast.innerHTML = `
+        <div class="green-hunt-toast-content">
+            <div class="green-hunt-toast-icon">🟢🦊</div>
+            <div class="green-hunt-toast-text">
+                <div id="green-hunt-toast-title">DEELGEBIED MAG WEER GEHUNT WORDEN!</div>
+                <div id="green-hunt-toast-sub">Status is zojuist op GROEN gesprongen!</div>
+            </div>
+            <div class="green-hunt-toast-actions">
+                <button type="button" id="green-hunt-toast-zoom-btn">🎯 Zoom in</button>
+                <button type="button" id="green-hunt-toast-close-btn">✕</button>
+            </div>
+        </div>
+    `;
+    mapWrapper.appendChild(toast);
+
+    document.getElementById('green-hunt-toast-close-btn').addEventListener('click', function() {
+        toast.style.display = 'none';
+    });
+}
+
+function triggerAreaHuntableAlert(areaName, timeFormatted) {
+    ensureGreenHuntBannerUI();
+    playAlertSound('green');
+    if ('vibrate' in navigator) navigator.vibrate([400, 120, 400, 120, 600]);
+
+    var toast = document.getElementById('green-hunt-alert-toast');
+    var titleEl = document.getElementById('green-hunt-toast-title');
+    var subEl = document.getElementById('green-hunt-toast-sub');
+    var zoomBtn = document.getElementById('green-hunt-toast-zoom-btn');
+
+    var timePart = timeFormatted ? ` (om ${timeFormatted})` : '';
+    titleEl.textContent = `🟢 ${areaName.toUpperCase()} MAG WEER GEHUNT WORDEN!`;
+    subEl.textContent = `Deelgebied ${areaName} staat weer op GROEN${timePart}. Ga direct op pad!`;
+
+    zoomBtn.onclick = function() {
+        window.zoomToLatestFoxArea(areaName);
+        selectedFoxInfoArea = areaName;
+        window.renderFoxStatusButtons();
+        toast.style.display = 'none';
+    };
+
+    toast.style.display = 'block';
+    if (greenAlertTimeout) clearTimeout(greenAlertTimeout);
+    greenAlertTimeout = setTimeout(function() {
+        toast.style.display = 'none';
+    }, 18000);
+}
 
 // 1. Luister real-time naar statuswijzigingen vanuit Telegram in Firebase ('foxStatuses')
 var isInitialFoxStatusLoad = true;
@@ -1321,16 +1508,33 @@ db.ref('foxStatuses').on('value', function(snapshot) {
     window.renderFoxStatusButtons();
 
     targetAreas.forEach(function(areaName) {
-        var curr = data[areaName] ? normalizeFoxStatusKey(data[areaName].status) : "grijs";
+        var stObj = data[areaName] || {};
+        var curr = stObj.status ? normalizeFoxStatusKey(stObj.status) : "grijs";
+
         if (!isInitialFoxStatusLoad && prevFoxStatusMap[areaName] && prevFoxStatusMap[areaName] !== curr) {
             var cfg = foxStatusConfig[curr] || foxStatusConfig["grijs"];
-            if ('vibrate' in navigator) navigator.vibrate([250, 100, 250]);
+
+            // EXTRA DUIDELIJKE IN-APP MELDING ALS DEELGEBIED WEER GEHUNT MAG WORDEN (GROEN)
+            if (curr === "groen") {
+                triggerAreaHuntableAlert(areaName, stObj.timeFormatted || "");
+            } else {
+                if ('vibrate' in navigator) navigator.vibrate([250, 100, 250]);
+            }
+
             if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
                 navigator.serviceWorker.ready.then(function(reg) {
-                    reg.showNotification("🦊 Status " + areaName + ": " + cfg.label, {
-                        body: "Status van " + areaName + " is via Telegram gewijzigd in " + cfg.label + "!",
+                    var notifTitle = curr === "groen"
+                        ? `🟢 JA! ${areaName} mag weer gehunt worden!`
+                        : `🦊 Status ${areaName}: ${cfg.label}`;
+                    var notifBody = curr === "groen"
+                        ? `Deelgebied ${areaName} staat weer op GROEN! Klik om op de kaart te kijken.`
+                        : `Status van ${areaName} is via Telegram gewijzigd in ${cfg.label}!`;
+
+                    reg.showNotification(notifTitle, {
+                        body: notifBody,
                         icon: 'icon-192.png',
                         badge: 'icon-192.png',
+                        vibrate: curr === "groen" ? [400, 120, 400, 120, 600] : [250, 100, 250],
                         tag: 'fox-status-' + areaName,
                         renotify: true
                     });
@@ -1358,4 +1562,332 @@ db.ref('adminSettings/visibleFoxStatuses').on('value', function(snapshot) {
     if (typeof window.syncAdminFoxFilterCheckboxes === 'function') {
         window.syncAdminFoxFilterCheckboxes();
     }
+});
+
+/* ==========================================================================
+   MEGA BELANGRIJKE MELDING: TEGENHUNT POPUP MIDDEN OP HET SCHERM + AUTO-ZOOM
+   ========================================================================== */
+
+var currentCounterHuntData = null;
+var counterHuntCountdownInterval = null;
+var lastHandledCounterHuntId = null;
+
+function getBearingFromDirectionName(dirName) {
+    var d = String(dirName || "").toLowerCase().replace(/[\s\-_]/g, "");
+    var mapBearings = {
+        "noord": 0, "n": 0,
+        "noordoost": 45, "no": 45,
+        "oost": 90, "o": 90,
+        "zuidoost": 135, "zo": 135,
+        "zuid": 180, "z": 180,
+        "zuidwest": 225, "zw": 225,
+        "west": 270, "w": 270,
+        "noordwest": 315, "nw": 315
+    };
+    return mapBearings[d] !== undefined ? mapBearings[d] : null;
+}
+
+function computeDestLatLngSimple(lat, lng, distMeters, bearingDeg) {
+    var distRatio = distMeters / 6371000;
+    var brngRad = bearingDeg * Math.PI / 180;
+    var latRad = lat * Math.PI / 180;
+    var lngRad = lng * Math.PI / 180;
+
+    var endLat = Math.asin(Math.sin(latRad) * Math.cos(distRatio) +
+                 Math.cos(latRad) * Math.sin(distRatio) * Math.cos(brngRad));
+    var endLng = lngRad + Math.atan2(Math.sin(brngRad) * Math.sin(distRatio) * Math.cos(latRad),
+                 Math.cos(distRatio) - Math.sin(latRad) * Math.sin(endLat));
+
+    return [endLat * 180 / Math.PI, endLng * 180 / Math.PI];
+}
+
+/* Tekent op de kaart bij Scouting Amalgama een opvallende rode windrichting-sector (taartpunt) binnen de 450m cirkel */
+function renderCounterHuntSectorOnMap(chData) {
+    counterHuntHighlightLayer.clearLayers();
+    if (!chData || chData.state !== 'active') {
+        amalgamaBaseCircle.setStyle({ color: '#e67e22', fillColor: '#e67e22', weight: 2 });
+        return;
+    }
+
+    amalgamaBaseCircle.setStyle({ color: '#ff2e2e', fillColor: '#e74c3c', weight: 3.5 });
+
+    var bearing = getBearingFromDirectionName(chData.direction);
+    if (bearing !== null) {
+        var wedgePoints = [[amalgamaLat, amalgamaLng]];
+        for (var a = bearing - 28; a <= bearing + 28; a += 4) {
+            var normA = (a + 360) % 360;
+            wedgePoints.push(computeDestLatLngSimple(amalgamaLat, amalgamaLng, radiusMeters, normA));
+        }
+        wedgePoints.push([amalgamaLat, amalgamaLng]);
+
+        var sectorPoly = L.polygon(wedgePoints, {
+            color: '#ff0000',
+            weight: 3,
+            fillColor: '#ff0000',
+            fillOpacity: 0.35,
+            dashArray: '6, 4'
+        }).addTo(counterHuntHighlightLayer);
+
+        sectorPoly.bindTooltip(`🚨 TEGENHUNT RICHTING: ${String(chData.direction).toUpperCase()}`, {
+            permanent: true,
+            direction: 'center',
+            className: 'marker-label user-gps-label-inactive'
+        });
+    }
+}
+
+function injectCounterHuntUI() {
+    if (document.getElementById('counterhunt-modal-overlay')) return;
+
+    // 1. Centrale Popup Midden op het scherm
+    var overlay = document.createElement('div');
+    overlay.id = 'counterhunt-modal-overlay';
+    overlay.style.display = 'none';
+    overlay.innerHTML = `
+        <div id="counterhunt-modal-box" class="ch-mode-active">
+            <div id="ch-top-timer-wrap">
+                <div id="ch-timer-caption">⏳ RESTERENDE ZOEKTIJD (30 MIN)</div>
+                <div id="ch-giant-timer">30:00</div>
+            </div>
+
+            <div id="ch-alert-badge">🚨 TEGENHUNT GEPLAKT BIJ CLUBGEBOUW! 🚨</div>
+
+            <div id="ch-main-info-grid">
+                <div class="ch-info-card">
+                    <span class="ch-info-card-label">🧭 WINDRICHTING</span>
+                    <span class="ch-info-card-val" id="ch-direction-val">Zuid-West</span>
+                </div>
+                <div class="ch-info-card">
+                    <span class="ch-info-card-label">🕒 GEPLAKT OM TIJDSTIP</span>
+                    <span class="ch-info-card-val" id="ch-time-val">23:01</span>
+                </div>
+            </div>
+
+            <div id="ch-extra-details">
+                Inzet: <b id="ch-points-val">10 punten</b> • Zoek binnen de <b>450m cirkel</b> van <b>Scouting Amalgama</b>!
+            </div>
+
+            <div id="ch-raw-msg-box"></div>
+
+            <div class="ch-modal-actions">
+                <button type="button" id="ch-btn-zoom-club" class="ch-action-btn ch-btn-primary">
+                    🗺️ Bekijk op Kaart (Scouting Amalgama)
+                </button>
+                <button type="button" id="ch-btn-nav-club" class="ch-action-btn ch-btn-secondary">
+                    📍 Navigeer naar Clubgebouw
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // 2. Klikbare Mini-Balk bovenin het scherm (zichtbaar als de popup even weggeklikt is terwijl de timer nog loopt)
+    var mapWrapper = document.getElementById('map-wrapper') || document.body;
+    var miniBar = document.createElement('div');
+    miniBar.id = 'counterhunt-mini-bar';
+    miniBar.style.display = 'none';
+    miniBar.innerHTML = `
+        <span id="ch-mini-text">🚨 TEGENHUNT ACTIEF (Zuid-West) • Geplakt: 23:01</span>
+        <span id="ch-mini-timer">30:00</span>
+        <span class="ch-mini-open-btn">Open Popup 🔼</span>
+    `;
+    mapWrapper.appendChild(miniBar);
+
+    document.getElementById('ch-btn-zoom-club').addEventListener('click', function() {
+        overlay.style.display = 'none';
+        map.flyTo([amalgamaLat, amalgamaLng], 16, { animate: true, duration: 1.0 });
+        updateCounterHuntMiniBar();
+    });
+
+    document.getElementById('ch-btn-nav-club').addEventListener('click', function() {
+        window.navigateToAreaPoint(amalgamaLat, amalgamaLng);
+    });
+
+    miniBar.addEventListener('click', function() {
+        overlay.style.display = 'flex';
+        miniBar.style.display = 'none';
+    });
+}
+
+function formatCounterHuntRemaining(expiresAtMs) {
+    var diffSec = Math.floor((Number(expiresAtMs) - Date.now()) / 1000);
+    if (diffSec <= 0) return { expired: true, text: "00:00" };
+    var mins = Math.floor(diffSec / 60);
+    var secs = diffSec % 60;
+    return {
+        expired: false,
+        text: String(mins).padStart(2, '0') + ":" + String(secs).padStart(2, '0')
+    };
+}
+
+function updateCounterHuntMiniBar() {
+    var overlay = document.getElementById('counterhunt-modal-overlay');
+    var miniBar = document.getElementById('counterhunt-mini-bar');
+    if (!miniBar) return;
+
+    if (!currentCounterHuntData || currentCounterHuntData.state !== 'active') {
+        miniBar.style.display = 'none';
+        return;
+    }
+
+    var rem = formatCounterHuntRemaining(currentCounterHuntData.expiresAtMs);
+    if (rem.expired) {
+        miniBar.style.display = 'none';
+        counterHuntHighlightLayer.clearLayers();
+        amalgamaBaseCircle.setStyle({ color: '#e67e22', fillColor: '#e67e22', weight: 2 });
+        return;
+    }
+
+    var isModalOpen = overlay && overlay.style.display === 'flex';
+    miniBar.style.display = isModalOpen ? 'none' : 'flex';
+
+    var miniText = document.getElementById('ch-mini-text');
+    var miniTimer = document.getElementById('ch-mini-timer');
+    if (miniText) {
+        miniText.textContent = `🚨 TEGENHUNT: ${String(currentCounterHuntData.direction || '').toUpperCase()} (Geplakt ${currentCounterHuntData.timeShort || ''})`;
+    }
+    if (miniTimer) {
+        miniTimer.textContent = `⏳ ${rem.text}`;
+    }
+}
+
+function updateCounterHuntTimersTick() {
+    if (!currentCounterHuntData) return;
+
+    if (currentCounterHuntData.state === 'active') {
+        var rem = formatCounterHuntRemaining(currentCounterHuntData.expiresAtMs);
+        var giantTimer = document.getElementById('ch-giant-timer');
+        if (giantTimer) {
+            giantTimer.textContent = rem.expired ? "00:00 (VERLOPEN)" : rem.text;
+        }
+        updateCounterHuntMiniBar();
+    }
+}
+
+injectCounterHuntUI();
+setInterval(updateCounterHuntTimersTick, 1000);
+
+// Luister real-time naar 'counterHunt' in Firebase
+var isInitialCounterHuntLoad = true;
+
+db.ref('counterHunt').on('value', function(snapshot) {
+    var data = snapshot.val();
+    currentCounterHuntData = data;
+    injectCounterHuntUI();
+
+    var overlay = document.getElementById('counterhunt-modal-overlay');
+    var modalBox = document.getElementById('counterhunt-modal-box');
+    var timerWrap = document.getElementById('ch-top-timer-wrap');
+    var timerCaption = document.getElementById('ch-timer-caption');
+    var giantTimer = document.getElementById('ch-giant-timer');
+    var alertBadge = document.getElementById('ch-alert-badge');
+    var infoGrid = document.getElementById('ch-main-info-grid');
+    var dirVal = document.getElementById('ch-direction-val');
+    var timeVal = document.getElementById('ch-time-val');
+    var extraDetails = document.getElementById('ch-extra-details');
+    var rawMsgBox = document.getElementById('ch-raw-msg-box');
+    var zoomBtn = document.getElementById('ch-btn-zoom-club');
+
+    if (!data) {
+        overlay.style.display = 'none';
+        renderCounterHuntSectorOnMap(null);
+        updateCounterHuntMiniBar();
+        isInitialCounterHuntLoad = false;
+        return;
+    }
+
+    var now = Date.now();
+    var isNewEvent = (data.id && data.id !== lastHandledCounterHuntId);
+
+    // SITUATIE 1: ACTIEVE TEGENHUNT BINNENGEKOMEN
+    if (data.state === 'active') {
+        var rem = formatCounterHuntRemaining(data.expiresAtMs);
+        if (rem.expired) {
+            overlay.style.display = 'none';
+            renderCounterHuntSectorOnMap(null);
+            updateCounterHuntMiniBar();
+            isInitialCounterHuntLoad = false;
+            return;
+        }
+
+        modalBox.className = 'ch-mode-active';
+        timerWrap.style.display = 'flex';
+        timerCaption.textContent = '⏳ RESTERENDE TIJD OM TE VINDEN';
+        giantTimer.textContent = rem.text;
+
+        alertBadge.textContent = '🚨 TEGENHUNT GEPLAKT BIJ ONS CLUBGEBOUW! 🚨';
+        infoGrid.style.display = 'grid';
+        dirVal.textContent = data.direction || 'Onbekend';
+        timeVal.textContent = data.timeShort || data.timeFull || '--:--';
+        extraDetails.innerHTML = `Kost bij niet vinden: <b>${data.points || 10} punten</b> • Zoek binnen 450m van <b>Scouting Amalgama</b>!`;
+        rawMsgBox.textContent = data.rawMessage || '';
+        zoomBtn.textContent = '🗺️ Sluit & Zoek op Kaart (Scouting Amalgama)';
+
+        renderCounterHuntSectorOnMap(data);
+
+        if (isNewEvent) {
+            lastHandledCounterHuntId = data.id;
+            overlay.style.display = 'flex';
+
+            // Zoom bij iedere ingelogde gebruiker direct in op ons clubgebouw (Scouting Amalgama)
+            map.flyTo([amalgamaLat, amalgamaLng], 16, { animate: true, duration: 1.2 });
+
+            playAlertSound('counterhunt');
+            if ('vibrate' in navigator) navigator.vibrate([600, 150, 600, 150, 800]);
+
+            if (!isInitialCounterHuntLoad && 'serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+                navigator.serviceWorker.ready.then(function(reg) {
+                    reg.showNotification("🚨 TEGENHUNT GEPLAKT (" + (data.direction || "") + ")!", {
+                        body: `Geplakt om ${data.timeShort || ''}! Richting: ${data.direction}. Jullie hebben 30 minuten!`,
+                        icon: 'icon-192.png',
+                        badge: 'icon-192.png',
+                        vibrate: [600, 150, 600, 150, 800],
+                        tag: 'counterhunt-alert',
+                        renotify: true
+                    });
+                });
+            }
+        }
+        updateCounterHuntMiniBar();
+    }
+    // SITUATIE 2: TEGENHUNT VERIJDELD / GEVONDEN!
+    else if (data.state === 'foiled') {
+        renderCounterHuntSectorOnMap(null);
+        updateCounterHuntMiniBar();
+
+        // Toon de Gefeliciteerd-popup als het verijdeld-bericht recent is (< 10 min oud)
+        var foiledAgeMs = now - (data.foiledAtMs || 0);
+        if (isNewEvent && foiledAgeMs < 10 * 60 * 1000) {
+            lastHandledCounterHuntId = data.id;
+
+            modalBox.className = 'ch-mode-foiled';
+            timerWrap.style.display = 'flex';
+            timerCaption.textContent = '🎉 TEGENHUNT SUCCESVOL VERIJDELD!';
+            giantTimer.textContent = `+${data.points || 10} PT`;
+
+            alertBadge.textContent = `🏆 GEFELICITEERD! CODE ${data.code || ''} GEVONDEN!`;
+            infoGrid.style.display = 'none';
+            extraDetails.innerHTML = `De tegenhunt met code <b>${data.code || ''}</b> is verijdeld! Dit levert jullie <b>${data.points || 10} punten</b> op!`;
+            rawMsgBox.textContent = data.rawMessage || '';
+            zoomBtn.textContent = '✔️ Top, Sluit Melding';
+
+            overlay.style.display = 'flex';
+            playAlertSound('foiled');
+            if ('vibrate' in navigator) navigator.vibrate([250, 100, 250, 100, 400]);
+
+            if (!isInitialCounterHuntLoad && 'serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+                navigator.serviceWorker.ready.then(function(reg) {
+                    reg.showNotification("🎉 Tegenhunt Verijdeld! (+" + (data.points || 10) + " punten)", {
+                        body: `Code ${data.code || ''} is gevonden! Goed gewerkt!`,
+                        icon: 'icon-192.png',
+                        badge: 'icon-192.png',
+                        tag: 'counterhunt-alert',
+                        renotify: true
+                    });
+                });
+            }
+        }
+    }
+
+    isInitialCounterHuntLoad = false;
 });

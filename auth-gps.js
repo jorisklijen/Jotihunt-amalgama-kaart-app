@@ -335,10 +335,10 @@ function sendCurrentLocation() {
 function startBackgroundLiveTracking() {
     sendCurrentLocation();
     if (intervalTimer) clearInterval(intervalTimer);
-    intervalTimer = setInterval(sendCurrentLocation, 30000);
+    intervalTimer = setInterval(sendCurrentLocation, 15000);
 
     try {
-        var blob = new Blob(["setInterval(function() { postMessage('tick'); }, 30000);"], { type: "text/javascript" });
+        var blob = new Blob(["setInterval(function() { postMessage('tick'); }, 15000);"], { type: "text/javascript" });
         workerTimer = new Worker(URL.createObjectURL(blob));
         workerTimer.onmessage = function() { sendCurrentLocation(); };
     } catch (e) {

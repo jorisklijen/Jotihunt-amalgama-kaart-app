@@ -2800,7 +2800,11 @@ window.initAdminEngine = function() {
         window.calculateAndPublishMapState(false);
     });
 
+ // Ruim eventueel nog bestaande oude 'jotihuntSync' data in Firebase direct op
+    db.ref('jotihuntSync').remove().catch(function() {});
+
+    // Versnelde Master Engine refresh: elke 10 seconden i.p.v. 30 seconden
     setInterval(function() {
         window.calculateAndPublishMapState(false);
-    }, 30000);
+    }, 10000);
 };

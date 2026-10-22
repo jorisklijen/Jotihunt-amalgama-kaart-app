@@ -1,7 +1,7 @@
 /* ==========================================================================
 SC SCOUTING AMALGAMA - JOTIHUNT APP STYLESHEET
-Geoptimaliseerd voor hoge framerates, lage presentation delay (INP fix)
-en soepele kaartinteractie op mobiele en oudere toestellen.
+Geoptimaliseerd voor hoge framerates, lage presentation delay (INP fix),
+vaste flikkervrije info-vensters, Groene Hunt-alerts en Tegenhunt Popups.
 ========================================================================== */
 
 /* --- 1. RESET & BASIS LAYOUT --- */
@@ -296,9 +296,9 @@ html, body {
 }
 
 .user-gps-label-inactive {
-    background: #7f8c8d !important;
+    background: #c0392b !important;
     color: #ffffff !important;
-    border-color: #95a5a6 !important;
+    border-color: #e74c3c !important;
 }
 
 .compass-label {
@@ -465,7 +465,7 @@ html, body {
     font-weight: 600;
 }
 
-/* --- 7. ZWEVEND VOSSEN STATUS MENU (MET GECENTREERDE NAMEN & DYNAMISCH INFO-VENSTER) --- */
+/* --- 7. ZWEVEND VOSSEN STATUS MENU & VAST DETAIL-VENSTER (100% FLIKKERVRIJ) --- */
 #fox-status-panel {
     position: absolute;
     top: 12px;
@@ -476,13 +476,12 @@ html, body {
     border: 1px solid #4a6278;
     border-radius: 8px;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-    width: 195px;
-    max-width: 82vw;
+    width: 155px;
+    max-width: 78vw;
     font-size: 0.8rem;
     user-select: none;
     touch-action: none;
     overflow: hidden;
-    transition: height 0.2s ease;
 }
 
 #fox-status-header {
@@ -546,20 +545,16 @@ html, body {
     align-items: center;
     text-align: center;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
-    transition: transform 0.1s ease, filter 0.15s ease, border-radius 0.15s ease;
 }
 
-.fox-area-status-btn.is-expanded {
-    border-bottom-left-radius: 2px;
-    border-bottom-right-radius: 2px;
+.fox-area-status-btn.is-selected-area {
+    outline: 2.5px solid #ffffff;
+    outline-offset: -2px;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
 }
 
 .fox-area-status-btn:hover {
     filter: brightness(1.08);
-}
-
-.fox-area-status-btn:active {
-    transform: scale(0.98);
 }
 
 .fox-btn-name {
@@ -568,65 +563,118 @@ html, body {
     width: 100%;
 }
 
-/* Dynamisch uitklapbaar info-venster onder de deelgebied-knop */
-.fox-area-info-box {
+/* Vast Info-Venster naast het Vossen Status Menu */
+#fox-fixed-detail-card {
+    position: absolute;
+    top: 12px;
+    right: 175px;
+    z-index: 955;
+    width: 235px;
+    max-width: 86vw;
     background: #1f2d3a;
+    color: #ecf0f1;
     border: 1px solid #4a6278;
-    border-top: none;
-    border-bottom-left-radius: 5px;
-    border-bottom-right-radius: 5px;
-    padding: 7px 8px;
-    margin-top: -1px;
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    font-size: 0.72rem;
-    color: #ecf0f1;
-    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.25);
-    animation: foxInfoFadeIn 0.15s ease-out;
+    overflow: hidden;
+    user-select: none;
 }
 
-@keyframes foxInfoFadeIn {
-    from { opacity: 0; transform: translateY(-3px); }
-    to { opacity: 1; transform: translateY(0); }
+#fox-detail-header {
+    background: #162029;
+    padding: 7px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #3d566e;
+    font-weight: 700;
+    font-size: 0.83rem;
+    color: #ffffff;
+}
+
+#fox-detail-color-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1.5px solid #ffffff;
+}
+
+#fox-detail-close-btn {
+    background: transparent;
+    border: none;
+    color: #bdc3c7;
+    font-size: 0.9rem;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+#fox-detail-close-btn:hover {
+    color: #ffffff;
+}
+
+#fox-detail-body {
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 0.74rem;
 }
 
 .fox-info-row {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
     line-height: 1.25;
 }
 
 .fox-info-label {
     color: #bdc3c7;
-    font-size: 0.68rem;
+    font-size: 0.69rem;
     font-weight: 600;
 }
 
 .fox-info-val {
     color: #ffffff;
-    font-size: 0.74rem;
+    font-size: 0.76rem;
     font-weight: 700;
     padding-left: 2px;
 }
 
-.fox-info-nav-btn {
+.fox-detail-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
     margin-top: 3px;
-    background: #3498db;
-    color: #ffffff;
-    border: none;
+}
+
+.fox-info-zoom-btn {
+    background: #34495e;
+    color: #ecf0f1;
+    border: 1px solid #5d7892;
     border-radius: 4px;
     padding: 5px 6px;
-    font-size: 0.71rem;
+    font-size: 0.72rem;
     font-weight: 700;
     cursor: pointer;
     width: 100%;
     text-align: center;
 }
 
-.fox-info-nav-btn:active {
-    background: #2980b9;
+.fox-info-nav-btn {
+    background: #3498db;
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px;
+    font-size: 0.73rem;
+    font-weight: 700;
+    cursor: pointer;
+    width: 100%;
+    text-align: center;
 }
 
 .fox-status-empty {
@@ -635,4 +683,279 @@ html, body {
     text-align: center;
     padding: 4px 0;
     font-style: italic;
+}
+
+/* --- 8. DUIDELIJKE IN-APP MELDING ALS DEELGEBIED WEER OP GROEN SPRINGT --- */
+#green-hunt-alert-toast {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2200;
+    width: 92%;
+    max-width: 460px;
+    background: linear-gradient(135deg, #1e8449, #27ae60);
+    color: #ffffff;
+    border: 2px solid #a9dfbf;
+    border-radius: 10px;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.65);
+    padding: 11px 14px;
+}
+
+.green-hunt-toast-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.green-hunt-toast-icon {
+    font-size: 1.55rem;
+    flex-shrink: 0;
+}
+
+.green-hunt-toast-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#green-hunt-toast-title {
+    font-weight: 800;
+    font-size: 0.88rem;
+    letter-spacing: 0.3px;
+}
+
+#green-hunt-toast-sub {
+    font-size: 0.76rem;
+    color: #eafaf1;
+    font-weight: 600;
+}
+
+.green-hunt-toast-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+#green-hunt-toast-zoom-btn {
+    background: #ffffff;
+    color: #1e8449;
+    border: none;
+    border-radius: 5px;
+    padding: 6px 10px;
+    font-weight: 800;
+    font-size: 0.76rem;
+    cursor: pointer;
+}
+
+#green-hunt-toast-close-btn {
+    background: rgba(0, 0, 0, 0.25);
+    color: #ffffff;
+    border: none;
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+/* --- 9. CENTRALE TEGENHUNT POPUP MIDDEN OP HET SCHERM --- */
+#counterhunt-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(15, 10, 10, 0.82);
+    backdrop-filter: blur(4px);
+    z-index: 4000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 14px;
+}
+
+#counterhunt-modal-box {
+    width: 100%;
+    max-width: 430px;
+    border-radius: 14px;
+    padding: 20px 18px;
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    text-align: center;
+    box-shadow: 0 12px 38px rgba(0, 0, 0, 0.85);
+}
+
+#counterhunt-modal-box.ch-mode-active {
+    background: linear-gradient(160deg, #7f1d1d 0%, #b91c1c 50%, #7f1d1d 100%);
+    border: 3px solid #fca5a5;
+    animation: chBorderPulse 1.5s infinite alternate;
+}
+
+#counterhunt-modal-box.ch-mode-foiled {
+    background: linear-gradient(160deg, #14532d 0%, #15803d 50%, #14532d 100%);
+    border: 3px solid #86efac;
+}
+
+@keyframes chBorderPulse {
+    0% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.6); }
+    100% { box-shadow: 0 0 35px rgba(239, 68, 68, 1); }
+}
+
+#ch-top-timer-wrap {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.45);
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+#ch-timer-caption {
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    color: #fde047;
+}
+
+#ch-giant-timer {
+    font-size: 2.85rem;
+    font-weight: 900;
+    line-height: 1.05;
+    letter-spacing: 2px;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+#ch-alert-badge {
+    font-size: 1.02rem;
+    font-weight: 900;
+    letter-spacing: 0.4px;
+    color: #fef08a;
+    line-height: 1.25;
+}
+
+#ch-main-info-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.ch-info-card {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 8px;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ch-info-card-label {
+    font-size: 0.68rem;
+    font-weight: 800;
+    color: #fecaca;
+    letter-spacing: 0.4px;
+}
+
+.ch-info-card-val {
+    font-size: 1.25rem;
+    font-weight: 900;
+    color: #ffffff;
+}
+
+#ch-extra-details {
+    font-size: 0.84rem;
+    line-height: 1.35;
+    color: #f8fafc;
+}
+
+#ch-raw-msg-box {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.28);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.74rem;
+    color: #e2e8f0;
+    line-height: 1.35;
+}
+
+.ch-modal-actions {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.ch-action-btn {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.ch-btn-primary {
+    background: #ffffff;
+    color: #991b1b;
+}
+
+.ch-mode-foiled .ch-btn-primary {
+    color: #14532d;
+}
+
+.ch-btn-secondary {
+    background: rgba(0, 0, 0, 0.4);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* Klikbare rode Mini-Balk bovenin de kaart zolang de Tegenhunt loopt */
+#counterhunt-mini-bar {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2100;
+    background: #b91c1c;
+    color: #ffffff;
+    border: 2px solid #fca5a5;
+    border-radius: 8px;
+    padding: 7px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.65);
+    white-space: nowrap;
+    max-width: 95vw;
+}
+
+#ch-mini-timer {
+    background: rgba(0, 0, 0, 0.45);
+    color: #fde047;
+    padding: 3px 7px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.ch-mini-open-btn {
+    text-decoration: underline;
+    font-size: 0.72rem;
+    color: #fef08a;
 }
