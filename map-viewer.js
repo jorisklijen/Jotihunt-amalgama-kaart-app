@@ -25,7 +25,7 @@ function applyDarkMode(enabled) {
         if (map.hasLayer(lightTileLayer)) map.removeLayer(lightTileLayer);
         if (!map.hasLayer(darkLayerGroup)) darkLayerGroup.addTo(map);
         mapContainer.classList.add('dark-mode-map');
-        document.getElementById('btn-darkmode').innerText = "☀️ Light";
+        document.getElementById('btn-darkmode').innerText = "Light";
         localStorage.setItem('jh_map_theme', 'dark');
     } else {
         if (map.hasLayer(darkLayerGroup)) map.removeLayer(darkLayerGroup);
@@ -228,24 +228,24 @@ function buildHousePopupHtml(loc) {
     if (isAdmin) {
         visitedBtnHtml = `
             <hr style="margin:7px 0 5px 0; border:0; border-top:1px solid #4a627a;">
-            <label style="font-size:11px; color:#bdc3c7; font-weight:bold; display:block; margin-bottom:3px;">🕒 Bezoektijdstip (voor RD-looplijn):</label>
+            <label style="font-size:11px; color:#bdc3c7; font-weight:bold; display:block; margin-bottom:3px;">Bezoektijdstip (voor RD-looplijn):</label>
             <input type="datetime-local" id="house_dt_${safeKey}" value="${defaultIsoVal}" style="width:100%; padding:4px 6px; font-size:11px; font-weight:bold; margin-bottom:4px;">
         `;
         if (isVisited) {
             visitedBtnHtml += `
                 <div style="display:flex; gap:5px;">
-                    <button onclick="window.saveHouseVisitedWithTime('${escapedName}', 'house_dt_${safeKey}')" style="background:#27ae60; color:white; border:none; padding:5px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">💾 Update tijd</button>
+                    <button onclick="window.saveHouseVisitedWithTime('${escapedName}', 'house_dt_${safeKey}')" style="background:#27ae60; color:white; border:none; padding:5px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">Update tijd</button>
                     <button onclick="window.clearHouseVisited('${escapedName}')" style="background:#e67e22; color:white; border:none; padding:5px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">↩️ Niet bezocht</button>
                 </div>
             `;
         } else {
             visitedBtnHtml += `
-                <button onclick="window.saveHouseVisitedWithTime('${escapedName}', 'house_dt_${safeKey}')" style="background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">✔️ Markeer als bezocht op tijdstip</button>
+                <button onclick="window.saveHouseVisitedWithTime('${escapedName}', 'house_dt_${safeKey}')" style="background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">Markeer als bezocht op tijdstip</button>
             `;
         }
     }
 
-    var radiusBtnText = hasActiveRadius ? "🚫 Verberg 450m Tegenhunt Cirkel" : "🎯 Toon 450m Tegenhunt Cirkel";
+    var radiusBtnText = hasActiveRadius ? "Verberg 450m Tegenhunt Cirkel" : "Toon 450m Tegenhunt Cirkel";
     var radiusBtnBg = hasActiveRadius ? "#c0392b" : "#8e44ad";
     var radiusBtnHtml = `<button onclick="window.toggleHouseRadius('${escapedName}', ${loc.lat}, ${loc.lng})" style="margin-top:6px; background:${radiusBtnBg}; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">${radiusBtnText}</button>`;
 
@@ -257,7 +257,7 @@ function buildHousePopupHtml(loc) {
         <b>${loc.name}</b><br>
         Deelgebied: ${loc.area}<br>
         Status: ${statusHtml}<br>
-        <button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">📍 Navigeer via Google Maps</button>
+        <button onclick="window.navigateToAreaPoint(${loc.lat},${loc.lng})" style="margin-top:6px; background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; font-weight:bold; width:100%;">Navigeer via Google Maps</button>
         ${radiusBtnHtml}
         ${visitedBtnHtml}
     </div>`;
@@ -414,7 +414,7 @@ function createWalkerMarker(pt) {
 
         targetLockHtml = `
             <hr style="margin:6px 0; border:0; border-top:1px solid #4a627a;">
-            <label style="font-size:11px; color:#bdc3c7; font-weight:bold; display:block; margin-bottom:3px;">🎯 Doel-clubhuis (Route):</label>
+            <label style="font-size:11px; color:#bdc3c7; font-weight:bold; display:block; margin-bottom:3px;">Doel-clubhuis (Route):</label>
             <select onchange="if(window.setAreaLockedTarget) window.setAreaLockedTarget('${pt.area}', this.value)" style="width:100%; padding:4px; font-size:11px; font-weight:bold;">
                 ${lockOptions}
             </select>
@@ -429,14 +429,14 @@ function createWalkerMarker(pt) {
         ${pt.extraInfo ? `<span>Loopsnelheid: <b style="color:#2ecc71;">${pt.extraInfo}</b></span><br>` : ''}
         ${(!isAdmin ? targetLockHtml : '')}
         <button onclick="window.navigateToAreaPoint(${pt.latlng[0]}, ${pt.latlng[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
-            📍 Navigeer naar dit punt
+            Navigeer naar dit punt
         </button>
         ${(isAdmin ? targetLockHtml : '')}
         ${(isAdmin && pt.key) ? `
             <hr style="margin:6px 0; border:0; border-top:1px solid #4a627a;">
             <div style="display:flex; gap:5px; margin-top:4px;">
-                <button onclick="window.editRdPointPopup('${pt.key}')" style="background:#f39c12; color:white; border:none; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">✏️ Bewerk</button>
-                <button onclick="window.deleteRdPointPopup('${pt.key}')" style="background:#e74c3c; color:white; border:none; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">🗑️ Wis</button>
+                <button onclick="window.editRdPointPopup('${pt.key}')" style="background:#f39c12; color:white; border:none; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">Bewerk</button>
+                <button onclick="window.deleteRdPointPopup('${pt.key}')" style="background:#e74c3c; color:white; border:none; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:bold; flex:1;">Wis</button>
             </div>
         ` : ''}
     </div>`;
@@ -703,14 +703,14 @@ function renderComputedMapState(state) {
                 });
                 var dotMarker = L.marker(gf.intersectionPoint, { icon: dotIcon });
                 var targetName = gf.estimatedTargetHouse || "onbezochte locatie";
-                dotMarker.bindTooltip(`⭕ Cirkel-kruispunt ${area}`, {
+                dotMarker.bindTooltip(`Cirkel-kruispunt ${area}`, {
                     permanent: false,
                     direction: 'top',
                     className: 'marker-label'
                 });
                 dotMarker.bindPopup(`
                     <div style="font-size:12px; min-width:185px;">
-                        <b>⭕ Kruispunt Cirkel & Route (${area})</b><br>
+                        <b>Kruispunt Cirkel & Route (${area})</b><br>
                         Doelroute: <b>${targetName}</b><br>
                         <button onclick="window.navigateToAreaPoint(${gf.intersectionPoint[0]}, ${gf.intersectionPoint[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
                             Navigeer naar dit kruispunt
@@ -747,20 +747,20 @@ function renderComputedMapState(state) {
                 var liveFoxMarker = L.marker(livePt.coord, { icon: liveFoxIcon });
                 var lockBadge = livePt.isLocked ? '🔒 ' : '';
                 var nextClubText = livePt.targetHouse ? ` richting ${lockBadge}${livePt.targetHouse}` : '';
-                liveFoxMarker.bindTooltip(`🦊 Verwachte vos ${area}: op ${walkedDistStr}${nextClubText}`, {
+                liveFoxMarker.bindTooltip(`Verwachte vos ${area}: op ${walkedDistStr}${nextClubText}`, {
                     permanent: false,
                     direction: 'top',
                     className: 'marker-label'
                 });
                 liveFoxMarker.bindPopup(`
                     <div style="font-size:12px; min-width:200px;">
-                        <b>🦊 Live Verwachte Positie (${area})</b><br>
+                        <b>Live Verwachte Positie (${area})</b><br>
                         Afgelegd over looplijn: <b>${walkedDistStr}</b><br>
                         ${livePt.speedText ? `Snelheid: <b style="color:#2ecc71;">${livePt.speedText}</b><br>` : ''}
                         ${livePt.targetHouse ? `Doel-clubhuis: <b>${lockBadge}${livePt.targetHouse}</b><br>` : ''}
                         ${livePt.visitedOriginHouse ? `Laatst bezocht: <b>${livePt.visitedOriginHouse}</b><br>` : ''}
                         <button onclick="window.navigateToAreaPoint(${livePt.coord[0]}, ${livePt.coord[1]})" style="background:#27ae60; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
-                            📍 Navigeer naar verwachte vos
+                            Navigeer naar verwachte vos
                         </button>
                     </div>
                 `);
@@ -788,18 +788,18 @@ function renderComputedMapState(state) {
                 });
 
                 var altMarker = L.marker(altPt.coord, { icon: altDotIcon });
-                altMarker.bindTooltip(`🛤️ Parallel-positie ${area} (${altDistStr})`, {
+                altMarker.bindTooltip(`Parallel-positie ${area} (${altDistStr})`, {
                     permanent: false,
                     direction: 'top',
                     className: 'marker-label'
                 });
                 altMarker.bindPopup(`
                     <div style="font-size:12px; min-width:190px;">
-                        <b>🛤️ Alternatieve Positie (${area})</b><br>
+                        <b>Alternatieve Positie (${area})</b><br>
                         Parallelroute (mijdt N-wegen)<br>
                         Afgelegd: <b>${altDistStr}</b><br>
                         <button onclick="window.navigateToAreaPoint(${altPt.coord[0]}, ${altPt.coord[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
-                            📍 Navigeer naar parallel-punt
+                            Navigeer naar parallel-punt
                         </button>
                     </div>
                 `);
@@ -841,7 +841,7 @@ db.ref('rdPoints').on('child_added', function (snapshot) {
 
         if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
             navigator.serviceWorker.ready.then(function (reg) {
-                reg.showNotification("🎯 Nieuw RD Punt" + deelgebied, {
+                reg.showNotification("Nieuw RD Punt" + deelgebied, {
                     body: puntNaam + tijdTekst + " geplaatst op de kaart!",
                     icon: 'icon-192.png', badge: 'icon-192.png',
                     vibrate: [300, 100, 300, 100, 300],
@@ -908,7 +908,7 @@ function renderLiveUsersOnMap() {
                 var pt = latestKnownAreaPoints[areaName];
                 var dist = getDistanceKm(u.lat, u.lng, pt.latlng[0], pt.latlng[1]).toFixed(1);
                 var eta = Math.round((dist / 45) * 60);
-                var typePrefix = pt.isHouse ? "🏠 Laatste punt (Club)" : "🎯 Laatste punt (RD)";
+                var typePrefix = pt.isHouse ? "Laatste punt (Club)" : "Laatste punt (RD)";
                 vossenOptions += `<option value="${pt.latlng[0]},${pt.latlng[1]}">${typePrefix}: ${areaName} (${dist} km - ~${eta} min)</option>`;
             }
         });
@@ -928,11 +928,11 @@ function renderLiveUsersOnMap() {
                     var val = document.getElementById('sel_dest_${userId}').value.split(',');
                     window.navigateToAreaPoint(val[0], val[1]);
                 })()" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
-                    📍 Navigeer via Google Maps
+                    Navigeer via Google Maps
                 </button>
                 ${(isAdmin && !isActive) ? `
                     <button onclick="window.removeInactiveUser('${userId}', '${safeUserName}')" style="background:#c0392b; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
-                        🗑️ Verberg inactieve gebruiker
+                        Verberg inactieve gebruiker
                     </button>
                 ` : ''}
             </div>
@@ -941,7 +941,7 @@ function renderLiveUsersOnMap() {
         if (liveUserMarkers[userId]) {
             liveUserMarkers[userId].setLatLng([u.lat, u.lng]);
             liveUserMarkers[userId].setIcon(icon);
-            liveUserMarkers[userId].setTooltipContent("🚗 " + u.name);
+            liveUserMarkers[userId].setTooltipContent(u.name);
             var tooltipEl = liveUserMarkers[userId].getTooltip();
             if (tooltipEl && tooltipEl._container) {
                 tooltipEl._container.className = 'leaflet-tooltip leaflet-zoom-animated ' + labelClass;
@@ -949,7 +949,7 @@ function renderLiveUsersOnMap() {
             liveUserMarkers[userId].getPopup().setContent(popupHtml);
         } else {
             var m = L.marker([u.lat, u.lng], { icon: icon });
-            m.bindTooltip("🚗 " + u.name, { permanent: true, direction: 'top', className: labelClass });
+            m.bindTooltip(u.name, { permanent: true, direction: 'top', className: labelClass });
             m.bindPopup(popupHtml);
             usersLiveLayer.addLayer(m);
             liveUserMarkers[userId] = m;

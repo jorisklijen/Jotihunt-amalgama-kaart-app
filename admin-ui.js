@@ -653,7 +653,7 @@ function injectAdminFoxStatusControls() {
         return `
             <label class="admin-fox-color-pill">
                 <input type="checkbox" class="admin-fox-color-cb" data-color="${colorKey}" ${isChecked} style="accent-color:${cfg.bg};">
-                <span style="width:9px; height:9px; border-radius:50%; background:${cfg.bg}; display:inline-block; flex-shrink:0;"></span>
+                
                 <span>${cfg.label}</span>
             </label>
         `;
@@ -1044,7 +1044,7 @@ function checkAreaRoundCompletion() {
                 resetUpdates[safeKey] = null;
             });
             db.ref('houseVisited').update(resetUpdates).then(function() {
-                alert("🎉 Volledige ronde voltooid voor deelgebied " + areaName + "! Alle huisjes zijn weer op 'niet bezocht' gezet.");
+                alert("Volledige ronde voltooid voor deelgebied " + areaName + "! Alle huisjes zijn weer op 'niet bezocht' gezet.");
                 window.calculateAndPublishMapState(true);
             });
         }

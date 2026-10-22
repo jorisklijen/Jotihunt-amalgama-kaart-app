@@ -247,7 +247,7 @@ function getFoxStatusInfoBoxData(areaName, colorKey, cfg, stObj) {
 
     var timerStr = formatLiveStatusTimer(statusUpdatedAt, masterMetrics ? masterMetrics.statusDurationText : "");
     var sinceStr = stObj.timeFormatted ? ` (sinds ${stObj.timeFormatted})` : '';
-    var statusTitleText = `⏱️ Op status ${cfg.label}${sinceStr}:`;
+    var statusTitleText = `Op status ${cfg.label}${sinceStr}:`;
 
     var myTravelHtml = `<span style="color:#95a5a6;">Wachten op jouw GPS / vossenpunt...</span>`;
     if (masterMetrics && masterMetrics.estimatedCoord) {
