@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jotihunt-amalgama-v10';
+const CACHE_NAME = 'jotihunt-amalgama-v11';
 
 self.addEventListener('install', function(event) {
     self.skipWaiting();

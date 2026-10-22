@@ -23,13 +23,11 @@ db.ref('authSettings').on('value', function(snapshot) {
         if (setupHint) setupHint.style.display = 'none';
     }
 
-    // Update het invoerveld in het Beheer Instellingen paneel als de Admin is ingelogd
     var adminUserPwdInput = document.getElementById('admin-user-password-input');
     if (adminUserPwdInput && document.activeElement !== adminUserPwdInput) {
         adminUserPwdInput.value = firebaseAuthConfig.userPassword || "";
     }
 
-    // Controleer voor ingelogde normale gebruikers (hunters) of het standaardwachtwoord is gewijzigd
     var savedRole = localStorage.getItem('jh_auth_role');
     if (isSessionActive && savedRole === 'user' && !isAdmin) {
         var savedVersion = Number(localStorage.getItem('jh_user_session_version') || 0);
@@ -45,7 +43,6 @@ db.ref('authSettings').on('value', function(snapshot) {
     }
 });
 
-// Toon naamveld zodra het ingevoerde wachtwoord overeenkomt met het gebruikerswachtwoord in Firebase
 document.getElementById('pin-input').addEventListener('input', function() {
     var val = this.value.trim();
     var nameField = document.getElementById('username-input');
@@ -53,7 +50,6 @@ document.getElementById('pin-input').addEventListener('input', function() {
     if (errorDiv) errorDiv.style.display = 'none';
 
     if (!firebaseAuthConfig.loaded || !firebaseAuthConfig.adminPassword) {
-        // Eerste keer opstarten: eerste wachtwoord wordt voor Admin, dus geen hunter-naamveld nodig
         nameField.style.display = 'none';
         return;
     }
@@ -83,11 +79,9 @@ async function checkPin() {
     }
 
     try {
-        // Haal voor de zekerheid altijd de actuele waarde uit Firebase op
         var snapshot = await db.ref('authSettings').once('value');
         var authData = snapshot.val();
 
-        // SITUATIE 1: Er staat nog GEEN wachtwoord in Firebase -> Eerste ingevoerde wachtwoord is voor de Admin!
         if (!authData || !authData.adminPassword) {
             var initialVersion = 1;
             var defaultUserPwd = (authData && authData.userPassword) ? String(authData.userPassword) : "1111";
@@ -119,7 +113,6 @@ async function checkPin() {
         var currentUserPwd = authData.userPassword !== undefined ? String(authData.userPassword) : "1111";
         var currentVersion = authData.userSessionVersion ? Number(authData.userSessionVersion) : 1;
 
-        // SITUATIE 2: Ingevoerde wachtwoord klopt met het Admin-wachtwoord in Firebase
         if (pin === currentAdminPwd) {
             isAdmin = true;
             currentUserName = "Admin";
@@ -130,7 +123,6 @@ async function checkPin() {
             return;
         }
 
-        // SITUATIE 3: Ingevoerde wachtwoord klopt met het Gebruikerswachtwoord in Firebase
         if (pin === currentUserPwd) {
             if (nameInputEl.style.display === 'none') {
                 nameInputEl.style.display = 'inline-block';
@@ -153,7 +145,6 @@ async function checkPin() {
             return;
         }
 
-        // Onjuist wachtwoord
         errorDiv.innerText = "Onjuist wachtwoord";
         errorDiv.style.display = 'block';
         pinInputEl.value = '';
@@ -184,7 +175,6 @@ function logout() {
     location.reload();
 }
 
-// Automatisch inloggen indien sessie bekend én nog geldig is in Firebase
 window.addEventListener('load', function() {
     var savedRole = localStorage.getItem('jh_auth_role');
     var savedName = localStorage.getItem('jh_auth_name');
@@ -193,7 +183,6 @@ window.addEventListener('load', function() {
     db.ref('authSettings').once('value').then(function(snapshot) {
         var authData = snapshot.val();
         if (!authData || !authData.adminPassword) {
-            // Geen wachtwoord in Firebase -> verplicht naar inlogscherm om eerste admin-wachtwoord in te stellen
             localStorage.removeItem('jh_auth_role');
             localStorage.removeItem('jh_auth_name');
             return;
@@ -217,7 +206,6 @@ window.addEventListener('load', function() {
             var savedVersion = Number(localStorage.getItem('jh_user_session_version') || 0);
             var savedUserPwd = localStorage.getItem('jh_user_pwd_snapshot');
 
-            // Als het gebruikerswachtwoord in de tussentijd is gewijzigd -> direct uitloggen!
             if (
                 (savedVersion && savedVersion !== currentVersion) ||
                 (savedUserPwd !== null && savedUserPwd !== currentUserPwd)
@@ -235,7 +223,7 @@ window.addEventListener('load', function() {
     });
 });
 
-/* Lazy Loader: Laadt externe scripts en Admin-engine ALLEEN in voor de Admin */
+/* Lazy Loader: Laadt externe scripts en de 3 opgesplitste Admin-modules ALLEEN in voor de Admin */
 function loadScript(src) {
     return new Promise(function(resolve, reject) {
         var s = document.createElement('script');
@@ -248,6 +236,8 @@ function loadScript(src) {
 
 async function loadAdminDependencies() {
     await loadScript('https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js');
+    await loadScript('admin-routing.js');
+    await loadScript('admin-ui.js');
     await loadScript('admin-engine.js');
 
     if (typeof window.initAdminEngine === 'function') {
