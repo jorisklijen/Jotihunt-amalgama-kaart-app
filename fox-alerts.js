@@ -15,7 +15,7 @@ function injectFoxStatusPanel() {
     panel.id = 'fox-status-panel';
     panel.innerHTML = `
         <div id="fox-status-header">
-            <span>🦊 Vossen Status</span>
+            <span>Vossen Status</span>
             <button type="button" id="fox-status-min-btn" title="Minimaliseren / Maximaliseren">-</button>
         </div>
         <div id="fox-status-body">
@@ -37,23 +37,23 @@ function injectFoxStatusPanel() {
         </div>
         <div id="fox-detail-body">
             <div class="fox-info-row">
-                <span class="fox-info-label" id="fox-detail-status-label">⏱️ Op status:</span>
+                <span class="fox-info-label" id="fox-detail-status-label">Op status:</span>
                 <span class="fox-info-val" id="fox-detail-timer-val" data-updated-at="">--</span>
             </div>
             <div class="fox-info-row">
-                <span class="fox-info-label">🚗 Jouw afstand & reistijd:</span>
+                <span class="fox-info-label">Jouw afstand & reistijd:</span>
                 <span class="fox-info-val" id="fox-detail-my-travel">--</span>
             </div>
             <div class="fox-info-row">
-                <span class="fox-info-label">🥇 Dichtstbijzijnde hunter:</span>
+                <span class="fox-info-label">Dichtstbijzijnde hunter:</span>
                 <span class="fox-info-val" id="fox-detail-closest-hunter">--</span>
             </div>
             <div class="fox-detail-actions">
                 <button type="button" id="fox-detail-zoom-btn" class="fox-info-zoom-btn">
-                    🔍 Zoom op kaart
+                    Zoom op kaart
                 </button>
                 <button type="button" id="fox-detail-nav-btn" class="fox-info-nav-btn" style="display:none;">
-                    📍 Navigeer naar schatting
+                    Navigeer naar schatting
                 </button>
             </div>
         </div>
@@ -461,13 +461,13 @@ function ensureGreenHuntBannerUI() {
     toast.style.display = 'none';
     toast.innerHTML = `
         <div class="green-hunt-toast-content">
-            <div class="green-hunt-toast-icon">🟢🦊</div>
+            <div class="green-hunt-toast-icon"></div>
             <div class="green-hunt-toast-text">
                 <div id="green-hunt-toast-title">DEELGEBIED MAG WEER GEHUNT WORDEN!</div>
                 <div id="green-hunt-toast-sub">Status is zojuist op GROEN gesprongen!</div>
             </div>
             <div class="green-hunt-toast-actions">
-                <button type="button" id="green-hunt-toast-zoom-btn">🎯 Zoom in</button>
+                <button type="button" id="green-hunt-toast-zoom-btn">Zoom in</button>
                 <button type="button" id="green-hunt-toast-close-btn">✕</button>
             </div>
         </div>
@@ -490,7 +490,7 @@ function triggerAreaHuntableAlert(areaName, timeFormatted) {
     var zoomBtn = document.getElementById('green-hunt-toast-zoom-btn');
 
     var timePart = timeFormatted ? ` (om ${timeFormatted})` : '';
-    titleEl.textContent = `🟢 ${areaName.toUpperCase()} MAG WEER GEHUNT WORDEN!`;
+    titleEl.textContent = `${areaName.toUpperCase()} MAG WEER GEHUNT WORDEN!`;
     subEl.textContent = `Deelgebied ${areaName} staat weer op GROEN${timePart}. Ga direct op pad!`;
 
     zoomBtn.onclick = function() {
@@ -531,7 +531,7 @@ db.ref('foxStatuses').on('value', function(snapshot) {
             if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
                 navigator.serviceWorker.ready.then(function(reg) {
                     var notifTitle = curr === "groen"
-                        ? `🟢 JA! ${areaName} mag weer gehunt worden!`
+                        ? `JA! ${areaName} mag weer gehunt worden!`
                         : `🦊 Status ${areaName}: ${cfg.label}`;
                     var notifBody = curr === "groen"
                         ? `Deelgebied ${areaName} staat weer op GROEN! Klik om op de kaart te kijken.`
@@ -573,6 +573,53 @@ db.ref('adminSettings/visibleFoxStatuses').on('value', function(snapshot) {
 /* --- TEGENHUNT POPUP MIDDEN OP HET SCHERM + AUTO-ZOOM --- */
 var currentCounterHuntData = null;
 var lastHandledCounterHuntId = null;
+var counterHuntDismissTimeouts = [];
+var configuredCounterHuntAlertMinutes = 5;
+var hasTriggeredExpiredNoticeForId = {};
+
+// Luister voor zowel Hunters als Admins naar de ingestelde na-timer in Firebase
+db.ref('adminSettings/counterHuntAlertMinutes').on('value', function(snapshot) {
+    var val = parseFloat(snapshot.val());
+    if (!isNaN(val) && val > 0) {
+        configuredCounterHuntAlertMinutes = val;
+    } else {
+        configuredCounterHuntAlertMinutes = 5;
+    }
+    evaluateCounterHuntAutoHide();
+});
+
+function getCounterHuntNoticeTimeoutMs() {
+    return Math.max(1, Number(configuredCounterHuntAlertMinutes) || 5) * 60 * 1000;
+}
+
+function isCounterHuntEventDismissed(id, type) {
+    if (!id) return false;
+    return localStorage.getItem('jh_dismissed_ch_' + type + '_' + id) === '1';
+}
+
+function markCounterHuntEventDismissed(id, type) {
+    if (!id) return;
+    localStorage.setItem('jh_dismissed_ch_' + type + '_' + id, '1');
+}
+
+function clearCounterHuntAutoHideTimers() {
+    counterHuntDismissTimeouts.forEach(function(t) { clearTimeout(t); });
+    counterHuntDismissTimeouts = [];
+}
+
+window.isCounterHuntNotificationActive = function() {
+    var overlay = document.getElementById('counterhunt-modal-overlay');
+    var miniBar = document.getElementById('counterhunt-mini-bar');
+    var overlayOpen = !!(overlay && overlay.style.display === 'flex');
+    var miniOpen = !!(miniBar && miniBar.style.display === 'flex');
+    return overlayOpen || miniOpen;
+};
+
+function notifyAdminPanelCounterHuntState() {
+    if (typeof window.updateAdminSettingsPanelStatus === 'function') {
+        window.updateAdminSettingsPanelStatus();
+    }
+}
 
 function getBearingFromDirectionName(dirName) {
     var d = String(dirName || "").toLowerCase().replace(/[\s\-_]/g, "");
@@ -610,6 +657,12 @@ function renderCounterHuntSectorOnMap(chData) {
         return;
     }
 
+    var rem = formatCounterHuntRemaining(chData.expiresAtMs);
+    if (rem.expired) {
+        amalgamaBaseCircle.setStyle({ color: '#e67e22', fillColor: '#e67e22', weight: 2 });
+        return;
+    }
+
     amalgamaBaseCircle.setStyle({ color: '#ff2e2e', fillColor: '#e74c3c', weight: 3.5 });
 
     var bearing = getBearingFromDirectionName(chData.direction);
@@ -629,7 +682,7 @@ function renderCounterHuntSectorOnMap(chData) {
             dashArray: '6, 4'
         }).addTo(counterHuntHighlightLayer);
 
-        sectorPoly.bindTooltip(`🚨 TEGENHUNT RICHTING: ${String(chData.direction).toUpperCase()}`, {
+        sectorPoly.bindTooltip(`TEGENHUNT RICHTING: ${String(chData.direction).toUpperCase()}`, {
             permanent: true,
             direction: 'center',
             className: 'marker-label user-gps-label-inactive'
@@ -646,19 +699,19 @@ function injectCounterHuntUI() {
     overlay.innerHTML = `
         <div id="counterhunt-modal-box" class="ch-mode-active">
             <div id="ch-top-timer-wrap">
-                <div id="ch-timer-caption">⏳ RESTERENDE ZOEKTIJD (30 MIN)</div>
+                <div id="ch-timer-caption">RESTERENDE ZOEKTIJD (30 MIN)</div>
                 <div id="ch-giant-timer">30:00</div>
             </div>
 
-            <div id="ch-alert-badge">🚨 TEGENHUNT GEPLAKT BIJ CLUBGEBOUW! 🚨</div>
+            <div id="ch-alert-badge">TEGENHUNT GEPLAKT BIJ CLUBGEBOUW!</div>
 
             <div id="ch-main-info-grid">
                 <div class="ch-info-card">
-                    <span class="ch-info-card-label">🧭 WINDRICHTING</span>
+                    <span class="ch-info-card-label">WINDRICHTING</span>
                     <span class="ch-info-card-val" id="ch-direction-val">Zuid-West</span>
                 </div>
                 <div class="ch-info-card">
-                    <span class="ch-info-card-label">🕒 GEPLAKT OM TIJDSTIP</span>
+                    <span class="ch-info-card-label">GEPLAKT OM TIJDSTIP</span>
                     <span class="ch-info-card-val" id="ch-time-val">23:01</span>
                 </div>
             </div>
@@ -671,10 +724,10 @@ function injectCounterHuntUI() {
 
             <div class="ch-modal-actions">
                 <button type="button" id="ch-btn-zoom-club" class="ch-action-btn ch-btn-primary">
-                    🗺️ Bekijk op Kaart (Scouting Amalgama)
+                    Bekijk op Kaart (Scouting Amalgama)
                 </button>
                 <button type="button" id="ch-btn-nav-club" class="ch-action-btn ch-btn-secondary">
-                    📍 Navigeer naar Clubgebouw
+                     Navigeer naar Clubgebouw
                 </button>
             </div>
         </div>
@@ -686,16 +739,28 @@ function injectCounterHuntUI() {
     miniBar.id = 'counterhunt-mini-bar';
     miniBar.style.display = 'none';
     miniBar.innerHTML = `
-        <span id="ch-mini-text">🚨 TEGENHUNT ACTIEF (Zuid-West) • Geplakt: 23:01</span>
+        <span id="ch-mini-text">TEGENHUNT ACTIEF (Zuid-West) • Geplakt: 23:01</span>
         <span id="ch-mini-timer">30:00</span>
-        <span class="ch-mini-open-btn">Open Popup 🔼</span>
+        <span class="ch-mini-open-btn"></span>
     `;
     mapWrapper.appendChild(miniBar);
 
     document.getElementById('ch-btn-zoom-club').addEventListener('click', function() {
         overlay.style.display = 'none';
-        map.flyTo([amalgamaLat, amalgamaLng], 16, { animate: true, duration: 1.0 });
+        if (currentCounterHuntData && currentCounterHuntData.id) {
+            if (currentCounterHuntData.state === 'foiled') {
+                markCounterHuntEventDismissed(currentCounterHuntData.id, 'foiled');
+            } else if (currentCounterHuntData.state === 'active') {
+                var rem = formatCounterHuntRemaining(currentCounterHuntData.expiresAtMs);
+                if (rem.expired) {
+                    markCounterHuntEventDismissed(currentCounterHuntData.id, 'expired');
+                } else {
+                    map.flyTo([amalgamaLat, amalgamaLng], 16, { animate: true, duration: 1.0 });
+                }
+            }
+        }
         updateCounterHuntMiniBar();
+        notifyAdminPanelCounterHuntState();
     });
 
     document.getElementById('ch-btn-nav-club').addEventListener('click', function() {
@@ -705,6 +770,7 @@ function injectCounterHuntUI() {
     miniBar.addEventListener('click', function() {
         overlay.style.display = 'flex';
         miniBar.style.display = 'none';
+        notifyAdminPanelCounterHuntState();
     });
 }
 
@@ -719,6 +785,82 @@ function formatCounterHuntRemaining(expiresAtMs) {
     };
 }
 
+function showExpiredCounterHuntModal(data) {
+    var overlay = document.getElementById('counterhunt-modal-overlay');
+    var modalBox = document.getElementById('counterhunt-modal-box');
+    var timerWrap = document.getElementById('ch-top-timer-wrap');
+    var timerCaption = document.getElementById('ch-timer-caption');
+    var giantTimer = document.getElementById('ch-giant-timer');
+    var alertBadge = document.getElementById('ch-alert-badge');
+    var infoGrid = document.getElementById('ch-main-info-grid');
+    var extraDetails = document.getElementById('ch-extra-details');
+    var rawMsgBox = document.getElementById('ch-raw-msg-box');
+    var zoomBtn = document.getElementById('ch-btn-zoom-club');
+    var navBtn = document.getElementById('ch-btn-nav-club');
+
+    var now = Date.now();
+    var expiredAgoMs = now - Number(data.expiresAtMs || now);
+    var maxDisplayMs = getCounterHuntNoticeTimeoutMs();
+
+    renderCounterHuntSectorOnMap(null);
+    updateCounterHuntMiniBar();
+
+    if (expiredAgoMs >= maxDisplayMs || isCounterHuntEventDismissed(data.id, 'expired')) {
+        if (overlay) overlay.style.display = 'none';
+        notifyAdminPanelCounterHuntState();
+        return;
+    }
+
+    modalBox.className = 'ch-mode-expired';
+    timerWrap.style.display = 'flex';
+    timerCaption.textContent = 'ZOEKTĲD VERLOPEN (30 MIN VOORBIJ)';
+    giantTimer.textContent = '00:00';
+
+    alertBadge.textContent = 'HELAAS! TEGENHUNT NIET GEVONDEN';
+    infoGrid.style.display = 'none';
+    extraDetails.innerHTML = `Het is jammer genoeg niet gelukt om de tegenhunt (${data.direction || 'Onbekend'}) op tijd te vinden. Deze melding sluit automatisch na <b>${configuredCounterHuntAlertMinutes} min</b>.`;
+    rawMsgBox.textContent = data.rawMessage || '';
+    zoomBtn.textContent = 'Sluit Melding';
+    if (navBtn) navBtn.style.display = 'none';
+
+    overlay.style.display = 'flex';
+    notifyAdminPanelCounterHuntState();
+
+    clearCounterHuntAutoHideTimers();
+    var remainingHideMs = Math.max(1000, maxDisplayMs - Math.max(0, expiredAgoMs));
+    var tId = setTimeout(function() {
+        markCounterHuntEventDismissed(data.id, 'expired');
+        overlay.style.display = 'none';
+        notifyAdminPanelCounterHuntState();
+    }, remainingHideMs);
+    counterHuntDismissTimeouts.push(tId);
+}
+
+function evaluateCounterHuntAutoHide() {
+    if (!currentCounterHuntData) return;
+    var now = Date.now();
+    var maxDisplayMs = getCounterHuntNoticeTimeoutMs();
+    var overlay = document.getElementById('counterhunt-modal-overlay');
+
+    if (currentCounterHuntData.state === 'foiled') {
+        var foiledTs = Number(currentCounterHuntData.foiledAtMs || currentCounterHuntData.updatedAt || now);
+        var ageMs = now - foiledTs;
+        if (ageMs >= maxDisplayMs || isCounterHuntEventDismissed(currentCounterHuntData.id, 'foiled')) {
+            if (overlay) overlay.style.display = 'none';
+            notifyAdminPanelCounterHuntState();
+        }
+    } else if (currentCounterHuntData.state === 'active') {
+        var rem = formatCounterHuntRemaining(currentCounterHuntData.expiresAtMs);
+        if (rem.expired) {
+            var expAgeMs = now - Number(currentCounterHuntData.expiresAtMs || now);
+            if (expAgeMs >= maxDisplayMs || isCounterHuntEventDismissed(currentCounterHuntData.id, 'expired')) {
+                if (overlay) overlay.style.display = 'none';
+                notifyAdminPanelCounterHuntState();
+            }
+        }
+    }
+}
+
 function updateCounterHuntMiniBar() {
     var overlay = document.getElementById('counterhunt-modal-overlay');
     var miniBar = document.getElementById('counterhunt-mini-bar');
@@ -726,6 +868,7 @@ function updateCounterHuntMiniBar() {
 
     if (!currentCounterHuntData || currentCounterHuntData.state !== 'active') {
         miniBar.style.display = 'none';
+        notifyAdminPanelCounterHuntState();
         return;
     }
 
@@ -734,6 +877,7 @@ function updateCounterHuntMiniBar() {
         miniBar.style.display = 'none';
         counterHuntHighlightLayer.clearLayers();
         amalgamaBaseCircle.setStyle({ color: '#e67e22', fillColor: '#e67e22', weight: 2 });
+        notifyAdminPanelCounterHuntState();
         return;
     }
 
@@ -743,11 +887,12 @@ function updateCounterHuntMiniBar() {
     var miniText = document.getElementById('ch-mini-text');
     var miniTimer = document.getElementById('ch-mini-timer');
     if (miniText) {
-        miniText.textContent = `🚨 TEGENHUNT: ${String(currentCounterHuntData.direction || '').toUpperCase()} (Geplakt ${currentCounterHuntData.timeShort || ''})`;
+        miniText.textContent = `TEGENHUNT: ${String(currentCounterHuntData.direction || '').toUpperCase()} (Geplakt ${currentCounterHuntData.timeShort || ''})`;
     }
     if (miniTimer) {
-        miniTimer.textContent = `⏳ ${rem.text}`;
+        miniTimer.textContent = `${rem.text}`;
     }
+    notifyAdminPanelCounterHuntState();
 }
 
 function updateCounterHuntTimersTick() {
@@ -755,11 +900,22 @@ function updateCounterHuntTimersTick() {
 
     if (currentCounterHuntData.state === 'active') {
         var rem = formatCounterHuntRemaining(currentCounterHuntData.expiresAtMs);
+        if (rem.expired) {
+            if (!hasTriggeredExpiredNoticeForId[currentCounterHuntData.id]) {
+                hasTriggeredExpiredNoticeForId[currentCounterHuntData.id] = true;
+                showExpiredCounterHuntModal(currentCounterHuntData);
+            } else {
+                evaluateCounterHuntAutoHide();
+            }
+            return;
+        }
         var giantTimer = document.getElementById('ch-giant-timer');
         if (giantTimer) {
-            giantTimer.textContent = rem.expired ? "00:00 (VERLOPEN)" : rem.text;
+            giantTimer.textContent = rem.text;
         }
         updateCounterHuntMiniBar();
+    } else if (currentCounterHuntData.state === 'foiled') {
+        evaluateCounterHuntAutoHide();
     }
 }
 
@@ -772,6 +928,7 @@ db.ref('counterHunt').on('value', function(snapshot) {
     var data = snapshot.val();
     currentCounterHuntData = data;
     injectCounterHuntUI();
+    clearCounterHuntAutoHideTimers();
 
     var overlay = document.getElementById('counterhunt-modal-overlay');
     var modalBox = document.getElementById('counterhunt-modal-box');
@@ -785,40 +942,43 @@ db.ref('counterHunt').on('value', function(snapshot) {
     var extraDetails = document.getElementById('ch-extra-details');
     var rawMsgBox = document.getElementById('ch-raw-msg-box');
     var zoomBtn = document.getElementById('ch-btn-zoom-club');
+    var navBtn = document.getElementById('ch-btn-nav-club');
 
     if (!data) {
         overlay.style.display = 'none';
         renderCounterHuntSectorOnMap(null);
         updateCounterHuntMiniBar();
+        notifyAdminPanelCounterHuntState();
         isInitialCounterHuntLoad = false;
         return;
     }
 
     var now = Date.now();
     var isNewEvent = (data.id && data.id !== lastHandledCounterHuntId);
+    var maxDisplayMs = getCounterHuntNoticeTimeoutMs();
 
     if (data.state === 'active') {
         var rem = formatCounterHuntRemaining(data.expiresAtMs);
         if (rem.expired) {
-            overlay.style.display = 'none';
-            renderCounterHuntSectorOnMap(null);
-            updateCounterHuntMiniBar();
+            hasTriggeredExpiredNoticeForId[data.id] = true;
+            showExpiredCounterHuntModal(data);
             isInitialCounterHuntLoad = false;
             return;
         }
 
         modalBox.className = 'ch-mode-active';
         timerWrap.style.display = 'flex';
-        timerCaption.textContent = '⏳ RESTERENDE TIJD OM TE VINDEN';
+        timerCaption.textContent = 'RESTERENDE TIJD OM TE VINDEN';
         giantTimer.textContent = rem.text;
 
-        alertBadge.textContent = '🚨 TEGENHUNT GEPLAKT BIJ ONS CLUBGEBOUW! 🚨';
+        alertBadge.textContent = 'TEGENHUNT GEPLAKT BIJ ONS CLUBGEBOUW!';
         infoGrid.style.display = 'grid';
         dirVal.textContent = data.direction || 'Onbekend';
         timeVal.textContent = data.timeShort || data.timeFull || '--:--';
         extraDetails.innerHTML = `Kost bij niet vinden: <b>${data.points || 10} punten</b> • Zoek binnen 450m van <b>Scouting Amalgama</b>!`;
         rawMsgBox.textContent = data.rawMessage || '';
-        zoomBtn.textContent = '🗺️ Sluit & Zoek op Kaart (Scouting Amalgama)';
+        zoomBtn.textContent = 'Sluit & Zoek op Kaart (Scouting Amalgama)';
+        if (navBtn) navBtn.style.display = 'block';
 
         renderCounterHuntSectorOnMap(data);
 
@@ -833,7 +993,7 @@ db.ref('counterHunt').on('value', function(snapshot) {
 
             if (!isInitialCounterHuntLoad && 'serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
                 navigator.serviceWorker.ready.then(function(reg) {
-                    reg.showNotification("🚨 TEGENHUNT GEPLAKT (" + (data.direction || "") + ")!", {
+                    reg.showNotification("TEGENHUNT GEPLAKT (" + (data.direction || "") + ")!", {
                         body: `Geplakt om ${data.timeShort || ''}! Richting: ${data.direction}. Jullie hebben 30 minuten!`,
                         icon: 'icon-192.png',
                         badge: 'icon-192.png',
@@ -845,40 +1005,60 @@ db.ref('counterHunt').on('value', function(snapshot) {
             }
         }
         updateCounterHuntMiniBar();
+        notifyAdminPanelCounterHuntState();
     } else if (data.state === 'foiled') {
         renderCounterHuntSectorOnMap(null);
         updateCounterHuntMiniBar();
 
-        var foiledAgeMs = now - (data.foiledAtMs || 0);
-        if (isNewEvent && foiledAgeMs < 10 * 60 * 1000) {
+        var foiledTs = Number(data.foiledAtMs || data.updatedAt || now);
+        var foiledAgeMs = Math.max(0, now - foiledTs);
+        var alreadyDismissed = isCounterHuntEventDismissed(data.id, 'foiled');
+
+        if (foiledAgeMs < maxDisplayMs && !alreadyDismissed) {
             lastHandledCounterHuntId = data.id;
 
             modalBox.className = 'ch-mode-foiled';
             timerWrap.style.display = 'flex';
-            timerCaption.textContent = '🎉 TEGENHUNT SUCCESVOL VERIJDELD!';
+            timerCaption.textContent = 'TEGENHUNT SUCCESVOL VERIJDELD!';
             giantTimer.textContent = `+${data.points || 10} PT`;
 
-            alertBadge.textContent = `🏆 GEFELICITEERD! CODE ${data.code || ''} GEVONDEN!`;
+            alertBadge.textContent = `GEFELICITEERD! CODE ${data.code || ''} GEVONDEN!`;
             infoGrid.style.display = 'none';
-            extraDetails.innerHTML = `De tegenhunt met code <b>${data.code || ''}</b> is verijdeld! Dit levert jullie <b>${data.points || 10} punten</b> op!`;
+            extraDetails.innerHTML = `De tegenhunt met code <b>${data.code || ''}</b> is verijdeld! Dit levert jullie <b>${data.points || 10} punten</b> op! (Sluit automatisch na ${configuredCounterHuntAlertMinutes} min)`;
             rawMsgBox.textContent = data.rawMessage || '';
-            zoomBtn.textContent = '✔️ Top, Sluit Melding';
+            zoomBtn.textContent = 'Sluit Melding';
+            if (navBtn) navBtn.style.display = 'none';
 
             overlay.style.display = 'flex';
-            playAlertSound('foiled');
-            if ('vibrate' in navigator) navigator.vibrate([250, 100, 250, 100, 400]);
+            notifyAdminPanelCounterHuntState();
 
-            if (!isInitialCounterHuntLoad && 'serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
-                navigator.serviceWorker.ready.then(function(reg) {
-                    reg.showNotification("🎉 Tegenhunt Verijdeld! (+" + (data.points || 10) + " punten)", {
-                        body: `Code ${data.code || ''} is gevonden! Goed gewerkt!`,
-                        icon: 'icon-192.png',
-                        badge: 'icon-192.png',
-                        tag: 'counterhunt-alert',
-                        renotify: true
+            if (!isInitialCounterHuntLoad) {
+                playAlertSound('foiled');
+                if ('vibrate' in navigator) navigator.vibrate([250, 100, 250, 100, 400]);
+
+                if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+                    navigator.serviceWorker.ready.then(function(reg) {
+                        reg.showNotification("Tegenhunt Verijdeld! (+" + (data.points || 10) + " punten)", {
+                            body: `Code ${data.code || ''} is gevonden! Goed gewerkt!`,
+                            icon: 'icon-192.png',
+                            badge: 'icon-192.png',
+                            tag: 'counterhunt-alert',
+                            renotify: true
+                        });
                     });
-                });
+                }
             }
+
+            var remainingHideMs = Math.max(1000, maxDisplayMs - foiledAgeMs);
+            var hideTimer = setTimeout(function() {
+                markCounterHuntEventDismissed(data.id, 'foiled');
+                overlay.style.display = 'none';
+                notifyAdminPanelCounterHuntState();
+            }, remainingHideMs);
+            counterHuntDismissTimeouts.push(hideTimer);
+        } else {
+            overlay.style.display = 'none';
+            notifyAdminPanelCounterHuntState();
         }
     }
 

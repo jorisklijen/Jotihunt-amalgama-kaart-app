@@ -20,10 +20,15 @@ window.setAreaLockedTarget = function(area, houseName) {
     });
 };
 
-function updateAdminSettingsPanelStatus() {
+window.updateAdminSettingsPanelStatus = function() {
     var statusDot = document.getElementById('admin-max-hours-status-dot');
     var labelEl = document.getElementById('admin-max-hours-label');
     var subtextEl = document.getElementById('admin-max-hours-subtext');
+
+    var chTimerDot = document.getElementById('admin-ch-timer-status-dot');
+    var chTimerLabel = document.getElementById('admin-ch-timer-label');
+    var chTimerSubtext = document.getElementById('admin-ch-timer-subtext');
+    var chTimerInput = document.getElementById('admin-ch-timer-input');
 
     var altRouteDot = document.getElementById('admin-alt-route-status-dot');
     var altRouteToggle = document.getElementById('admin-alt-route-toggle');
@@ -49,6 +54,24 @@ function updateAdminSettingsPanelStatus() {
 
     labelEl.classList.toggle('capped-reached', anyCapped);
     subtextEl.classList.toggle('capped-reached', anyCapped);
+
+    // Status van de Tegenhunt melding (wordt lichtgrijs als er een melding actief is)
+    var isChNoticeActive = !!(typeof window.isCounterHuntNotificationActive === 'function' && window.isCounterHuntNotificationActive());
+    if (chTimerInput && document.activeElement !== chTimerInput && adminSettings.counterHuntAlertMinutes) {
+        chTimerInput.value = adminSettings.counterHuntAlertMinutes;
+    }
+    if (chTimerDot) {
+        chTimerDot.className = 'admin-status-dot ' + (isChNoticeActive ? 'status-dot-green' : 'status-dot-red');
+        chTimerDot.title = isChNoticeActive
+            ? 'Er is momenteel een Tegenhunt-melding actief'
+            : 'Geen actieve Tegenhunt-melding op dit moment';
+    }
+    if (chTimerLabel) {
+        chTimerLabel.classList.toggle('capped-reached', isChNoticeActive);
+    }
+    if (chTimerSubtext) {
+        chTimerSubtext.classList.toggle('capped-reached', isChNoticeActive);
+    }
 
     var altEnabled = !!adminSettings.showAltQuietRoute;
     var isAltRed = !altEnabled;
@@ -122,6 +145,10 @@ function updateAdminSettingsPanelStatus() {
             }).join('');
         }
     }
+};
+
+function updateAdminSettingsPanelStatus() {
+    window.updateAdminSettingsPanelStatus();
 }
 
 function injectAdminUI() {
@@ -223,12 +250,12 @@ function injectAdminUI() {
             background-color: #e74c3c;
             box-shadow: 0 0 5px rgba(231, 76, 60, 0.85);
         }
-        #admin-max-hours-input {
+        #admin-max-hours-input, #admin-ch-timer-input {
             width: 60px; padding: 5px 6px; border-radius: 5px;
             border: 1px solid #4a6278; background: #34495e; color: #ffffff;
             font-size: 0.85rem; font-weight: bold; text-align: center; outline: none;
         }
-        #admin-max-hours-input:focus { border-color: #3498db; }
+        #admin-max-hours-input:focus, #admin-ch-timer-input:focus { border-color: #3498db; }
         #admin-alt-route-toggle, #admin-route-speed-toggle {
             width: 17px; height: 17px; cursor: pointer; accent-color: #2ecc71;
         }
@@ -290,7 +317,7 @@ function injectAdminUI() {
     overlay.id = 'rd-modal-overlay';
     overlay.innerHTML = `
         <div id="rd-modal-box">
-            <h3 id="rd-modal-title">📍 RD-Punt Toevoegen</h3>
+            <h3 id="rd-modal-title">RD-Punt Toevoegen</h3>
 
             <div class="rd-field-group">
                 <label for="rd-type-select">Type punt (Naam):</label>
@@ -299,7 +326,7 @@ function injectAdminUI() {
                     <option value="Hunt">Hunt</option>
                     <option value="Anders">Anders</option>
                 </select>
-                <span id="rd-modal-anders-note">ℹ️ Bij 'Anders' wordt geen deelgebied en geen tijdstip opgeslagen.</span>
+                <span id="rd-modal-anders-note">Bij 'Anders' wordt geen deelgebied en geen tijdstip opgeslagen.</span>
             </div>
 
             <div class="rd-field-group">
@@ -324,7 +351,7 @@ function injectAdminUI() {
             <div class="rd-field-group" id="rd-datetime-group">
                 <label for="rd-datetime-input">Datum & Tijdstip:</label>
                 <input type="datetime-local" id="rd-datetime-input" class="rd-input" required>
-                <span id="rd-modal-hint-note">ℹ️ Voor een 'Hint' zijn alleen hele uren (:00) toegestaan.</span>
+                <span id="rd-modal-hint-note">Voor een 'Hint' zijn alleen hele uren (:00) toegestaan.</span>
             </div>
 
             <div id="rd-modal-error"></div>
@@ -429,8 +456,21 @@ function injectAdminUI() {
 
                 <div class="admin-setting-row">
                     <div class="admin-setting-label-wrap">
+                        <span id="admin-ch-timer-status-dot" class="admin-status-dot status-dot-red" title="Geen actieve Tegenhunt-melding"></span>
+                        <label id="admin-ch-timer-label" for="admin-ch-timer-input">Tegenhunt melding na-timer (<b>X</b> min):</label>
+                    </div>
+                    <input type="number" id="admin-ch-timer-input" min="1" max="60" step="1" value="5">
+                </div>
+                <div id="admin-ch-timer-subtext" class="admin-setting-subtext">
+                    Verbergt de melding (verijdeld of verlopen) automatisch na X minuten en toont deze niet opnieuw bij herladen.
+                </div>
+
+                <hr class="admin-divider">
+
+                <div class="admin-setting-row">
+                    <div class="admin-setting-label-wrap">
                         <span id="admin-alt-route-status-dot" class="admin-status-dot status-dot-green" title="Alternatieve route actief"></span>
-                        <label id="admin-alt-route-label" for="admin-alt-route-toggle">🛤️ Toon alternatieve parallelroute (mijd N-wegen):</label>
+                        <label id="admin-alt-route-label" for="admin-alt-route-toggle">Toon alternatieve parallelroute (mijd N-wegen):</label>
                     </div>
                     <input type="checkbox" id="admin-alt-route-toggle" checked>
                 </div>
@@ -443,7 +483,7 @@ function injectAdminUI() {
                 <div class="admin-setting-row">
                     <div class="admin-setting-label-wrap">
                         <span id="admin-route-speed-status-dot" class="admin-status-dot status-dot-red" title="Loopsnelheid o.b.v. hemelsbreed"></span>
-                        <label id="admin-route-speed-label" for="admin-route-speed-toggle">🥾 Loopsnelheid o.b.v. wandelroute (i.p.v. hemelsbreed):</label>
+                        <label id="admin-route-speed-label" for="admin-route-speed-toggle">Loopsnelheid o.b.v. wandelroute (i.p.v. hemelsbreed):</label>
                     </div>
                     <input type="checkbox" id="admin-route-speed-toggle">
                 </div>
@@ -487,6 +527,22 @@ function injectAdminUI() {
                 updatedAt: Date.now()
             }).then(function() {
                 window.calculateAndPublishMapState(true);
+            });
+        });
+
+        var chTimerInput = document.getElementById('admin-ch-timer-input');
+        chTimerInput.addEventListener('change', function() {
+            var val = parseFloat(this.value);
+            if (isNaN(val) || val <= 0) {
+                val = 5;
+                this.value = 5;
+            }
+            adminSettings.counterHuntAlertMinutes = val;
+            updateAdminSettingsPanelStatus();
+            claimMasterLockNow();
+            db.ref('adminSettings').update({
+                counterHuntAlertMinutes: val,
+                updatedAt: Date.now()
             });
         });
 
@@ -608,12 +664,12 @@ function injectAdminFoxStatusControls() {
             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:0.73rem;">
                 <span style="font-weight:600; color:#bdc3c7;">${areaName}:</span>
                 <select class="admin-target-lock-select admin-manual-fox-status" data-area="${areaName}" style="width:120px; padding:2px 5px;">
-                    <option value="rood">🔴 Rood</option>
-                    <option value="oranje">🟠 Oranje</option>
-                    <option value="geel">🟡 Geel</option>
-                    <option value="groen">🟢 Groen</option>
-                    <option value="blauw">🔵 Blauw</option>
-                    <option value="grijs" selected>⚪ Grijs</option>
+                    <option value="rood">Rood</option>
+                    <option value="oranje">Oranje</option>
+                    <option value="geel">Geel</option>
+                    <option value="groen">Groen</option>
+                    <option value="blauw">Blauw</option>
+                    <option value="grijs" selected>Grijs</option>
                 </select>
             </div>
         `;
@@ -628,7 +684,7 @@ function injectAdminFoxStatusControls() {
         <div class="admin-setting-row">
             <div class="admin-setting-label-wrap">
                 <span id="admin-fox-filter-dot" class="admin-status-dot status-dot-green"></span>
-                <label id="admin-fox-filter-label" style="color:#dcdde1;">🦊 Toon statussen in Vossen-menu:</label>
+                <label id="admin-fox-filter-label" style="color:#dcdde1;">Toon statussen in Vossen-menu:</label>
             </div>
         </div>
         <div class="admin-fox-colors-grid">
@@ -639,7 +695,7 @@ function injectAdminFoxStatusControls() {
         </div>
 
         <details style="margin-top:4px; background:#243342; padding:6px 8px; border-radius:5px; border:1px solid #3d566e;">
-            <summary style="font-size:0.74rem; font-weight:bold; color:#85c1e9; cursor:pointer;">🛠️ Handmatig vossenstatus wijzigen</summary>
+            <summary style="font-size:0.74rem; font-weight:bold; color:#85c1e9; cursor:pointer;">Handmatig vossenstatus wijzigen</summary>
             <div style="display:flex; flex-direction:column; gap:4px; margin-top:6px;">
                 ${manualOverrideRowsHtml}
             </div>
@@ -649,7 +705,7 @@ function injectAdminFoxStatusControls() {
         <div class="admin-setting-row">
             <div class="admin-setting-label-wrap">
                 <span class="admin-status-dot status-dot-green"></span>
-                <label for="admin-user-password-input" style="color:#dcdde1;">🔑 Gebruikerswachtwoord (Hunters):</label>
+                <label for="admin-user-password-input" style="color:#dcdde1;">Gebruikerswachtwoord (Hunters):</label>
             </div>
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
@@ -722,7 +778,7 @@ function injectAdminFoxStatusControls() {
 
             await db.ref('liveUsers').remove();
 
-            alert("✅ Gebruikerswachtwoord gewijzigd naar '" + newPwd + "'. Alle ingelogde gebruikers zijn automatisch uitgelogd.");
+            alert("Gebruikerswachtwoord gewijzigd naar '" + newPwd + "'. Alle ingelogde gebruikers zijn automatisch uitgelogd.");
         });
     }
 
@@ -758,7 +814,7 @@ function openRdModal(mode, existingKey, existingData) {
     errBox.style.display = 'none';
 
     if (mode === 'edit' && existingData) {
-        titleEl.innerText = "✏️ RD-Punt Bewerken";
+        titleEl.innerText = "RD-Punt Bewerken";
         var allowedTypes = ["Hint", "Hunt", "Anders"];
         var currentType = existingData.pointType || existingData.baseName || "Hint";
         typeSelect.value = allowedTypes.includes(currentType) ? currentType : "Anders";

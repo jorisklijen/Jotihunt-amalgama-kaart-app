@@ -14,6 +14,7 @@ var areaCappedStatus = {};
 
 var adminSettings = {
     maxCircleGrowthHours: 3,
+    counterHuntAlertMinutes: 5,
     maxWalkingSpeedKmh: 7.0,
     defaultSpeedKmh: 6.5,
     showAltQuietRoute: true,

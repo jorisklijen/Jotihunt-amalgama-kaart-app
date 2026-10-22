@@ -42,7 +42,7 @@ function evaluateMasterRole() {
         claimMasterLockNow();
     } else {
         isMasterAdmin = false;
-        if (badge) badge.innerText = "Beheerder (👀 Standby Sync)";
+        if (badge) badge.innerText = "Beheerder (Standby Sync)";
     }
 }
 
@@ -368,10 +368,10 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 : currentRadiusMeters + ' m';
 
             var badgeText = isFuture
-                ? `🎯 ${area}: 1 m (in toekomst)`
+                ? `${area}: 1 m (in toekomst)`
                 : (isCappedByAge
-                    ? `⏸️ ${area}: ${distFormatted} (max ${maxGrowthHours}u bereikt)`
-                    : `🎯 ${area}: ${distFormatted}`);
+                    ? `${area}: ${distFormatted} (max ${maxGrowthHours}u bereikt)`
+                    : `${area}: ${distFormatted}`);
 
             newAreaCappedStatus[area] = {
                 isCapped: isCappedByAge,
@@ -547,6 +547,16 @@ window.initAdminEngine = function() {
                 var inputEl = document.getElementById('admin-max-hours-input');
                 if (inputEl && document.activeElement !== inputEl) {
                     inputEl.value = parsedHours;
+                }
+            }
+        }
+        if (val.counterHuntAlertMinutes !== undefined) {
+            var parsedMins = parseFloat(val.counterHuntAlertMinutes);
+            if (!isNaN(parsedMins) && parsedMins > 0) {
+                adminSettings.counterHuntAlertMinutes = parsedMins;
+                var chInputEl = document.getElementById('admin-ch-timer-input');
+                if (chInputEl && document.activeElement !== chInputEl) {
+                    chInputEl.value = parsedMins;
                 }
             }
         }

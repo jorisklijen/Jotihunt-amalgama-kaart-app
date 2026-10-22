@@ -614,7 +614,8 @@ function renderComputedMapState(state) {
             var badgeIcon = L.divIcon({
                 className: 'geofence-badge-wrapper',
                 html: `<div class="geofence-radius-badge" style="border-color:${circleColor};">${gf.badgeText}</div>`,
-                iconSize: [80, 20], iconAnchor: [40, 10]
+                iconSize: null,
+                iconAnchor: null
             });
             if (activeGeofenceBadges[area]) {
                 activeGeofenceBadges[area].setLatLng(gf.center);
@@ -664,7 +665,7 @@ function renderComputedMapState(state) {
                 });
                 var targetHouseLabel = gf.estimatedTargetHouse ? `<br>Doelroute: <b>${gf.estimatedTargetHouse}</b>` : '';
                 var visitedNote = gf.visitedOriginHouse ? `<br>Herkomst (bezocht): <b>${gf.visitedOriginHouse}</b>` : '';
-                walkLine.bindPopup(`<b>🥾 Primaire voorspelde looproute (${area})</b>${targetHouseLabel}${visitedNote}`);
+                walkLine.bindPopup(`<b>Primaire voorspelde looproute (${area})</b>${targetHouseLabel}${visitedNote}`);
                 geofenceLayer.addLayer(walkLine);
                 activeEstimatedRoutes[area] = walkLine;
             }
@@ -682,7 +683,7 @@ function renderComputedMapState(state) {
                     className: 'alternative-walk-line'
                 });
                 var altTargetLabel = gf.estimatedTargetHouse ? `<br>Doel: <b>${gf.estimatedTargetHouse}</b>` : '';
-                altLine.bindPopup(`<b>🛤️ Alternatieve parallelroute (${area})</b><br>Mijdt N-wegen / kiest parallelweg${altTargetLabel}`);
+                altLine.bindPopup(`<b>Alternatieve parallelroute (${area})</b><br>Mijdt N-wegen / kiest parallelweg${altTargetLabel}`);
                 geofenceLayer.addLayer(altLine);
                 activeAlternativeRoutes[area] = altLine;
             }
@@ -712,7 +713,7 @@ function renderComputedMapState(state) {
                         <b>⭕ Kruispunt Cirkel & Route (${area})</b><br>
                         Doelroute: <b>${targetName}</b><br>
                         <button onclick="window.navigateToAreaPoint(${gf.intersectionPoint[0]}, ${gf.intersectionPoint[1]})" style="background:#3498db; color:white; border:none; padding:5px 8px; border-radius:3px; cursor:pointer; width:100%; margin-top:6px; font-weight:bold;">
-                            📍 Navigeer naar dit kruispunt
+                            Navigeer naar dit kruispunt
                         </button>
                     </div>
                 `);
