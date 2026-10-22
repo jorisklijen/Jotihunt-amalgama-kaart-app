@@ -15,9 +15,53 @@ var firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 var db = firebase.database();
+
+/* --- AUTOMATISCH ANONIEM INLOGGEN & WACHT-VANGNET --- */
+var authReadyPromise = new Promise(function(resolve) {
+    var unsubscribe = firebase.auth().onAuthStateChanged(function(user) {
+        if (user) {
+            unsubscribe();
+            resolve(user);
+        }
+    });
+});
+
 firebase.auth().signInAnonymously().catch(function(error) {
     console.error("Fout bij anoniem inloggen Firebase:", error);
 });
+
+// Zorg dat alle lees- en schrijfacties automatisch wachten tot de anonieme sessie klaar is
+(function() {
+    var RefProto = firebase.database.Reference.prototype;
+
+    var origOn = RefProto.on;
+    RefProto.on = function(eventType, callback, cancelCallbackOrContext, context) {
+        var self = this;
+        authReadyPromise.then(function() {
+            origOn.call(self, eventType, callback, cancelCallbackOrContext, context);
+        });
+        return callback;
+    };
+
+    var origOnce = RefProto.once;
+    RefProto.once = function(eventType, successCallback, failureCallbackOrContext, context) {
+        var self = this;
+        return authReadyPromise.then(function() {
+            return origOnce.call(self, eventType, successCallback, failureCallbackOrContext, context);
+        });
+    };
+
+    ['set', 'update', 'remove'].forEach(function(method) {
+        var origMethod = RefProto[method];
+        RefProto[method] = function() {
+            var self = this;
+            var args = arguments;
+            return authReadyPromise.then(function() {
+                return origMethod.apply(self, args);
+            });
+        };
+    });
+})();
 
 /* Globale applicatie-variabelen */
 var isAdmin = false;
