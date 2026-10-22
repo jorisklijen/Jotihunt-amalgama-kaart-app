@@ -15,6 +15,9 @@ var firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 var db = firebase.database();
+firebase.auth().signInAnonymously().catch(function(error) {
+    console.error("Fout bij anoniem inloggen Firebase:", error);
+});
 
 /* Globale applicatie-variabelen */
 var isAdmin = false;
