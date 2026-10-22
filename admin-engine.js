@@ -1,5 +1,5 @@
 /* ==========================================================================
-   4C. ADMIN-ENGINE.JS - MASTER LOCK, CENTRALE BEREKENING & INITIALISATIE
+   4C. ADMIN-ENGINE.JS - MASTER LOCK, CENTRALE BEREKENING, OPDRACHTEN SYNC & INIT
    (Wordt uitsluitend ingeladen voor de Admin)
    ========================================================================== */
 
@@ -30,7 +30,7 @@ function claimMasterLockNow() {
     lockRef.onDisconnect().remove();
     isMasterAdmin = true;
     var badge = document.getElementById('user-badge');
-    if (badge) badge.innerText = "Beheerder (⚡ Master Engine)";
+    if (badge) badge.innerText = "Beheerder (Master Engine)";
 }
 
 function evaluateMasterRole() {
@@ -177,7 +177,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
     }
 
     if (!isMasterAdmin && !forceManual) {
-        updateAdminSettingsPanelStatus();
+        if (typeof updateAdminSettingsPanelStatus === 'function') updateAdminSettingsPanelStatus();
         return;
     }
 
@@ -326,7 +326,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 }
 
                 if (totalWeight > 0) {
-                    var avgRad = Math.atan2(sumSin / totalWeight, sumCos / totalWeight);
+                    var avgRad = Math.atan2(sumSin / totalWeight, mCos ? sumCos / totalWeight : sumCos / totalWeight);
                     bearingDeg = ((avgRad * 180 / Math.PI) + 360) % 360;
                 }
             }
@@ -411,15 +411,15 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                     }
                 });
 
-                var lockPrefix = lockedTargetName ? "🔒 " : "";
+                var lockPrefix = lockedTargetName ? "[Gelockt] " : "";
                 var chainLabelParts = [];
                 if (lastChainEvent && lastChainEvent.type === 'house') {
-                    chainLabelParts.push("✔️ " + lastChainEvent.name);
+                    chainLabelParts.push("[Bezocht] " + lastChainEvent.name);
                 }
                 targetHousesChain.forEach(function(h) {
                     chainLabelParts.push(h.name);
                 });
-                estimatedTargetHouseName = lockPrefix + chainLabelParts.join(" ➔ ");
+                estimatedTargetHouseName = lockPrefix + chainLabelParts.join(" -> ");
 
                 var routesObj = await buildMultiStageWalkRoute(
                     waypoints,
@@ -489,7 +489,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
         }
 
         areaCappedStatus = newAreaCappedStatus;
-        updateAdminSettingsPanelStatus();
+        if (typeof updateAdminSettingsPanelStatus === 'function') updateAdminSettingsPanelStatus();
 
         var processedOtherPoints = rawOtherPoints.map(function(pt) {
             return {
@@ -528,14 +528,167 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
     }
 };
 
-/* --- 3. INITIALISATIE VAN DE ADMIN ENGINE --- */
+/* --- 3. AUTOMATISCHE OPDRACHTEN-SYNC VANUIT JOTIHUNT.NL (VIA CLOUDFLARE WORKER) --- */
+async function fetchJotihuntAssignmentsEndpoint() {
+    var targetUrl = "https://jotihunt.nl/api/2.0/articles";
+    var routes = [
+        { url: "https://jotihunt-proxy.joriskleijn2000.workers.dev/?url=" + encodeURIComponent(targetUrl), wrapped: false },
+        { url: "https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl) + "&disableCache=" + Date.now(), wrapped: true },
+        { url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl), wrapped: false }
+    ];
+
+    for (var i = 0; i < routes.length; i++) {
+        try {
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 6000);
+            var res = await fetch(routes[i].url, { cache: "no-store", signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (!res.ok) continue;
+
+            var json = await res.json();
+            if (routes[i].wrapped) {
+                if (!json || !json.contents) continue;
+                if (typeof json.contents === 'string' && json.contents.trim().startsWith('<')) continue;
+                json = JSON.parse(json.contents);
+            }
+            if (json && json.data) return json.data;
+            if (Array.isArray(json)) return json;
+        } catch (e) {}
+    }
+    return [];
+}
+
+function parseAssignmentDeadlineFromArticle(item) {
+    var rawDate = item.end_time || item.deadline || item.expires_at || (item.message && item.message.end_time) || null;
+    if (rawDate) {
+        var d = new Date(rawDate);
+        if (!isNaN(d.getTime())) return d;
+    }
+
+    var body = String(item.content || (item.message && item.message.content) || item.body || '');
+    var timeMatch = body.match(/(?:voor|uiterlijk|om|tot|vóór)\s+(\d{1,2})[:.](\d{2})/i);
+    if (timeMatch) {
+        var pubStr = item.publish_at || item.created_at || null;
+        var base = pubStr ? new Date(pubStr) : new Date();
+        if (isNaN(base.getTime())) base = new Date();
+        base.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
+        return base;
+    }
+    return null;
+}
+
+function parseMaxPointsFromArticle(item) {
+    if (item.max_points !== undefined) return Number(item.max_points);
+    if (item.points !== undefined) return Number(item.points);
+    if (item.message && item.message.max_points !== undefined) return Number(item.message.max_points);
+    var body = String(item.content || (item.message && item.message.content) || item.body || '');
+    var ptMatch = body.match(/(\d+)\s+punt(?:en)?/i);
+    return ptMatch ? parseInt(ptMatch[1], 10) : 5;
+}
+
+window.syncAssignmentsFromApi = async function(forceManual = false) {
+    if (!isAdmin) return;
+    if (!isMasterAdmin && !forceManual) return;
+
+    try {
+        var articles = await fetchJotihuntAssignmentsEndpoint();
+        if (!Array.isArray(articles) || articles.length === 0) {
+            if (forceManual) alert("Geen nieuwe opdrachten gevonden via de Jotihunt feed.");
+            return;
+        }
+
+        var assignmentArticles = articles.filter(function(art) {
+            var typeStr = String(art.type || art.category || '').toLowerCase();
+            var titleStr = String(art.title || (art.message && art.message.title) || '').toLowerCase();
+            return typeStr.includes('assignment') || typeStr.includes('opdracht') || titleStr.includes('opdracht');
+        });
+
+        if (assignmentArticles.length === 0) {
+            assignmentArticles = articles.filter(function(art) {
+                var text = String((art.title || '') + ' ' + (art.content || (art.message && art.message.content) || '')).toLowerCase();
+                return text.includes('opdracht') || text.includes('inleveren');
+            });
+        }
+
+        var currentMap = (typeof assignmentsData === 'object' && assignmentsData) ? assignmentsData : {};
+
+        assignmentArticles.forEach(function(art) {
+            var artTitle = art.title || (art.message && art.message.title) || "Opdracht";
+            var assignId = 'jh_' + (art.id || String(artTitle).replace(/[^a-z0-9]/gi, '_').toLowerCase());
+            var existing = currentMap[assignId] || {};
+
+            var deadlineDate = parseAssignmentDeadlineFromArticle(art);
+            var deadlineMs = deadlineDate ? deadlineDate.getTime() : (existing.deadlineTimestamp || null);
+            var deadlineFormatted = deadlineDate
+                ? deadlineDate.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }) + ' ' +
+                  deadlineDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
+                : (existing.deadlineFormatted || "Zie bericht");
+
+            var payload = {
+                id: assignId,
+                title: artTitle,
+                deadlineTimestamp: deadlineMs,
+                deadlineFormatted: deadlineFormatted,
+                maxPoints: existing.maxPoints !== undefined && existing.maxPoints !== null ? existing.maxPoints : parseMaxPointsFromArticle(art),
+                earnedPoints: existing.earnedPoints !== undefined ? existing.earnedPoints : null,
+                feedback: existing.feedback || "",
+                status: existing.status || "Open",
+                assignedTo: existing.assignedTo || "",
+                notes: existing.notes || "",
+                url: "https://jotihunt.nl/"
+            };
+
+            db.ref('assignments/' + assignId).update(payload);
+        });
+
+        if (forceManual) {
+            alert("Synchronisatie met Jotihunt voltooid (" + assignmentArticles.length + " opdrachten gecontroleerd).");
+        }
+    } catch (e) {
+        console.warn("Kon opdrachten niet synchroniseren:", e);
+    }
+};
+
+window.openCustomAssignmentModal = function() {
+    if (!isAdmin) return;
+    var title = prompt("Titel van de nieuwe opdracht:");
+    if (!title || !title.trim()) return;
+
+    var deadlineInput = prompt("Deadline tijdstip (UU:MM, bijv. 21:30):", "21:00");
+    var maxPts = prompt("Maximaal te behalen punten:", "5");
+
+    var d = new Date();
+    if (deadlineInput && deadlineInput.includes(':')) {
+        var p = deadlineInput.split(':');
+        d.setHours(parseInt(p[0], 10) || 0, parseInt(p[1], 10) || 0, 0, 0);
+    }
+    var formatted = d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }) + ' ' +
+                    d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+
+    var id = 'manual_' + Date.now();
+    db.ref('assignments/' + id).set({
+        id: id,
+        title: title.trim(),
+        deadlineTimestamp: d.getTime(),
+        deadlineFormatted: formatted,
+        maxPoints: parseInt(maxPts, 10) || 0,
+        earnedPoints: null,
+        feedback: "",
+        status: "Open",
+        assignedTo: "",
+        notes: "",
+        updatedAt: Date.now()
+    });
+};
+
+/* --- 4. INITIALISATIE VAN DE ADMIN ENGINE --- */
 window.initAdminEngine = function() {
     initMasterElection();
 
     proj4.defs("EPSG:28992", "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.387638888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.417,50.3319,465.524,-0.398957,0.343988,-1.8774,4.0725 +units=m +no_defs");
     proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 
-    injectAdminUI();
+    if (typeof injectAdminUI === 'function') injectAdminUI();
     renderFixedHouses();
 
     db.ref('adminSettings').on('value', function(snapshot) {
@@ -568,8 +721,8 @@ window.initAdminEngine = function() {
         }
         adminSettings.lockedTargets = val.lockedTargets || {};
 
-        updateAdminSettingsPanelStatus();
-        window.syncAdminFoxFilterCheckboxes();
+        if (typeof updateAdminSettingsPanelStatus === 'function') updateAdminSettingsPanelStatus();
+        if (typeof window.syncAdminFoxFilterCheckboxes === 'function') window.syncAdminFoxFilterCheckboxes();
         window.calculateAndPublishMapState(false);
     });
 
@@ -606,7 +759,7 @@ window.initAdminEngine = function() {
             });
         }
         areaCappedStatus = syncedStatus;
-        updateAdminSettingsPanelStatus();
+        if (typeof updateAdminSettingsPanelStatus === 'function') updateAdminSettingsPanelStatus();
     });
 
     db.ref('rdPoints').on('value', function(snapshot) {
@@ -659,4 +812,12 @@ window.initAdminEngine = function() {
     setInterval(function() {
         window.calculateAndPublishMapState(false);
     }, 10000);
+
+    // Synchroniseer de opdrachten vanaf jotihunt.nl elke 60 seconden via de Master Admin
+    setTimeout(function() {
+        window.syncAssignmentsFromApi(false);
+    }, 2000);
+    setInterval(function() {
+        window.syncAssignmentsFromApi(false);
+    }, 60000);
 };

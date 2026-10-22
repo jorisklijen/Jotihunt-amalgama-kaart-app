@@ -67,6 +67,7 @@ firebase.auth().signInAnonymously().catch(function(error) {
 var isAdmin = false;
 var currentUserName = "";
 var currentUserId = "";
+var activeView = "map";
 
 var targetAreas = ["Alpha", "Bravo", "Delta", "Foxtrot", "Golf", "Hotel", "Oscar"];
 var areaColors = {
@@ -116,10 +117,11 @@ var amalgamaLat = 51.83915;
 var amalgamaLng = 5.78562;
 var radiusMeters = 450;
 
-/* Gedeelde data-opslag voor kaartweergave */
+/* Gedeelde data-opslag voor kaartweergave & opdrachten */
 var allLocations = [];
 var houseVisitedStatus = {};
 var latestKnownAreaPoints = {};
+var assignmentsData = {};
 
 /* Hulpfunctie: Vertaalt elke ruwe status (green, red, orange, grey, yellow, blue, etc.) naar 1 van de 6 sleutels */
 function normalizeFoxStatusKey(rawStatus) {
@@ -146,4 +148,36 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
 
 window.navigateToAreaPoint = function(lat, lng) {
     window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+};
+
+/* Schakelen tussen Kaart en Opdrachten weergave */
+window.switchView = function(viewName) {
+    activeView = viewName;
+    var mapWrap = document.getElementById('map-wrapper');
+    var assignWrap = document.getElementById('assignments-wrapper');
+    var btnMap = document.getElementById('tab-btn-map');
+    var btnAssign = document.getElementById('tab-btn-assignments');
+
+    if (viewName === 'assignments') {
+        if (mapWrap) mapWrap.style.display = 'none';
+        if (assignWrap) assignWrap.style.display = 'flex';
+        if (btnMap) btnMap.classList.remove('active-tab');
+        if (btnAssign) btnAssign.classList.add('active-tab');
+        if (typeof window.renderAssignmentsList === 'function') {
+            window.renderAssignmentsList();
+        }
+    } else {
+        if (assignWrap) assignWrap.style.display = 'none';
+        if (mapWrap) mapWrap.style.display = 'block';
+        if (btnAssign) btnAssign.classList.remove('active-tab');
+        if (btnMap) btnMap.classList.add('active-tab');
+        if (window.map) {
+            setTimeout(function() { window.map.invalidateSize(); }, 150);
+        }
+    }
+};
+
+window.dismissDeadlineAlert = function() {
+    var banner = document.getElementById('deadline-alert-banner');
+    if (banner) banner.style.display = 'none';
 };

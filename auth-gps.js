@@ -1,8 +1,20 @@
 /* ==========================================================================
    2. AUTH-GPS.JS - FIREBASE INLOGSYSTEEM, WAKELOCK, GPS TRACKING & LAZY LOADING
+   Behoudt 100% van het Firebase 'authSettings' wachtwoordsysteem + koppeling
+   met de nieuwe Opdrachten-pagina.
    ========================================================================== */
 
 var isSessionActive = false;
+
+// Vangnet voor het geval firebaseAuthConfig nog niet in config.js gedeclareerd stond
+if (typeof window.firebaseAuthConfig === 'undefined') {
+    window.firebaseAuthConfig = {
+        adminPassword: null,
+        userPassword: "1111",
+        userSessionVersion: 1,
+        loaded: false
+    };
+}
 
 /* Luister real-time naar de wachtwoorden en sessie-versie in Firebase ('authSettings') */
 db.ref('authSettings').on('value', function(snapshot) {
@@ -58,7 +70,9 @@ document.getElementById('pin-input').addEventListener('input', function() {
         nameField.style.display = 'inline-block';
         nameField.placeholder = 'Naam';
     } else if (val === firebaseAuthConfig.adminPassword) {
-        nameField.style.display = 'none';
+        // Optioneel naamveld voor Admin (handig bij 'Opdracht oppakken', valt standaard terug op 'Admin')
+        nameField.style.display = 'inline-block';
+        nameField.placeholder = 'Naam (optioneel voor Admin)';
     }
 });
 
@@ -99,12 +113,12 @@ async function checkPin() {
             firebaseAuthConfig.loaded = true;
 
             isAdmin = true;
-            currentUserName = "Admin";
+            currentUserName = name || "Admin";
             localStorage.setItem('jh_auth_role', 'admin');
-            localStorage.setItem('jh_auth_name', 'Admin');
+            localStorage.setItem('jh_auth_name', currentUserName);
             localStorage.setItem('jh_admin_pwd_snapshot', pin);
 
-            alert("✅ Nog geen wachtwoord gevonden in Firebase.\n\nJouw ingevoerde wachtwoord is nu ingesteld als het Admin-wachtwoord! Je kunt het wachtwoord voor de gebruikers instellen in het Beheer Instellingen menu.");
+            alert("Nog geen wachtwoord gevonden in Firebase.\n\nJouw ingevoerde wachtwoord is nu ingesteld als het Admin-wachtwoord! Je kunt het wachtwoord voor de gebruikers instellen in het Beheer Instellingen menu.");
             initApp();
             return;
         }
@@ -115,9 +129,9 @@ async function checkPin() {
 
         if (pin === currentAdminPwd) {
             isAdmin = true;
-            currentUserName = "Admin";
+            currentUserName = name || "Admin";
             localStorage.setItem('jh_auth_role', 'admin');
-            localStorage.setItem('jh_auth_name', 'Admin');
+            localStorage.setItem('jh_auth_name', currentUserName);
             localStorage.setItem('jh_admin_pwd_snapshot', currentAdminPwd);
             initApp();
             return;
@@ -200,7 +214,7 @@ window.addEventListener('load', function() {
             }
             localStorage.setItem('jh_admin_pwd_snapshot', currentAdminPwd);
             isAdmin = true;
-            currentUserName = "Admin";
+            currentUserName = savedName || "Admin";
             initApp();
         } else if (savedRole === 'user' && savedName) {
             var savedVersion = Number(localStorage.getItem('jh_user_session_version') || 0);
@@ -256,9 +270,14 @@ function initApp() {
 
     var badge = document.getElementById('user-badge');
     if (isAdmin) {
-        badge.innerText = "Beheerder (Admin)";
+        badge.innerText = currentUserName === "Admin" ? "Beheerder (Admin)" : currentUserName + " (Admin)";
         document.getElementById('btn-add-rd').style.display = 'inline-block';
         document.getElementById('clear-rd-btn').style.display = 'inline-block';
+
+        // Toon ook de Admin-knoppen op de nieuwe Opdrachten-pagina (Sync Jotihunt & Nieuwe Opdracht)
+        var adminBtns = document.querySelectorAll('.admin-only-btn');
+        adminBtns.forEach(function(btn) { btn.style.display = 'inline-block'; });
+
         loadAdminDependencies().catch(function(err) {
             console.error("Fout bij laden admin-modules:", err);
         });
@@ -269,8 +288,13 @@ function initApp() {
 
     keepScreenAwake();
 
+    // Ververs direct de Opdrachtenlijst zodat de "Oppakken" knop en Admin-invoervelden de juiste rechten hebben
+    if (typeof window.renderAssignmentsList === 'function') {
+        window.renderAssignmentsList();
+    }
+
     setTimeout(function() {
-        map.invalidateSize();
+        if (window.map) map.invalidateSize();
     }, 100);
 }
 

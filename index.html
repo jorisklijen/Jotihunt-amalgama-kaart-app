@@ -37,25 +37,62 @@
         </div>
     </div>
 
+    <!-- NEUTRALE ADMIN DEADLINE NOTIFICATIE (10 MINUTEN) -->
+    <div id="deadline-alert-banner" style="display:none;">
+        <span id="deadline-alert-text">Let op: Opdracht verloopt over minder dan 10 minuten.</span>
+        <button type="button" onclick="dismissDeadlineAlert()">Sluiten</button>
+    </div>
+
     <!-- ================= HOOFDAPPLICATIE ================= -->
     <div id="app-container">
-        <!-- Bovenste navigatie- en actiebalk -->
+        <!-- Bovenste navigatie- en actiebalk (Volledig emoji-vrij) -->
         <div id="header">
             <div id="header-title-box">
                 <h1>Scouting Amalgama Jotihunt app</h1>
                 <div id="user-badge">Niet ingelogd</div>
             </div>
             <div class="header-right">
+                <button class="header-btn nav-tab-btn active-tab" id="tab-btn-map" onclick="switchView('map')">Kaart</button>
+                <button class="header-btn nav-tab-btn" id="tab-btn-assignments" onclick="switchView('assignments')">Opdrachten</button>
                 <button class="header-btn" id="btn-add-rd" onclick="if(window.addMarkerByRD) addMarkerByRD()" style="display:none;">+ RD</button>
                 <button class="header-btn" id="clear-rd-btn" onclick="if(window.clearRdPoints) clearRdPoints()" style="display:none;">Wis</button>
-                <button class="header-btn" id="btn-darkmode" onclick="toggleDarkMode()" title="Donkere kaartmodus aan/uit">🌙 Dark</button>
+                <button class="header-btn" id="btn-darkmode" onclick="toggleDarkMode()" title="Donkere kaartmodus aan/uit">Dark</button>
                 <button class="header-btn" id="btn-logout" onclick="logout()" title="Uitloggen">Uitloggen</button>
             </div>
         </div>
         
-        <!-- Kaartomgeving -->
+        <!-- WEERGAVE 1: KAARTOMGEVING -->
         <div id="map-wrapper">
             <div id="map"></div>
+        </div>
+
+        <!-- WEERGAVE 2: OPDRACHTEN PAGINA -->
+        <div id="assignments-wrapper" style="display:none;">
+            <div class="assignments-top-bar">
+                <div class="points-summary-cards">
+                    <div class="points-card">
+                        <span class="points-label">Behaalde punten</span>
+                        <span class="points-value" id="points-earned-total">0</span>
+                    </div>
+                    <div class="points-card">
+                        <span class="points-label">Maximaal te behalen</span>
+                        <span class="points-value" id="points-max-total">0</span>
+                    </div>
+                    <div class="points-card">
+                        <span class="points-label">Actieve opdrachten</span>
+                        <span class="points-value" id="assignments-active-count">0</span>
+                    </div>
+                </div>
+
+                <div class="assignments-actions-bar">
+                    <input type="text" id="assignment-search" placeholder="Filter op titel, naam of status..." oninput="renderAssignmentsList()">
+                    <button class="action-btn admin-only-btn" id="btn-sync-assignments" onclick="if(window.syncAssignmentsFromApi) syncAssignmentsFromApi(true)" style="display:none;">Sync Jotihunt</button>
+                    <button class="action-btn admin-only-btn" id="btn-add-assignment" onclick="if(window.openCustomAssignmentModal) openCustomAssignmentModal()" style="display:none;">Nieuwe Opdracht</button>
+                </div>
+            </div>
+
+            <!-- Responsive Lijst/Tabel Container -->
+            <div id="assignments-list-container"></div>
         </div>
     </div>
 
@@ -68,16 +105,17 @@
         }
     </script>
 
-  <!-- Externe Basis Bibliotheken (Alleen Leaflet & Firebase Compat v10) -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <!-- Externe Basis Bibliotheken (Alleen Leaflet & Firebase Compat v10) -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 
     <!-- Modulaire App Scripts (Hunter + Basis) -->
     <script src="config.js"></script>
     <script src="map-viewer.js"></script>
     <script src="fox-alerts.js"></script>
+    <script src="assignments.js"></script>
     <script src="auth-gps.js"></script>
     <!-- Let op: admin-routing.js, admin-ui.js, admin-engine.js en proj4.js worden automatisch ingeladen zodra een Admin inlogt! -->
 </body>
