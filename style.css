@@ -29,6 +29,7 @@ html, body {
     width: 100%;
     height: 100%;
     position: relative;
+    overflow: hidden;
 }
 
 /* --- 2. HEADER & STATUSBALK --- */
@@ -98,6 +99,7 @@ html, body {
     width: 100%;
     height: 100%;
     background-color: #1a252f;
+    overflow: hidden;
 }
 
 #map,
@@ -577,7 +579,6 @@ html, body {
     width: 100%;
 }
 
-/* Vast Info-Venster naast het Vossen Status Menu */
 #fox-fixed-detail-card {
     position: absolute;
     top: 12px;
@@ -936,7 +937,6 @@ html, body {
     border: 1px solid rgba(255, 255, 255, 0.4);
 }
 
-/* Klikbare rode Mini-Balk bovenin de kaart zolang de Tegenhunt loopt */
 #counterhunt-mini-bar {
     position: absolute;
     top: 8px;
@@ -974,7 +974,6 @@ html, body {
     color: #fef08a;
 }
 
-/* --- STIJL VOOR VERLOPEN TEGENHUNT MELDING --- */
 #counterhunt-modal-box.ch-mode-expired {
     background: linear-gradient(160deg, #431407 0%, #9a3412 50%, #431407 100%);
     border: 3px solid #fdba74;
@@ -1046,13 +1045,12 @@ html, body {
     .ch-info-card-val {
         font-size: 1.05rem;
     }
-} /* <-- DEZE SLUIT-ACCOLADE ONTBRAK EERDER! */
+}
 
 
 /* ==========================================================================
    10. OPDRACHTEN PAGINA: GOOGLE SHEETS DESKTOP GRID & MOBIELE KAARTEN
-   Geen emoji's, donkerblauw thema (#1a252f / #2c3e50)
-   Met afkapping (...) en uitklappen op klik/tap!
+   Inclusief onzichtbaar scrollen op het Opdrachten-tabblad en status 'Deadline verlopen'
    ========================================================================== */
 
 #deadline-alert-banner {
@@ -1084,16 +1082,32 @@ html, body {
     border-color: #2980b9 !important;
 }
 
+/* Scrollbare container uitsluitend voor het Opdrachten-tabblad, zonder zichtbare scrollbar */
 #assignments-wrapper {
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
     background: #1a252f;
     color: #ecf0f1;
     overflow-y: auto;
     overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     padding: 14px;
     gap: 14px;
+    scrollbar-width: none;       /* Firefox: verberg scrollbar */
+    -ms-overflow-style: none;    /* IE/Edge: verberg scrollbar */
+}
+
+#assignments-wrapper::-webkit-scrollbar,
+#assignments-list-container::-webkit-scrollbar,
+textarea.table-text-input::-webkit-scrollbar {
+    display: none;               /* Chrome/Safari/Edge: verberg scrollbar */
+    width: 0;
+    height: 0;
 }
 
 /* --- BOVENSTE BALK: PUNTENKAARTEN & ZOEKBALK (DESKTOP + MOBIEL) --- */
@@ -1198,7 +1212,6 @@ html, body {
     word-break: break-word;
 }
 
-/* Textarea / Input die standaard 1 regel met '...' toont en bij focus uitklapt */
 textarea.table-text-input {
     font-family: inherit;
     resize: none;
@@ -1212,6 +1225,7 @@ textarea.table-text-input {
     width: 100%;
     max-width: 100%;
     cursor: pointer;
+    scrollbar-width: none;
 }
 
 textarea.table-text-input:focus,
@@ -1352,24 +1366,28 @@ textarea.table-text-input.is-expanded {
         justify-content: flex-end;
     }
 
+    /* Zorgt dat je op desktop en tablet soepel door de lijst kunt scrollen zonder scrollbar */
     #assignments-list-container {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
         border: 1px solid #4a6278;
         border-radius: 6px;
-        overflow: hidden;
         background: #2c3e50;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
     }
 
-    /* Kolomverdeling met vaste spreadsheet-verhoudingen */
     .assignments-grid-header,
     .assignment-row {
         display: grid;
-        grid-template-columns: minmax(180px, 1.8fr) 125px 135px 175px 115px minmax(150px, 1.4fr) minmax(190px, 1.8fr);
+        grid-template-columns: minmax(180px, 1.8fr) 150px 145px 175px 115px minmax(150px, 1.4fr) minmax(190px, 1.8fr);
         align-items: stretch;
         gap: 0;
     }
 
-    /* Spreadsheet Kolomkoppen */
     .assignments-grid-header {
         background: #11181f;
         color: #bdc3c7;
@@ -1394,7 +1412,6 @@ textarea.table-text-input.is-expanded {
         border-right: none;
     }
 
-    /* Spreadsheet Rijen */
     .assignment-row {
         background: #2c3e50;
         border-bottom: 1px solid #3e5368;
@@ -1422,12 +1439,15 @@ textarea.table-text-input.is-expanded {
     .assignment-row.status-bezig { border-left-color: #f39c12; }
     .assignment-row.status-ingeleverd { border-left-color: #2ecc71; opacity: 0.92; }
     .assignment-row.status-afgerond { border-left-color: #7f8c8d; opacity: 0.78; }
+    .assignment-row.status-deadlineverlopen {
+        border-left-color: #e74c3c;
+        background: rgba(192, 57, 43, 0.14);
+    }
     .assignment-row.row-urgent {
-        background: rgba(231, 76, 60, 0.16) !important;
+        background: rgba(231, 76, 60, 0.18) !important;
         border-left-color: #e74c3c;
     }
 
-    /* Individuele Spreadsheet Cellen met verticale rasterlijnen */
     .cell-block {
         padding: 7px 10px;
         border-right: 1px solid #3e5368;
@@ -1445,7 +1465,6 @@ textarea.table-text-input.is-expanded {
         display: none !important;
     }
 
-    /* Compacte Google-Sheets achtige invoervelden in cellen */
     .status-select,
     textarea.table-text-input,
     .points-input {
@@ -1486,6 +1505,7 @@ textarea.table-text-input.is-expanded {
     .status-select.status-bezig { color: #f39c12; font-weight: 700; }
     .status-select.status-ingeleverd { color: #2ecc71; font-weight: 700; }
     .status-select.status-afgerond { color: #bdc3c7; font-weight: 700; }
+    .status-select.status-deadlineverlopen { color: #ff7675; font-weight: 700; }
 
     .points-input {
         width: 44px;
@@ -1501,6 +1521,11 @@ textarea.table-text-input.is-expanded {
 @media (max-width: 900px) {
     .assignments-grid-header {
         display: none;
+    }
+
+    #assignments-list-container {
+        flex-shrink: 0;
+        padding-bottom: 24px;
     }
 
     .assignment-row {
@@ -1521,6 +1546,10 @@ textarea.table-text-input.is-expanded {
     .assignment-row.status-bezig { border-left-color: #f39c12; }
     .assignment-row.status-ingeleverd { border-left-color: #2ecc71; opacity: 0.88; }
     .assignment-row.status-afgerond { border-left-color: #7f8c8d; opacity: 0.75; }
+    .assignment-row.status-deadlineverlopen {
+        border-left-color: #e74c3c;
+        background: rgba(192, 57, 43, 0.16);
+    }
     .assignment-row.row-urgent { border-color: #e74c3c; background: rgba(231, 76, 60, 0.12); }
 
     .cell-block {
@@ -1554,6 +1583,10 @@ textarea.table-text-input.is-expanded {
         font-size: 0.92rem;
         font-weight: 600;
         min-height: 40px;
+    }
+
+    .status-select.status-deadlineverlopen {
+        color: #ff7675;
     }
 
     textarea.table-text-input {
