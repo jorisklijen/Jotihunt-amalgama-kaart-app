@@ -450,90 +450,102 @@ setInterval(function() {
 
 injectFoxStatusPanel();
 
-/* --- DUIDELIJKE IN-APP MELDING BIJ VOSSEN OP GROEN (MET 30S WITTE BALK + 0.5S SLUITEN) --- */
-var greenAlertTimeout = null;
-var greenAlertCloseDelayTimeout = null;
+/* --- DUIDELIJKE IN-APP MELDING BIJ VOSSEN STATUSWIJZIGING (MET 6S WITTE BALK + 0.5S SLUITEN) --- */
+var foxAlertTimeout = null;
+var foxAlertCloseDelayTimeout = null;
 
-function closeGreenHuntToastNow() {
-    if (greenAlertTimeout) clearTimeout(greenAlertTimeout);
-    if (greenAlertCloseDelayTimeout) clearTimeout(greenAlertCloseDelayTimeout);
-    var toast = document.getElementById('green-hunt-alert-toast');
+function closeFoxAlertToastNow() {
+    if (foxAlertTimeout) clearTimeout(foxAlertTimeout);
+    if (foxAlertCloseDelayTimeout) clearTimeout(foxAlertCloseDelayTimeout);
+    var toast = document.getElementById('fox-alert-toast');
     if (toast) toast.style.display = 'none';
 }
 
-function ensureGreenHuntBannerUI() {
-    if (document.getElementById('green-hunt-alert-toast')) return;
-    var mapWrapper = document.getElementById('map-wrapper') || document.body;
+function ensureFoxAlertBannerUI() {
+    if (document.getElementById('fox-alert-toast')) return;
+    
     var toast = document.createElement('div');
-    toast.id = 'green-hunt-alert-toast';
+    toast.id = 'fox-alert-toast';
     toast.style.display = 'none';
-    toast.style.overflow = 'hidden';
+    
     toast.innerHTML = `
-        <div class="green-hunt-toast-content">
-            <div class="green-hunt-toast-icon"></div>
-            <div class="green-hunt-toast-text">
-                <div id="green-hunt-toast-title">DEELGEBIED MAG WEER GEHUNT WORDEN!</div>
-                <div id="green-hunt-toast-sub">Status is zojuist op GROEN gesprongen!</div>
-            </div>
-            <div class="green-hunt-toast-actions">
-                <button type="button" id="green-hunt-toast-zoom-btn">Zoom in</button>
-                <button type="button" id="green-hunt-toast-close-btn">✕</button>
-            </div>
+        <span id="fox-alert-toast-text"></span>
+        <div style="display:flex; flex-shrink:0;">
+            <button type="button" id="fox-alert-toast-zoom-btn">Zoom in</button>
+            <button type="button" id="fox-alert-toast-close-btn">Sluiten</button>
         </div>
         <div class="toast-progress-wrap">
-            <div id="green-hunt-toast-progress-bar" class="toast-progress-bar"></div>
+            <div id="fox-alert-toast-progress-bar" class="toast-progress-bar"></div>
         </div>
     `;
-    mapWrapper.appendChild(toast);
+    
+    document.body.insertBefore(toast, document.body.firstChild);
 
-    document.getElementById('green-hunt-toast-close-btn').addEventListener('click', function() {
-        closeGreenHuntToastNow();
+    document.getElementById('fox-alert-toast-close-btn').addEventListener('click', function() {
+        closeFoxAlertToastNow();
     });
 }
 
-function triggerAreaHuntableAlert(areaName, timeFormatted) {
-    ensureGreenHuntBannerUI();
-    playAlertSound('green');
-    if ('vibrate' in navigator) navigator.vibrate([400, 120, 400, 120, 600]);
+function triggerFoxStatusAlert(areaName, colorKey, timeFormatted) {
+    ensureFoxAlertBannerUI();
+    
+    var cfg = foxStatusConfig[colorKey] || foxStatusConfig["grijs"];
+    
+    // Alleen bij Groen het lange vibratie/geluidspatroon, de rest kort
+    if (colorKey === 'groen') {
+        playAlertSound('green');
+        if ('vibrate' in navigator) navigator.vibrate([400, 120, 400, 120, 600]);
+    } else {
+        if ('vibrate' in navigator) navigator.vibrate([250, 100, 250]);
+    }
 
-    var toast = document.getElementById('green-hunt-alert-toast');
-    var titleEl = document.getElementById('green-hunt-toast-title');
-    var subEl = document.getElementById('green-hunt-toast-sub');
-    var zoomBtn = document.getElementById('green-hunt-toast-zoom-btn');
-    var progressBar = document.getElementById('green-hunt-toast-progress-bar');
+    var toast = document.getElementById('fox-alert-toast');
+    var textEl = document.getElementById('fox-alert-toast-text');
+    var zoomBtn = document.getElementById('fox-alert-toast-zoom-btn');
+    var progressBar = document.getElementById('fox-alert-toast-progress-bar');
+
+    // Stel de kleuren dynamisch in op basis van de config
+    toast.style.backgroundColor = cfg.bg;
+    toast.style.borderBottomColor = cfg.border;
+    toast.style.color = cfg.text;
 
     var timePart = timeFormatted ? ` (om ${timeFormatted})` : '';
-    titleEl.textContent = `${areaName.toUpperCase()} MAG WEER GEHUNT WORDEN!`;
-    subEl.textContent = `Deelgebied ${areaName} staat weer op GROEN${timePart}. Ga direct op pad!`;
+    
+    if (colorKey === 'groen') {
+        textEl.textContent = `DEELGEBIED ${areaName.toUpperCase()} MAG WEER GEHUNT WORDEN! Status is GROEN${timePart}.`;
+    } else {
+        textEl.textContent = `STATUSWIJZIGING: ${areaName.toUpperCase()} is nu ${cfg.label.toUpperCase()}${timePart}.`;
+    }
 
     zoomBtn.onclick = function() {
         window.zoomToLatestFoxArea(areaName);
         selectedFoxInfoArea = areaName;
         window.renderFoxStatusButtons();
-        closeGreenHuntToastNow();
+        closeFoxAlertToastNow();
     };
 
-    toast.style.display = 'block';
+    toast.style.display = 'flex';
 
-    // Start de witte voortgangsbalk van links (0%) naar rechts (100%) in exact 30 seconden
+    // Start de witte voortgangsbalk (6 seconden)
     if (progressBar) {
         progressBar.style.transition = 'none';
         progressBar.style.width = '0%';
         void progressBar.offsetWidth; // Forceer reflow
-        progressBar.style.transition = 'width 30s linear';
+        progressBar.style.transition = 'width 6s linear';
         progressBar.style.width = '100%';
     }
 
-    if (greenAlertTimeout) clearTimeout(greenAlertTimeout);
-    if (greenAlertCloseDelayTimeout) clearTimeout(greenAlertCloseDelayTimeout);
+    if (foxAlertTimeout) clearTimeout(foxAlertTimeout);
+    if (foxAlertCloseDelayTimeout) clearTimeout(foxAlertCloseDelayTimeout);
 
-    // Zodra de 30 seconden voorbij zijn en de overkant is bereikt: wacht 0.5 sec (500ms) en sluit
-    greenAlertTimeout = setTimeout(function() {
-        greenAlertCloseDelayTimeout = setTimeout(function() {
-            closeGreenHuntToastNow();
+    // Na 6 seconden sluiten
+    foxAlertTimeout = setTimeout(function() {
+        foxAlertCloseDelayTimeout = setTimeout(function() {
+            closeFoxAlertToastNow();
         }, 500);
-    }, 30000);
+    }, 6000);
 }
+
 var isInitialFoxStatusLoad = true;
 var prevFoxStatusMap = {};
 
@@ -549,24 +561,22 @@ db.ref('foxStatuses').on('value', function(snapshot) {
         if (!isInitialFoxStatusLoad && prevFoxStatusMap[areaName] && prevFoxStatusMap[areaName] !== curr) {
             var cfg = foxStatusConfig[curr] || foxStatusConfig["grijs"];
 
-            if (curr === "groen") {
-                triggerAreaHuntableAlert(areaName, stObj.timeFormatted || "");
-            } else {
-                if ('vibrate' in navigator) navigator.vibrate([250, 100, 250]);
-            }
+            // Activeer de nieuwe dynamische melding voor ALLE kleuren
+            triggerFoxStatusAlert(areaName, curr, stObj.timeFormatted || "");
 
+            // OS Pushnotificatie voor op de achtergrond
             if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
                 navigator.serviceWorker.ready.then(function(reg) {
                     var notifTitle = curr === "groen"
                         ? `JA! ${areaName} mag weer gehunt worden!`
-                        : `🦊 Status ${areaName}: ${cfg.label}`;
+                        : `Vossen Status ${areaName}: ${cfg.label}`;
                     var notifBody = curr === "groen"
                         ? `Deelgebied ${areaName} staat weer op GROEN! Klik om op de kaart te kijken.`
                         : `Status van ${areaName} is via Telegram gewijzigd in ${cfg.label}!`;
 
                     reg.showNotification(notifTitle, {
                         body: notifBody,
-                        icon: 'icon-192.png',
+                        icon: 'icon-192.png', //// hier foto voor melding
                         badge: 'icon-192.png',
                         vibrate: curr === "groen" ? [400, 120, 400, 120, 600] : [250, 100, 250],
                         tag: 'fox-status-' + areaName,

@@ -1,8 +1,8 @@
 /* ==========================================================================
-SC SCOUTING AMALGAMA - JOTIHUNT APP STYLESHEET
-Geoptimaliseerd voor hoge framerates, lage presentation delay (INP fix),
-vaste flikkervrije info-vensters, Groene Hunt-alerts en Tegenhunt Popups.
-========================================================================== */
+   SC SCOUTING AMALGAMA - JOTIHUNT APP STYLESHEET
+   Geoptimaliseerd voor hoge framerates, lage presentation delay (INP fix),
+   vaste flikkervrije info-vensters, Status-alerts, Opdrachten & Tegenhunt Popups.
+   ========================================================================== */
 
 /* --- 1. RESET & BASIS LAYOUT --- */
 * {
@@ -163,7 +163,7 @@ html, body {
 .custom-rd-pin svg,
 .custom-car-pin svg {
     display: block;
-    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
     transform: translateZ(0);
 }
 
@@ -314,7 +314,7 @@ html, body {
     text-align: center;
     font-weight: bold;
     font-size: 11px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
 /* --- SCHALENDE ACHTERGROND VOOR LAATST BEZOCHTE PUNT / CIRKEL-BADGE --- */
@@ -700,79 +700,37 @@ html, body {
     font-style: italic;
 }
 
-/* --- 8. DUIDELIJKE IN-APP MELDING ALS DEELGEBIED WEER OP GROEN SPRINGT --- */
+/* --- 8. DUIDELIJKE IN-APP MELDING BIJ STATUSWIJZIGING (VOSSEN) --- */
+#fox-alert-toast,
 #green-hunt-alert-toast {
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 2200;
-    width: 92%;
-    max-width: 460px;
-    background: linear-gradient(135deg, #1e8449, #27ae60);
-    color: #ffffff;
-    border: 2px solid #a9dfbf;
-    border-radius: 10px;
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.65);
-    padding: 11px 14px;
-}
-
-.green-hunt-toast-content {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.green-hunt-toast-icon {
-    font-size: 1.55rem;
-    flex-shrink: 0;
-}
-
-.green-hunt-toast-text {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-#green-hunt-toast-title {
-    font-weight: 800;
+    padding: 10px 16px;
     font-size: 0.88rem;
-    letter-spacing: 0.3px;
-}
-
-#green-hunt-toast-sub {
-    font-size: 0.76rem;
-    color: #eafaf1;
     font-weight: 600;
-}
-
-.green-hunt-toast-actions {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
+    border-bottom: 2px solid transparent;
+    z-index: 2500;
+    position: relative;
+    overflow: hidden;
 }
 
-#green-hunt-toast-zoom-btn {
-    background: #ffffff;
-    color: #1e8449;
-    border: none;
-    border-radius: 5px;
-    padding: 6px 10px;
-    font-weight: 800;
-    font-size: 0.76rem;
+#fox-alert-toast button,
+#green-hunt-alert-toast button {
+    background: rgba(0, 0, 0, 0.18);
+    color: inherit;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-weight: 600;
     cursor: pointer;
+    margin-left: 8px;
+    transition: background-color 0.15s ease;
 }
 
-#green-hunt-toast-close-btn {
-    background: rgba(0, 0, 0, 0.25);
-    color: #ffffff;
-    border: none;
-    border-radius: 5px;
-    padding: 5px 8px;
-    font-weight: bold;
-    cursor: pointer;
+#fox-alert-toast button:hover,
+#green-hunt-alert-toast button:hover {
+    background: rgba(0, 0, 0, 0.32);
 }
 
 /* --- 9. CENTRALE TEGENHUNT POPUP MIDDEN OP HET SCHERM --- */
@@ -1019,18 +977,6 @@ html, body {
         font-size: 0.73rem;
     }
 
-    .green-hunt-toast-content {
-        flex-wrap: wrap;
-    }
-
-    #green-hunt-toast-title {
-        font-size: 0.8rem;
-    }
-
-    #green-hunt-toast-sub {
-        font-size: 0.72rem;
-    }
-
     #counterhunt-modal-box {
         padding: 15px 13px;
         gap: 10px;
@@ -1050,7 +996,7 @@ html, body {
 
 /* ==========================================================================
    10. OPDRACHTEN PAGINA: GOOGLE SHEETS DESKTOP GRID & MOBIELE KAARTEN
-   Inclusief onzichtbaar scrollen op het Opdrachten-tabblad en status 'Deadline verlopen'
+   Geen felle blauwe links, strak in het donkere thema (#1a252f / #2c3e50)
    ========================================================================== */
 
 #deadline-alert-banner {
@@ -1064,6 +1010,8 @@ html, body {
     align-items: center;
     border-bottom: 1px solid #962d22;
     z-index: 2500;
+    position: relative;
+    overflow: hidden;
 }
 
 #deadline-alert-banner button {
@@ -1077,9 +1025,9 @@ html, body {
 }
 
 .nav-tab-btn.active-tab {
-    background: #3498db !important;
+    background: #4a6278 !important;
     color: #ffffff !important;
-    border-color: #2980b9 !important;
+    border-color: #6c88a3 !important;
 }
 
 /* Scrollbare container uitsluitend voor het Opdrachten-tabblad, zonder zichtbare scrollbar */
@@ -1098,14 +1046,14 @@ html, body {
     touch-action: pan-y;
     padding: 14px;
     gap: 14px;
-    scrollbar-width: none;       /* Firefox: verberg scrollbar */
-    -ms-overflow-style: none;    /* IE/Edge: verberg scrollbar */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
 
 #assignments-wrapper::-webkit-scrollbar,
 #assignments-list-container::-webkit-scrollbar,
 textarea.table-text-input::-webkit-scrollbar {
-    display: none;               /* Chrome/Safari/Edge: verberg scrollbar */
+    display: none;
     width: 0;
     height: 0;
 }
@@ -1132,22 +1080,30 @@ textarea.table-text-input::-webkit-scrollbar {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: space-between;
     text-align: center;
     min-width: 0;
+    min-height: 68px;
 }
 
 .points-label {
-    font-size: 0.75rem;
+    font-size: 0.74rem;
     color: #bdc3c7;
     text-transform: uppercase;
     letter-spacing: 0.4px;
+    line-height: 1.2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.4em;
 }
 
 .points-value {
-    font-size: 1.35rem;
-    font-weight: 700;
+    font-size: 1.4rem;
+    font-weight: 800;
     color: #ffffff;
-    margin-top: 2px;
+    line-height: 1.1;
+    margin-top: 4px;
 }
 
 .assignments-actions-bar {
@@ -1169,7 +1125,7 @@ textarea.table-text-input::-webkit-scrollbar {
 }
 
 #assignment-search:focus {
-    border-color: #3498db;
+    border-color: #7f8c8d;
 }
 
 .action-btn {
@@ -1237,23 +1193,24 @@ textarea.table-text-input.is-expanded {
     cursor: text;
 }
 
-/* --- ALGEMENE ELEMENT STYLING --- */
+/* --- ALGEMENE ELEMENT STYLING (IN HET DONKERE THEMA ZONDER FEL BLAUW) --- */
 .assignment-title-text {
     font-weight: 700;
     font-size: 0.9rem;
-    color: #ffffff;
+    color: #ecf0f1;
     line-height: 1.3;
 }
 
 .assignment-link {
     display: inline-block;
     font-size: 0.75rem;
-    color: #5dade2;
+    color: #bdc3c7;
     text-decoration: none;
     margin-top: 2px;
 }
 
 .assignment-link:hover {
+    color: #ffffff;
     text-decoration: underline;
 }
 
@@ -1366,7 +1323,6 @@ textarea.table-text-input.is-expanded {
         justify-content: flex-end;
     }
 
-    /* Zorgt dat je op desktop en tablet soepel door de lijst kunt scrollen zonder scrollbar */
     #assignments-list-container {
         flex: 1 1 auto;
         min-height: 0;
@@ -1415,7 +1371,7 @@ textarea.table-text-input.is-expanded {
     .assignment-row {
         background: #2c3e50;
         border-bottom: 1px solid #3e5368;
-        border-left: 4px solid #3498db;
+        border-left: 4px solid #7f8c8d;
         margin-top: 0;
         border-radius: 0;
         padding: 0;
@@ -1435,10 +1391,10 @@ textarea.table-text-input.is-expanded {
     }
 
     /* Statuskleuren op de linker rij-indicator */
-    .assignment-row.status-open { border-left-color: #3498db; }
+    .assignment-row.status-open { border-left-color: #7f8c8d; }
     .assignment-row.status-bezig { border-left-color: #f39c12; }
     .assignment-row.status-ingeleverd { border-left-color: #2ecc71; opacity: 0.92; }
-    .assignment-row.status-afgerond { border-left-color: #7f8c8d; opacity: 0.78; }
+    .assignment-row.status-afgerond { border-left-color: #95a5a6; opacity: 0.78; }
     .assignment-row.status-deadlineverlopen {
         border-left-color: #e74c3c;
         background: rgba(192, 57, 43, 0.14);
@@ -1489,19 +1445,19 @@ textarea.table-text-input.is-expanded {
     .status-select:hover,
     textarea.table-text-input:hover,
     .points-input:hover {
-        border-color: #4a6278;
+        border-color: #7f8c8d;
         background: #1a252f;
     }
 
     .status-select:focus,
     textarea.table-text-input:focus,
     .points-input:focus {
-        border-color: #3498db;
+        border-color: #7f8c8d;
         background: #11181f;
-        box-shadow: inset 0 0 0 1px #3498db;
+        box-shadow: inset 0 0 0 1px #7f8c8d;
     }
 
-    .status-select.status-open { color: #5dade2; font-weight: 700; }
+    .status-select.status-open { color: #ecf0f1; font-weight: 600; }
     .status-select.status-bezig { color: #f39c12; font-weight: 700; }
     .status-select.status-ingeleverd { color: #2ecc71; font-weight: 700; }
     .status-select.status-afgerond { color: #bdc3c7; font-weight: 700; }
@@ -1534,7 +1490,7 @@ textarea.table-text-input.is-expanded {
         gap: 10px;
         background: #2c3e50;
         border: 1px solid #3e5368;
-        border-left: 5px solid #3498db;
+        border-left: 5px solid #7f8c8d;
         border-radius: 6px;
         padding: 14px;
         margin-top: 8px;
@@ -1543,9 +1499,10 @@ textarea.table-text-input.is-expanded {
         overflow: hidden;
     }
 
+    .assignment-row.status-open { border-left-color: #7f8c8d; }
     .assignment-row.status-bezig { border-left-color: #f39c12; }
     .assignment-row.status-ingeleverd { border-left-color: #2ecc71; opacity: 0.88; }
-    .assignment-row.status-afgerond { border-left-color: #7f8c8d; opacity: 0.75; }
+    .assignment-row.status-afgerond { border-left-color: #95a5a6; opacity: 0.75; }
     .assignment-row.status-deadlineverlopen {
         border-left-color: #e74c3c;
         background: rgba(192, 57, 43, 0.16);
@@ -1585,9 +1542,8 @@ textarea.table-text-input.is-expanded {
         min-height: 40px;
     }
 
-    .status-select.status-deadlineverlopen {
-        color: #ff7675;
-    }
+    .status-select.status-open { color: #ecf0f1; font-weight: 600; }
+    .status-select.status-deadlineverlopen { color: #ff7675; }
 
     textarea.table-text-input {
         height: 40px;
@@ -1606,7 +1562,7 @@ textarea.table-text-input.is-expanded {
     }
 }
 
-/* --- KLIKBARE OPDRACHT-TITEL, WIS-KNOP & NIEUWE OPDRACHT MODAL --- */
+/* --- KLIKBARE OPDRACHT-TITEL (GEEN FEL BLAUW MEER, PAST IN THEMA), BEWERK/WIS-KNOP & MODAL --- */
 .title-row-wrap {
     display: flex;
     align-items: center;
@@ -1619,17 +1575,42 @@ textarea.table-text-input.is-expanded {
 .assignment-title-link {
     font-weight: 700;
     font-size: 0.9rem;
-    color: #5dade2;
-    text-decoration: none;
+    color: #ecf0f1;
+    text-decoration: underline dotted #7f8c8d;
+    text-underline-offset: 3px;
     line-height: 1.3;
     flex: 1;
     min-width: 0;
-    transition: color 0.15s ease;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease;
 }
 
 .assignment-title-link:hover {
-    color: #85c1e9;
-    text-decoration: underline;
+    color: #ffffff;
+    text-decoration: underline solid #bdc3c7;
+}
+
+.row-admin-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.edit-assignment-btn {
+    background: #34495e;
+    color: #ecf0f1;
+    border: 1px solid #5d7892;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.edit-assignment-btn:hover {
+    background: #4a6278;
+    color: #ffffff;
 }
 
 .delete-assignment-btn {
@@ -1647,6 +1628,16 @@ textarea.table-text-input.is-expanded {
 
 .delete-assignment-btn:hover {
     background: #e74c3c;
+}
+
+.admin-editable-deadline {
+    cursor: pointer;
+    text-decoration: underline dotted #7f8c8d;
+    text-underline-offset: 3px;
+}
+
+.admin-editable-deadline:hover {
+    color: #ffffff;
 }
 
 /* Nieuwe Opdracht Modal (Exact dezelfde stijl als de + RD Modal) */
@@ -1716,7 +1707,7 @@ textarea.table-text-input.is-expanded {
 }
 
 .assign-modal-input:focus {
-    border-color: #3498db;
+    border-color: #7f8c8d;
 }
 
 #assign-modal-error {
@@ -1752,41 +1743,7 @@ textarea.table-text-input.is-expanded {
 .assign-btn-cancel { background: #7f8c8d; }
 .assign-btn-cancel:hover { background: #95a5a6; }
 
-/* --- BEWERK-KNOP OPDRACHTEN & WITTE 30-SECONDEN VOORTGANGSBALK ONDER MELDINGEN --- */
-.row-admin-actions {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-shrink: 0;
-}
-
-.edit-assignment-btn {
-    background: #f39c12;
-    color: #ffffff;
-    border: 1px solid #d68910;
-    border-radius: 4px;
-    padding: 3px 8px;
-    font-size: 0.72rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: background-color 0.15s ease;
-}
-
-.edit-assignment-btn:hover {
-    background: #e67e22;
-}
-
-.admin-editable-deadline {
-    cursor: pointer;
-    text-decoration: underline dotted #5dade2;
-    text-underline-offset: 3px;
-}
-
-.admin-editable-deadline:hover {
-    color: #5dade2;
-}
-
-/* Witte balk onderaan de meldingen die in 30s van links naar rechts loopt */
+/* Witte voortgangsbalk onderaan de meldingen (loopt van links naar rechts) */
 .toast-progress-wrap {
     position: absolute;
     bottom: 0;
@@ -1805,36 +1762,210 @@ textarea.table-text-input.is-expanded {
     box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
 }
 
-.points-card {
+/* ==========================================================================
+   11. ADMIN INSTELLINGEN PANEEL (KLEURT DYNAMISCH MEE)
+   ========================================================================== */
+#admin-settings-panel {
+    position: absolute;
+    top: 12px;
+    left: 54px;
+    z-index: 950;
     background: #2c3e50;
+    color: #ecf0f1;
     border: 1px solid #4a6278;
-    border-radius: 6px;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    width: 280px;
+    max-width: 88vw;
+    font-size: 0.8rem;
+    user-select: none;
+    touch-action: none;
+    overflow: hidden;
+}
+
+#admin-settings-header {
+    background: #1a252f;
+    color: #ffffff;
+    padding: 7px 10px;
+    font-weight: bold;
+    font-size: 0.82rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: move;
+    border-bottom: 1px solid #4a6278;
+}
+
+#admin-settings-min-btn {
+    background: #34495e;
+    color: #ecf0f1;
+    border: 1px solid #4a6278;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 1px 7px;
+    line-height: 1.2;
+}
+
+#admin-settings-body {
     padding: 10px 12px;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: space-between; /* Zorgt dat getallen altijd op exact dezelfde hoogte staan */
-    text-align: center;
-    min-width: 0;
-    min-height: 68px;
+    gap: 8px;
+    max-height: 75vh;
+    overflow-y: auto;
 }
 
-.points-label {
-    font-size: 0.74rem;
-    color: #bdc3c7;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    line-height: 1.2;
+.admin-setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.admin-setting-label-wrap {
     display: flex;
     align-items: center;
-    justify-content: center;
-    min-height: 2.4em; /* Reserveert altijd ruimte voor 2 regels zodat elk getal recht uitlijnt */
+    gap: 7px;
+    flex: 1;
 }
 
-.points-value {
-    font-size: 1.4rem;
-    font-weight: 800;
+.admin-setting-row label {
+    font-size: 0.76rem;
+    color: #95a5a6;
+    font-weight: 600;
+    line-height: 1.25;
+    transition: color 0.2s ease;
+    cursor: pointer;
+}
+
+.admin-setting-row label.capped-reached {
+    color: #dcdde1 !important;
+}
+
+.admin-status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.status-dot-green {
+    background-color: #2ecc71;
+    box-shadow: 0 0 5px rgba(46, 204, 113, 0.75);
+}
+
+.status-dot-red {
+    background-color: #e74c3c;
+    box-shadow: 0 0 5px rgba(231, 76, 60, 0.85);
+}
+
+#admin-max-hours-input,
+#admin-ch-timer-input {
+    width: 60px;
+    padding: 5px 6px;
+    border-radius: 5px;
+    border: 1px solid #4a6278;
+    background: #34495e;
     color: #ffffff;
-    line-height: 1.1;
-    margin-top: 4px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    text-align: center;
+    outline: none;
+}
+
+#admin-max-hours-input:focus,
+#admin-ch-timer-input:focus {
+    border-color: #7f8c8d;
+}
+
+#admin-alt-route-toggle,
+#admin-route-speed-toggle {
+    width: 17px;
+    height: 17px;
+    cursor: pointer;
+    accent-color: #2ecc71;
+}
+
+.admin-setting-subtext {
+    font-size: 0.7rem;
+    color: #95a5a6;
+    line-height: 1.25;
+    transition: color 0.2s ease;
+}
+
+.admin-setting-subtext.capped-reached {
+    color: #dcdde1 !important;
+}
+
+.admin-divider {
+    border: 0;
+    border-top: 1px solid #3d566e;
+    margin: 2px 0;
+}
+
+#admin-area-growth-list {
+    display: none;
+    flex-direction: column;
+    gap: 5px;
+    border-top: 1px solid #3d566e;
+    padding-top: 6px;
+    margin-top: 2px;
+}
+
+.admin-area-status-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    color: #95a5a6;
+    font-weight: 600;
+    transition: color 0.2s ease;
+}
+
+.admin-area-status-item.capped-reached {
+    color: #dcdde1 !important;
+}
+
+.admin-target-lock-select {
+    width: 100%;
+    padding: 4px 6px;
+    font-size: 0.72rem;
+    background: #34495e;
+    color: #ecf0f1;
+    border: 1px solid #4a6278;
+    border-radius: 4px;
+    font-weight: 600;
+    outline: none;
+    cursor: pointer;
+}
+
+.admin-fox-colors-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px;
+    width: 100%;
+}
+
+.admin-fox-color-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.73rem;
+    color: #ecf0f1;
+    cursor: pointer;
+    background: #34495e;
+    padding: 5px 6px;
+    border-radius: 4px;
+    border: 1px solid #4a6278;
+    font-weight: 600;
+    justify-content: flex-start;
+}
+
+.admin-fox-color-pill input {
+    margin: 0;
+    cursor: pointer;
 }

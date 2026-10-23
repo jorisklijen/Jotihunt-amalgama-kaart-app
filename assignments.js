@@ -208,16 +208,30 @@ function hasPointsOrFeedback(item) {
 function computeDesiredStatus(item) {
     var currentStatus = item.status || 'Open';
 
-    // Alleen automatisch op 'Afgerond' zetten bij punten/feedback als de gebruiker de status NIET zelf handmatig heeft aangepast
+    // Regel 1: Als er behaalde punten en/of feedback zijn ingevuld
     if (hasPointsOrFeedback(item) && !item.manualStatusOverride) {
         return 'Afgerond';
     }
 
     if (item.deadlineTimestamp && !isNaN(item.deadlineTimestamp)) {
-        var isPast = Number(item.deadlineTimestamp) < Date.now();
+        var now = Date.now();
+        var deadline = Number(item.deadlineTimestamp);
+        var isPast = deadline < now;
+        var isExpiredBy3Hours = (now - deadline) > (3 * 3600 * 1000); // 3 uur voorbij de deadline
+
+        // NIEUW: Als hij 3 uur of langer verlopen is, en momenteel 'Deadline verlopen' is (of zou worden)
+        if (isPast && isExpiredBy3Hours) {
+            if (currentStatus === 'Deadline verlopen' || (!item.manualStatusOverride && currentStatus !== 'Ingeleverd' && currentStatus !== 'Afgerond')) {
+                return 'Afgerond';
+            }
+        }
+
+        // Regel 2: Deadline net verlopen (maar nog geen 3 uur), en NIET op 'Ingeleverd' of 'Afgerond'
         if (isPast && currentStatus !== 'Ingeleverd' && currentStatus !== 'Afgerond' && !item.manualStatusOverride) {
             return 'Deadline verlopen';
         }
+        
+        // Regel 3: Als de deadline naar de toekomst is verplaatst, herstel de status
         if (!isPast && currentStatus === 'Deadline verlopen') {
             return item.assignedTo ? 'Bezig' : 'Open';
         }
@@ -1187,20 +1201,20 @@ function showDeadlineAlertWithProgressBar(messageText) {
     if (bar) {
         bar.style.transition = 'none';
         bar.style.width = '0%';
-        void bar.offsetWidth; // Forceer reflow zodat de 30s animatie altijd vanaf links (0%) start
-        bar.style.transition = 'width 30s linear';
+        void bar.offsetWidth; // Forceer reflow
+        bar.style.transition = 'width 6s linear'; // Veranderd van 30s naar 6s
         bar.style.width = '100%';
     }
 
     if (deadlineBannerTimer) clearTimeout(deadlineBannerTimer);
     if (deadlineBannerCloseTimeout) clearTimeout(deadlineBannerCloseTimeout);
 
-    // Na 30 seconden heeft de witte balk de rechterkant bereikt -> wacht 0.5 sec (500ms) en sluit
+    // Na 6 seconden heeft de witte balk de rechterkant bereikt -> wacht 0.5 sec (500ms) en sluit
     deadlineBannerTimer = setTimeout(function() {
         deadlineBannerCloseTimeout = setTimeout(function() {
             window.dismissDeadlineAlert();
         }, 500);
-    }, 30000);
+    }, 6000); // Veranderd van 30000 naar 6000
 }
 
 function checkAdminDeadlineNotifications() {
