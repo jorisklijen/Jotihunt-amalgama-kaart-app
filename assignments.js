@@ -1,11 +1,12 @@
 /* ==========================================================================
    4. ASSIGNMENTS.JS - OPDRACHTEN TRACKER + LIVE GOOGLE SHEETS SYNC
    Desktop: Google Sheets tabel-grid | Mobiel: Gestapelde kaarten
-   Geen emoji's in de UI of knoppen.
+   Met afkapping (...) en uitklappen op klik/tap. Geen emoji's.
    ========================================================================== */
 
 var assignmentsData = {};
 var notifiedTenMinDeadlines = {};
+var expandedFieldMemory = {}; // Onthoudt welke tekstvelden de gebruiker heeft opengeklapt
 
 // Configuratie voor jullie live Google Sheet (tabblad gid=1344677603)
 var GOOGLE_SHEET_ID = "1lZTXRRbvy8ODGgZheOpm3qUdFOu8mM1muhxOyeStks4";
@@ -116,14 +117,10 @@ function parseSheetDeadline(deadlineStr) {
     var clean = String(deadlineStr).trim();
     if (!clean) return null;
 
-    // Probeer standaard Date.parse
-    var parsed = Date.parse(clean);
-    if (!isNaN(parsed)) return parsed;
-
-    // Ondersteun NL formaat zoals "23-10 21:00" of "23-10-2026 21:00" of alleen "21:00"
     var now = new Date();
     var currentYear = now.getFullYear();
 
+    // Ondersteun NL formaat zoals "23-10 21:00" of "23-10-2026 21:00"
     var dmyMatch = clean.match(/^(\d{1,2})[-/](\d{1,2})(?:[-/](\d{2,4}))?\s+(\d{1,2}):(\d{2})/);
     if (dmyMatch) {
         var day = parseInt(dmyMatch[1], 10);
@@ -135,12 +132,16 @@ function parseSheetDeadline(deadlineStr) {
         return new Date(year, month, day, hour, min, 0).getTime();
     }
 
-    var timeOnlyMatch = clean.match(/^(\d{1,2}):(\d{2})$/);
+    // Ondersteun alleen tijd zoals "17:45" of "17:45:00"
+    var timeOnlyMatch = clean.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if (timeOnlyMatch) {
         var d = new Date();
         d.setHours(parseInt(timeOnlyMatch[1], 10), parseInt(timeOnlyMatch[2], 10), 0, 0);
         return d.getTime();
     }
+
+    var parsed = Date.parse(clean);
+    if (!isNaN(parsed)) return parsed;
 
     return null;
 }
@@ -188,7 +189,6 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
     var rows = parseCSVToRows(csvText);
     if (rows.length < 2) return;
 
-    // Zoek de juiste kolom-indexen op basis van de eerste rij (headers), met vaste fallback-volgorde
     var headers = rows[0].map(function(h) { return String(h || '').toLowerCase().trim(); });
 
     function findCol(keywords, fallbackIdx) {
@@ -198,14 +198,14 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
         return idx !== -1 ? idx : fallbackIdx;
     }
 
-    var colTitle    = findCol(['opdracht', 'titel', 'naam', 'onderwerp', 'taak'], 0);
+    var colTitle    = findCol(['opdracht', 'titel', 'onderwerp', 'taak'], 0);
     var colStatus   = findCol(['status', 'voortgang', 'staat'], 1);
     var colDeadline = findCol(['deadline', 'tijd', 'inlever', 'eindtijd'], 2);
-    var colAssignee = findCol(['opgepakt', 'wie', 'persoon', 'door', 'naam'], 3);
+    var colAssignee = findCol(['opgepakt', 'wie', 'persoon', 'door', 'uitvoerder'], 3);
     var colEarned   = findCol(['behaald', 'gekregen', 'score'], 4);
     var colMax      = findCol(['max', 'te behalen', 'punten', 'totaal'], 4);
     var colFeedback = findCol(['feedback', 'beoordeling', 'jury', 'telegram'], 5);
-    var colNotes    = findCol(['opmerking', 'notitie', 'info', 'toelichting'], 6);
+    var colNotes    = findCol(['opmerking', 'notitie', 'info', 'toelichting', 'omschrijving', 'wat willen we zien'], 6);
 
     var updatesBatch = {};
     var syncedCount = 0;
@@ -215,11 +215,9 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
         var title = row[colTitle] ? String(row[colTitle]).trim() : "";
         if (!title) continue;
 
-        // Maak een stabiel Firebase ID op basis van de opdrachttitel
         var safeSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').substring(0, 48);
         var itemId = "sheet_" + (safeSlug || ("row_" + r));
 
-        // Kijk of deze opdracht al onder een ander ID in Firebase staat
         var existingId = Object.keys(assignmentsData).find(function(k) {
             return k === itemId || (assignmentsData[k] && String(assignmentsData[k].title || '').toLowerCase().trim() === title.toLowerCase());
         });
@@ -228,9 +226,18 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
 
         var rawStatus = row[colStatus] !== undefined ? row[colStatus] : "";
         var rawDeadline = row[colDeadline] !== undefined ? row[colDeadline] : "";
-        var rawAssignee = row[colAssignee] !== undefined ? row[colAssignee] : "";
+        var rawAssignee = row[colAssignee] !== undefined ? String(row[colAssignee]).trim() : "";
         var rawFeedback = row[colFeedback] !== undefined ? row[colFeedback] : "";
-        var rawNotes = row[colNotes] !== undefined ? row[colNotes] : "";
+        var rawNotes = row[colNotes] !== undefined ? String(row[colNotes]).trim() : "";
+
+        // Als de 'Opgepakt door' cel uit de Sheet per ongeluk een lange opdrachtbeschrijving bevat (>35 tekens),
+        // verplaats deze tekst dan automatisch naar Opmerkingen/Notities en houd 'Opgepakt door' schoon!
+        if (rawAssignee.length > 35 || rawAssignee.toLowerCase().startsWith("wat willen we zien")) {
+            if (!rawNotes) {
+                rawNotes = rawAssignee;
+            }
+            rawAssignee = existingObj.assignedTo && existingObj.assignedTo.length <= 35 ? existingObj.assignedTo : "";
+        }
 
         // Verwerk punten (ondersteunt zowel losse kolommen als "4 / 5" in één kolom)
         var earnedPoints = existingObj.earnedPoints !== undefined ? existingObj.earnedPoints : null;
@@ -267,7 +274,7 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
             status: rawStatus ? normalizeSheetStatus(rawStatus) : (existingObj.status || "Open"),
             deadlineFormatted: rawDeadline || existingObj.deadlineFormatted || "Geen datum",
             deadlineTimestamp: parsedDeadlineTs || existingObj.deadlineTimestamp || null,
-            assignedTo: rawAssignee !== "" ? rawAssignee : (existingObj.assignedTo || ""),
+            assignedTo: rawAssignee !== "" ? rawAssignee : (existingObj.assignedTo && existingObj.assignedTo.length <= 35 ? existingObj.assignedTo : ""),
             earnedPoints: earnedPoints,
             maxPoints: maxPoints,
             feedback: rawFeedback !== "" ? rawFeedback : (existingObj.feedback || ""),
@@ -374,6 +381,37 @@ function formatRemainingTime(deadlineMs) {
     return "Over " + hours + "u " + mins + "m";
 }
 
+/* ==========================================================================
+   UITKLAPPEN VAN AFGEKAPTE TEKSTVELDEN (...) BIJ KLIKKEN / TIKKEN
+   ========================================================================== */
+
+window.toggleExpandText = function(el, memKey) {
+    if (!el) return;
+    var isNowExpanded = el.classList.toggle('is-expanded');
+    if (memKey) {
+        expandedFieldMemory[memKey] = isNowExpanded;
+    }
+};
+
+window.expandTextareaInput = function(el, memKey) {
+    if (!el) return;
+    el.classList.add('is-expanded');
+    el.style.height = 'auto';
+    el.style.height = Math.max(40, el.scrollHeight + 4) + 'px';
+    if (memKey) {
+        expandedFieldMemory[memKey] = true;
+    }
+};
+
+window.collapseTextareaInput = function(el, memKey) {
+    if (!el) return;
+    el.classList.remove('is-expanded');
+    el.style.height = '';
+    if (memKey) {
+        expandedFieldMemory[memKey] = false;
+    }
+};
+
 /* Render de responsieve opdrachtenlijst (Google Sheets tabel op desktop, kaarten op mobiel) */
 window.renderAssignmentsList = function() {
     var container = document.getElementById('assignments-list-container');
@@ -434,6 +472,10 @@ window.renderAssignmentsList = function() {
         var earnedVal = (item.earnedPoints !== undefined && item.earnedPoints !== null && item.earnedPoints !== '') ? item.earnedPoints : '-';
         var maxVal = (item.maxPoints !== undefined && item.maxPoints !== null && item.maxPoints !== '') ? item.maxPoints : '-';
 
+        var titleExpanded = expandedFieldMemory[key + '_title'] ? 'is-expanded' : '';
+        var assigneeExpanded = expandedFieldMemory[key + '_assignee'] ? 'is-expanded' : '';
+        var fbExpanded = expandedFieldMemory[key + '_feedback'] ? 'is-expanded' : '';
+
         var pointsCellHtml = adminMode
             ? `<div class="points-edit-wrap">
                    <input type="number" class="live-edit-field points-input" value="${earnedVal !== '-' ? earnedVal : ''}" placeholder="-" onchange="updateAssignmentField('${key}', 'earnedPoints', this.value)" title="Behaalde punten">
@@ -443,15 +485,19 @@ window.renderAssignmentsList = function() {
             : `<div class="points-display-badge">${earnedVal} / ${maxVal} pt</div>`;
 
         var feedbackHtml = adminMode
-            ? `<input type="text" class="live-edit-field table-text-input" value="${escapeHtml(item.feedback || '')}" placeholder="Geen feedback" onchange="updateAssignmentField('${key}', 'feedback', this.value)">`
-            : `<div class="feedback-text">${escapeHtml(item.feedback || 'Nog geen beoordeling')}</div>`;
+            ? `<textarea rows="1" class="live-edit-field table-text-input" placeholder="Geen feedback"
+                   onfocus="expandTextareaInput(this, '${key}_feedback')"
+                   oninput="expandTextareaInput(this, '${key}_feedback')"
+                   onblur="collapseTextareaInput(this, '${key}_feedback')"
+                   onchange="updateAssignmentField('${key}', 'feedback', this.value)">${escapeHtml(item.feedback || '')}</textarea>`
+            : `<div class="feedback-text expandable-text ${fbExpanded}" onclick="toggleExpandText(this, '${key}_feedback')" title="Tik om volledig te lezen">${escapeHtml(item.feedback || 'Nog geen beoordeling')}</div>`;
 
         html += `
             <div class="assignment-row ${statusClass} ${isUrgent ? 'row-urgent' : ''}">
                 <!-- 1. Opdracht -->
                 <div class="cell-block cell-title">
                     <span class="mobile-col-label">Opdracht</span>
-                    <div class="assignment-title-text">${escapeHtml(item.title || 'Naamloze opdracht')}</div>
+                    <div class="assignment-title-text expandable-text ${titleExpanded}" onclick="toggleExpandText(this, '${key}_title')" title="Tik om volledig te lezen">${escapeHtml(item.title || 'Naamloze opdracht')}</div>
                     ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" class="assignment-link">Bekijk opdracht</a>` : ''}
                 </div>
 
@@ -477,7 +523,7 @@ window.renderAssignmentsList = function() {
                 <div class="cell-block cell-assignee">
                     <span class="mobile-col-label">Opgepakt door</span>
                     <div class="assignee-row">
-                        <span class="assignee-name" title="${escapeHtml(assignedTo || 'Niemand')}">${assignedTo ? escapeHtml(assignedTo) : 'Niemand'}</span>
+                        <span class="assignee-name expandable-text ${assigneeExpanded}" onclick="toggleExpandText(this, '${key}_assignee')" title="Tik om volledig te lezen">${assignedTo ? escapeHtml(assignedTo) : 'Niemand'}</span>
                         <button type="button" class="claim-btn ${isAssignedToMe ? 'btn-release' : 'btn-claim'}" onclick="toggleClaimAssignment('${key}')">${claimBtnLabel}</button>
                     </div>
                 </div>
@@ -497,7 +543,11 @@ window.renderAssignmentsList = function() {
                 <!-- 7. Opmerkingen / Notities -->
                 <div class="cell-block cell-notes">
                     <span class="mobile-col-label">Opmerkingen</span>
-                    <input type="text" class="live-edit-field table-text-input" value="${escapeHtml(item.notes || '')}" placeholder="Voeg notitie toe..." onchange="updateAssignmentField('${key}', 'notes', this.value)">
+                    <textarea rows="1" class="live-edit-field table-text-input" placeholder="Voeg notitie toe..."
+                        onfocus="expandTextareaInput(this, '${key}_notes')"
+                        oninput="expandTextareaInput(this, '${key}_notes')"
+                        onblur="collapseTextareaInput(this, '${key}_notes')"
+                        onchange="updateAssignmentField('${key}', 'notes', this.value)">${escapeHtml(item.notes || '')}</textarea>
                 </div>
             </div>
         `;

@@ -984,7 +984,7 @@ html, body {
     color: #7c2d12;
 }
 
-/* --- MOBIELE WEERGAVE & TEKST-SCHALING FIXES --- */
+/* --- MOBIELE WEERGAVE & TEKST-SCHALING FIXES VOOR DE KAART --- */
 @media (max-width: 600px) {
     #header {
         padding: 6px 8px;
@@ -1002,7 +1002,6 @@ html, body {
         font-size: 0.72rem;
     }
 
-    /* Zorg dat lange kaartlabels op mobiel netjes afbreken i.p.v. buiten het scherm vallen */
     .marker-label {
         white-space: normal !important;
         max-width: 220px !important;
@@ -1010,7 +1009,6 @@ html, body {
         text-align: center !important;
     }
 
-    /* Zorg dat de rode tegenhunt mini-balk op mobiel netjes op meerdere regels past */
     #counterhunt-mini-bar {
         white-space: normal;
         flex-wrap: wrap;
@@ -1022,7 +1020,6 @@ html, body {
         font-size: 0.73rem;
     }
 
-    /* Groene vossen-melding banner compacter op mobiel */
     .green-hunt-toast-content {
         flex-wrap: wrap;
     }
@@ -1035,7 +1032,6 @@ html, body {
         font-size: 0.72rem;
     }
 
-    /* Tegenhunt modal passend op kleinere telefoonschermen */
     #counterhunt-modal-box {
         padding: 15px 13px;
         gap: 10px;
@@ -1050,9 +1046,13 @@ html, body {
     .ch-info-card-val {
         font-size: 1.05rem;
     }
+} /* <-- DEZE SLUIT-ACCOLADE ONTBRAK EERDER! */
 
-    /* ==========================================================================
-   OPDRACHTEN PAGINA & DEADLINE MELDINGEN (RESPONSIVE MOBIEL & DESKTOP)
+
+/* ==========================================================================
+   10. OPDRACHTEN PAGINA: GOOGLE SHEETS DESKTOP GRID & MOBIELE KAARTEN
+   Geen emoji's, donkerblauw thema (#1a252f / #2c3e50)
+   Met afkapping (...) en uitklappen op klik/tap!
    ========================================================================== */
 
 #deadline-alert-banner {
@@ -1091,6 +1091,7 @@ html, body {
     background: #1a252f;
     color: #ecf0f1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 14px;
     gap: 14px;
 }
@@ -1118,6 +1119,7 @@ html, body {
     flex-direction: column;
     align-items: center;
     text-align: center;
+    min-width: 0;
 }
 
 .points-label {
@@ -1172,51 +1174,61 @@ html, body {
     background: #3d566e;
 }
 
-/* Desktop Grid Tabel */
-.assignments-grid-header {
-    display: grid;
-    grid-template-columns: 1.8fr 1fr 1.1fr 1.3fr 0.9fr 1.6fr 1.8fr;
-    gap: 10px;
-    background: #11181f;
-    color: #bdc3c7;
-    padding: 10px 14px;
-    border-radius: 6px;
-    font-size: 0.78rem;
-    font-weight: 700;
-    text-transform: uppercase;
+/* --- AFKAPPEN MET '...' EN UITKLAPPEN BIJ KLIKKEN --- */
+.cell-block {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
 }
 
-.assignment-row {
-    display: grid;
-    grid-template-columns: 1.8fr 1fr 1.1fr 1.3fr 0.9fr 1.6fr 1.8fr;
-    gap: 10px;
-    align-items: center;
-    background: #2c3e50;
-    border: 1px solid #3e5368;
-    border-left: 5px solid #3498db;
-    border-radius: 6px;
-    padding: 12px 14px;
-    margin-top: 8px;
+.expandable-text {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
 }
 
-.assignment-row.status-bezig { border-left-color: #f39c12; }
-.assignment-row.status-ingeleverd { border-left-color: #2ecc71; opacity: 0.88; }
-.assignment-row.status-afgerond { border-left-color: #7f8c8d; opacity: 0.75; }
-.assignment-row.row-urgent { border-color: #e74c3c; background: rgba(231, 76, 60, 0.12); }
-
-.mobile-col-label {
-    display: none;
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: #95a5a6;
-    text-transform: uppercase;
+.expandable-text.is-expanded {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
 }
 
+/* Textarea / Input die standaard 1 regel met '...' toont en bij focus uitklapt */
+textarea.table-text-input {
+    font-family: inherit;
+    resize: none;
+    height: 36px;
+    min-height: 36px;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    cursor: pointer;
+}
+
+textarea.table-text-input:focus,
+textarea.table-text-input.is-expanded {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-y: auto;
+    text-overflow: clip;
+    cursor: text;
+}
+
+/* --- ALGEMENE ELEMENT STYLING --- */
 .assignment-title-text {
     font-weight: 700;
     font-size: 0.9rem;
     color: #ffffff;
-    line-height: 1.25;
+    line-height: 1.3;
 }
 
 .assignment-link {
@@ -1229,17 +1241,6 @@ html, body {
 
 .assignment-link:hover {
     text-decoration: underline;
-}
-
-.status-select, .table-text-input, .points-input {
-    width: 100%;
-    padding: 7px 9px;
-    border-radius: 4px;
-    border: 1px solid #4a6278;
-    background: #34495e;
-    color: #ffffff;
-    font-size: 0.85rem;
-    font-weight: 600;
 }
 
 .deadline-main {
@@ -1264,15 +1265,15 @@ html, body {
     justify-content: space-between;
     gap: 8px;
     width: 100%;
+    min-width: 0;
 }
 
 .assignee-name {
+    flex: 1;
+    min-width: 0;
     font-size: 0.84rem;
     font-weight: 600;
     color: #ecf0f1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .claim-btn {
@@ -1298,11 +1299,6 @@ html, body {
     gap: 4px;
     width: 100%;
 }
-.points-input {
-    width: 54px;
-    text-align: center;
-    padding: 6px 4px;
-}
 
 .points-display-badge {
     background: #1a252f;
@@ -1313,12 +1309,17 @@ html, body {
     font-size: 0.82rem;
     text-align: center;
     color: #ecf0f1;
+    width: 100%;
 }
 
 .feedback-text {
     font-size: 0.82rem;
     color: #bdc3c7;
-    line-height: 1.3;
+    line-height: 1.35;
+    background: rgba(26, 37, 47, 0.4);
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(74, 98, 120, 0.4);
 }
 
 .empty-assignments-msg {
@@ -1363,7 +1364,7 @@ html, body {
     .assignments-grid-header,
     .assignment-row {
         display: grid;
-        grid-template-columns: minmax(190px, 1.9fr) 125px 145px 175px 115px minmax(160px, 1.4fr) minmax(200px, 1.8fr);
+        grid-template-columns: minmax(180px, 1.8fr) 125px 135px 175px 115px minmax(150px, 1.4fr) minmax(190px, 1.8fr);
         align-items: stretch;
         gap: 0;
     }
@@ -1446,7 +1447,7 @@ html, body {
 
     /* Compacte Google-Sheets achtige invoervelden in cellen */
     .status-select,
-    .table-text-input,
+    textarea.table-text-input,
     .points-input {
         width: 100%;
         padding: 5px 8px;
@@ -1460,15 +1461,21 @@ html, body {
         transition: border-color 0.15s ease, background-color 0.15s ease;
     }
 
+    textarea.table-text-input {
+        height: 31px;
+        min-height: 31px;
+        line-height: 19px;
+    }
+
     .status-select:hover,
-    .table-text-input:hover,
+    textarea.table-text-input:hover,
     .points-input:hover {
         border-color: #4a6278;
         background: #1a252f;
     }
 
     .status-select:focus,
-    .table-text-input:focus,
+    textarea.table-text-input:focus,
     .points-input:focus {
         border-color: #3498db;
         background: #11181f;
@@ -1488,7 +1495,9 @@ html, body {
     }
 }
 
-/* MOBIELE WEERGAVE (GEEN HORIZONTALE SCROLLBARS, FULL-WIDTH KAARTEN) */
+/* ==========================================================================
+   MOBIELE WEERGAVE (MAX-WIDTH: 900PX) - GESTAPELDE KAARTEN ZONDER OVERFLOW
+   ========================================================================== */
 @media (max-width: 900px) {
     .assignments-grid-header {
         display: none;
@@ -1496,7 +1505,7 @@ html, body {
 
     .assignment-row {
         display: grid;
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 10px;
         background: #2c3e50;
         border: 1px solid #3e5368;
@@ -1504,6 +1513,9 @@ html, body {
         border-radius: 6px;
         padding: 14px;
         margin-top: 8px;
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
     }
 
     .assignment-row.status-bezig { border-left-color: #f39c12; }
@@ -1515,6 +1527,10 @@ html, body {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow: hidden;
     }
 
     .mobile-col-label {
@@ -1526,10 +1542,11 @@ html, body {
     }
 
     .status-select,
-    .table-text-input,
+    textarea.table-text-input,
     .points-input {
         width: 100%;
-        padding: 7px 9px;
+        max-width: 100%;
+        padding: 8px 10px;
         border-radius: 4px;
         border: 1px solid #4a6278;
         background: #34495e;
@@ -1538,16 +1555,20 @@ html, body {
         font-weight: 600;
         min-height: 40px;
     }
+
+    textarea.table-text-input {
+        height: 40px;
+        line-height: 22px;
+    }
+
     .points-input {
         width: 64px;
         text-align: center;
     }
 
     .claim-btn {
-        min-height: 40px;
+        min-height: 38px;
         padding: 6px 14px;
-        font-size: 0.9rem;
+        font-size: 0.88rem;
     }
-}
-
 }
