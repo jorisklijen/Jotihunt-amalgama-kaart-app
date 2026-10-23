@@ -30,7 +30,6 @@ firebase.auth().signInAnonymously().catch(function(error) {
     console.error("Fout bij anoniem inloggen Firebase:", error);
 });
 
-// Zorg dat alle lees- en schrijfacties automatisch wachten tot de anonieme sessie klaar is
 (function() {
     var RefProto = firebase.database.Reference.prototype;
 
@@ -80,10 +79,8 @@ var areaColors = {
     "Oscar": "#003399"
 };
 
-/* Vaste regenboogvolgorde voor de 6 Telegram Vossenstatussen */
 var foxStatusOrder = ["rood", "oranje", "geel", "groen", "blauw", "grijs"];
 
-/* Kleuren en labels voor de 6 Telegram Vossenstatussen (gesorteerd op regenboogvolgorde) */
 var foxStatusConfig = {
     "rood":   { label: "Rood",   bg: "#e74c3c", border: "#c0392b", text: "#ffffff" },
     "oranje": { label: "Oranje", bg: "#e67e22", border: "#d35400", text: "#ffffff" },
@@ -93,7 +90,6 @@ var foxStatusConfig = {
     "grijs":  { label: "Grijs",  bg: "#7f8c8d", border: "#636e72", text: "#ffffff" }
 };
 
-/* Gedeelde state voor Vossenstatussen en zichtbaarheidsfilters */
 var currentFoxStatuses = {};
 var visibleFoxStatusColors = {
     "rood": true,
@@ -104,7 +100,6 @@ var visibleFoxStatusColors = {
     "grijs": true
 };
 
-/* Gedeelde state voor Firebase Authenticatie-instellingen */
 var firebaseAuthConfig = {
     adminPassword: null,
     userPassword: null,
@@ -112,18 +107,15 @@ var firebaseAuthConfig = {
     loaded: false
 };
 
-/* Amalgama Clubgebouw Coördinaten */
 var amalgamaLat = 51.83915;
 var amalgamaLng = 5.78562;
 var radiusMeters = 450;
 
-/* Gedeelde data-opslag voor kaartweergave & opdrachten */
 var allLocations = [];
 var houseVisitedStatus = {};
 var latestKnownAreaPoints = {};
 var assignmentsData = {};
 
-/* Hulpfunctie: Vertaalt elke ruwe status (green, red, orange, grey, yellow, blue, etc.) naar 1 van de 6 sleutels */
 function normalizeFoxStatusKey(rawStatus) {
     var s = String(rawStatus || "").toLowerCase().trim();
     if (s.includes("green") || s.includes("groen") || s.includes("vrij") || s.includes("actief")) return "groen";
@@ -135,7 +127,6 @@ function normalizeFoxStatusKey(rawStatus) {
     return "grijs";
 }
 
-/* Hulpfunctie: Hemelsbrede afstand in km (voor navigatie-afstand in popups en snelheidsberekening) */
 function getDistanceKm(lat1, lon1, lat2, lon2) {
     var R = 6371;
     var dLat = (lat2 - lat1) * Math.PI / 180;
@@ -150,19 +141,28 @@ window.navigateToAreaPoint = function(lat, lng) {
     window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
 };
 
-/* Schakelen tussen Kaart en Opdrachten weergave */
+/* Schakelen tussen Kaart en Opdrachten weergave (verbergt + RD en Wis op Opdrachten) */
 window.switchView = function(viewName) {
     activeView = viewName;
     var mapWrap = document.getElementById('map-wrapper');
     var assignWrap = document.getElementById('assignments-wrapper');
     var btnMap = document.getElementById('tab-btn-map');
     var btnAssign = document.getElementById('tab-btn-assignments');
+    var btnAddRd = document.getElementById('btn-add-rd');
+    var btnClearRd = document.getElementById('clear-rd-btn');
+    var btnDark = document.getElementById('btn-darkmode');
 
     if (viewName === 'assignments') {
         if (mapWrap) mapWrap.style.display = 'none';
         if (assignWrap) assignWrap.style.display = 'flex';
         if (btnMap) btnMap.classList.remove('active-tab');
         if (btnAssign) btnAssign.classList.add('active-tab');
+
+        // Verberg kaart-specifieke knoppen (+ RD, Wis, Dark/Light) op het Opdrachten-scherm
+        if (btnAddRd) btnAddRd.style.display = 'none';
+        if (btnClearRd) btnClearRd.style.display = 'none';
+        if (btnDark) btnDark.style.display = 'none';
+
         if (typeof window.renderAssignmentsList === 'function') {
             window.renderAssignmentsList();
         }
@@ -171,6 +171,12 @@ window.switchView = function(viewName) {
         if (mapWrap) mapWrap.style.display = 'block';
         if (btnAssign) btnAssign.classList.remove('active-tab');
         if (btnMap) btnMap.classList.add('active-tab');
+
+        // Toon + RD en Wis alleen op de kaart als de gebruiker Admin is
+        if (btnAddRd) btnAddRd.style.display = isAdmin ? 'inline-block' : 'none';
+        if (btnClearRd) btnClearRd.style.display = isAdmin ? 'inline-block' : 'none';
+        if (btnDark) btnDark.style.display = 'inline-block';
+
         if (window.map) {
             setTimeout(function() { window.map.invalidateSize(); }, 150);
         }

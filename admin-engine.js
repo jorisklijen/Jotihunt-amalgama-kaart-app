@@ -571,8 +571,13 @@ function parseAssignmentDeadlineFromArticle(item) {
         var pubStr = item.publish_at || item.created_at || null;
         var base = pubStr ? new Date(pubStr) : new Date();
         if (isNaN(base.getTime())) base = new Date();
-        base.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
-        return base;
+        var targetHour = parseInt(timeMatch[1], 10);
+        var targetMin = parseInt(timeMatch[2], 10);
+        var candidate = new Date(base.getFullYear(), base.getMonth(), base.getDate(), targetHour, targetMin, 0, 0);
+        if (candidate.getTime() < base.getTime() - (2 * 3600 * 1000)) {
+            candidate.setDate(candidate.getDate() + 1);
+        }
+        return candidate;
     }
     return null;
 }
@@ -586,6 +591,14 @@ function parseMaxPointsFromArticle(item) {
     return ptMatch ? parseInt(ptMatch[1], 10) : 5;
 }
 
+function resolveArticleJotihuntUrl(art) {
+    if (art.url && String(art.url).startsWith('http')) return art.url;
+    if (art.link && String(art.link).startsWith('http')) return art.link;
+    if (art.slug) return "https://jotihunt.nl/bericht/" + encodeURIComponent(art.slug);
+    if (art.id) return "https://jotihunt.nl/bericht/" + encodeURIComponent(art.id);
+    return "https://jotihunt.nl/";
+}
+
 window.syncAssignmentsFromApi = async function(forceManual = false) {
     if (!isAdmin) return;
     if (!isMasterAdmin && !forceManual) return;
@@ -593,7 +606,9 @@ window.syncAssignmentsFromApi = async function(forceManual = false) {
     try {
         var articles = await fetchJotihuntAssignmentsEndpoint();
         if (!Array.isArray(articles) || articles.length === 0) {
-            if (forceManual) alert("Geen nieuwe opdrachten gevonden via de Jotihunt feed.");
+            if (typeof window.syncAssignmentsFromGoogleSheet === 'function') {
+                window.syncAssignmentsFromGoogleSheet(forceManual);
+            }
             return;
         }
 
@@ -615,14 +630,21 @@ window.syncAssignmentsFromApi = async function(forceManual = false) {
         assignmentArticles.forEach(function(art) {
             var artTitle = art.title || (art.message && art.message.title) || "Opdracht";
             var assignId = 'jh_' + (art.id || String(artTitle).replace(/[^a-z0-9]/gi, '_').toLowerCase());
-            var existing = currentMap[assignId] || {};
 
+            // Als deze opdracht eerder is verwijderd, maak hem niet opnieuw aan
+            if (typeof window.isAssignmentDeleted === 'function' && window.isAssignmentDeleted(assignId, artTitle)) {
+                return;
+            }
+
+            var existing = currentMap[assignId] || {};
             var deadlineDate = parseAssignmentDeadlineFromArticle(art);
             var deadlineMs = deadlineDate ? deadlineDate.getTime() : (existing.deadlineTimestamp || null);
             var deadlineFormatted = deadlineDate
-                ? deadlineDate.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }) + ' ' +
-                  deadlineDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
-                : (existing.deadlineFormatted || "Zie bericht");
+                ? String(deadlineDate.getDate()).padStart(2, '0') + '-' +
+                  String(deadlineDate.getMonth() + 1).padStart(2, '0') + ' ' +
+                  String(deadlineDate.getHours()).padStart(2, '0') + ':' +
+                  String(deadlineDate.getMinutes()).padStart(2, '0')
+                : (existing.deadlineFormatted || "Geen datum");
 
             var payload = {
                 id: assignId,
@@ -635,50 +657,19 @@ window.syncAssignmentsFromApi = async function(forceManual = false) {
                 status: existing.status || "Open",
                 assignedTo: existing.assignedTo || "",
                 notes: existing.notes || "",
-                url: "https://jotihunt.nl/"
+                url: resolveArticleJotihuntUrl(art),
+                syncedToSheet: true
             };
 
             db.ref('assignments/' + assignId).update(payload);
         });
 
-        if (forceManual) {
-            alert("Synchronisatie met Jotihunt voltooid (" + assignmentArticles.length + " opdrachten gecontroleerd).");
+        if (typeof window.syncAssignmentsFromGoogleSheet === 'function') {
+            window.syncAssignmentsFromGoogleSheet(forceManual);
         }
     } catch (e) {
         console.warn("Kon opdrachten niet synchroniseren:", e);
     }
-};
-
-window.openCustomAssignmentModal = function() {
-    if (!isAdmin) return;
-    var title = prompt("Titel van de nieuwe opdracht:");
-    if (!title || !title.trim()) return;
-
-    var deadlineInput = prompt("Deadline tijdstip (UU:MM, bijv. 21:30):", "21:00");
-    var maxPts = prompt("Maximaal te behalen punten:", "5");
-
-    var d = new Date();
-    if (deadlineInput && deadlineInput.includes(':')) {
-        var p = deadlineInput.split(':');
-        d.setHours(parseInt(p[0], 10) || 0, parseInt(p[1], 10) || 0, 0, 0);
-    }
-    var formatted = d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }) + ' ' +
-                    d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
-
-    var id = 'manual_' + Date.now();
-    db.ref('assignments/' + id).set({
-        id: id,
-        title: title.trim(),
-        deadlineTimestamp: d.getTime(),
-        deadlineFormatted: formatted,
-        maxPoints: parseInt(maxPts, 10) || 0,
-        earnedPoints: null,
-        feedback: "",
-        status: "Open",
-        assignedTo: "",
-        notes: "",
-        updatedAt: Date.now()
-    });
 };
 
 /* --- 4. INITIALISATIE VAN DE ADMIN ENGINE --- */
@@ -816,7 +807,7 @@ window.initAdminEngine = function() {
     // Synchroniseer de opdrachten vanaf jotihunt.nl elke 60 seconden via de Master Admin
     setTimeout(function() {
         window.syncAssignmentsFromApi(false);
-    }, 2000);
+    }, 10000);
     setInterval(function() {
         window.syncAssignmentsFromApi(false);
     }, 60000);

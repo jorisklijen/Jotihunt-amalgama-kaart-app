@@ -1605,3 +1605,149 @@ textarea.table-text-input.is-expanded {
         font-size: 0.88rem;
     }
 }
+
+/* --- KLIKBARE OPDRACHT-TITEL, WIS-KNOP & NIEUWE OPDRACHT MODAL --- */
+.title-row-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+}
+
+.assignment-title-link {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #5dade2;
+    text-decoration: none;
+    line-height: 1.3;
+    flex: 1;
+    min-width: 0;
+    transition: color 0.15s ease;
+}
+
+.assignment-title-link:hover {
+    color: #85c1e9;
+    text-decoration: underline;
+}
+
+.delete-assignment-btn {
+    background: #c0392b;
+    color: #ffffff;
+    border: 1px solid #e74c3c;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 0.15s ease;
+}
+
+.delete-assignment-btn:hover {
+    background: #e74c3c;
+}
+
+/* Nieuwe Opdracht Modal (Exact dezelfde stijl als de + RD Modal) */
+#assignment-modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(26, 37, 47, 0.85);
+    backdrop-filter: blur(3px);
+    z-index: 3100;
+    justify-content: center;
+    align-items: center;
+    padding: 12px;
+}
+
+#assignment-modal-box {
+    background: #2c3e50;
+    color: #ecf0f1;
+    width: 100%;
+    max-width: 390px;
+    max-height: 92vh;
+    overflow-y: auto;
+    border-radius: 8px;
+    padding: 18px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+    border: 1px solid #4a6278;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+    font-size: 0.85rem;
+}
+
+#assignment-modal-box h3 {
+    margin: 0 0 2px 0;
+    font-size: 1.05rem;
+    color: #ffffff;
+    border-bottom: 1px solid #4a6278;
+    padding-bottom: 6px;
+}
+
+.assign-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.assign-field-group label {
+    font-weight: 600;
+    font-size: 0.78rem;
+    color: #bdc3c7;
+}
+
+.assign-modal-input {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 5px;
+    border: 1px solid #4a6278;
+    background: #34495e;
+    color: #ecf0f1;
+    font-size: 0.88rem;
+    font-family: inherit;
+    outline: none;
+    font-weight: 600;
+}
+
+.assign-modal-input:focus {
+    border-color: #3498db;
+}
+
+#assign-modal-error {
+    display: none;
+    background: rgba(231, 76, 60, 0.2);
+    border: 1px solid #e74c3c;
+    color: #ff7675;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.assign-modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.assign-modal-btn {
+    flex: 1;
+    padding: 9px;
+    border: none;
+    border-radius: 5px;
+    font-weight: bold;
+    font-size: 0.85rem;
+    cursor: pointer;
+    color: #ffffff;
+}
+
+.assign-btn-save { background: #27ae60; }
+.assign-btn-save:hover { background: #2ecc71; }
+.assign-btn-cancel { background: #7f8c8d; }
+.assign-btn-cancel:hover { background: #95a5a6; }
