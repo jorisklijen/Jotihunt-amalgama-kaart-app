@@ -1,6 +1,7 @@
 {
   "name": "Scouting Amalgama Jotihunt app",
   "short_name": "Jotihunt",
+  "version": "3.2.8",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#1a252f",

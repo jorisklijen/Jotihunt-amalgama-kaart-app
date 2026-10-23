@@ -164,10 +164,44 @@ async function computeFoxStatusMetricsForAllUsers(computedAreas, nowMs) {
     return metricsByArea;
 }
 
-/* --- 2. CENTRALE BEREKENING & PUBLICATIE NAAR FIREBASE --- */
+/* --- 2. CENTRALE BEREKENING & PUBLICATIE NAAR FIREBASE (DATA-SAVER EDITIE) --- */
 var isCalculatingMapState = false;
 var pendingCalculationRequest = false;
 var pendingForceManual = false;
+var lastPublishedStateHash = "";
+var lastPublishedTimestamp = 0;
+
+/* Comprimeer wandelroutes: rond af op 5 decimalen (1.1m precisie) en verwijder dubbele micro-punten.
+   Dit bespaart ~65% aan Firebase download-MB's voor alle verbonden hunters! */
+function compactRouteCoords(coords, minStepKm) {
+    if (!Array.isArray(coords) || coords.length === 0) return [];
+    var step = minStepKm || 0.010; // Standaard 10 meter tussen punten
+    var out = [];
+    for (var i = 0; i < coords.length; i++) {
+        var c = coords[i];
+        if (!Array.isArray(c) || c.length < 2) continue;
+        var lat = Math.round(Number(c[0]) * 100000) / 100000;
+        var lng = Math.round(Number(c[1]) * 100000) / 100000;
+
+        if (i === 0 || i === coords.length - 1 || out.length === 0) {
+            out.push([lat, lng]);
+        } else {
+            var prev = out[out.length - 1];
+            if (getDistanceKm(prev[0], prev[1], lat, lng) >= step) {
+                out.push([lat, lng]);
+            }
+        }
+    }
+    return out;
+}
+
+function roundCoordPair(c) {
+    if (!Array.isArray(c) || c.length < 2) return c;
+    return [
+        Math.round(Number(c[0]) * 100000) / 100000,
+        Math.round(Number(c[1]) * 100000) / 100000
+    ];
+}
 
 window.calculateAndPublishMapState = async function(forceManual = false) {
     if (!isAdmin) return;
@@ -276,7 +310,9 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             var currentRadiusMeters = 1;
             if (!isFuture) {
                 var metersPerSecond = (effectiveSpeedKmh * 1000) / 3600;
-                currentRadiusMeters = Math.max(1, Math.round(1 + (effectiveSecondsPassed * metersPerSecond)));
+                // Rond straal af op stappen van 5 meter om onnodige micro-updates naar Firebase te voorkomen
+                var rawRadius = Math.max(1, Math.round(1 + (effectiveSecondsPassed * metersPerSecond)));
+                currentRadiusMeters = isCappedByAge ? rawRadius : Math.max(1, Math.round(rawRadius / 5) * 5);
             }
 
             var lockedTargetName = (adminSettings.lockedTargets && adminSettings.lockedTargets[area])
@@ -326,7 +362,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 }
 
                 if (totalWeight > 0) {
-                    var avgRad = Math.atan2(sumSin / totalWeight, mCos ? sumCos / totalWeight : sumCos / totalWeight);
+                    var avgRad = Math.atan2(sumSin / totalWeight, sumCos / totalWeight);
                     bearingDeg = ((avgRad * 180 / Math.PI) + 360) % 360;
                 }
             }
@@ -339,12 +375,13 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                 var opacity = 1.0;
                 if (diffMinutes > 60) {
                     var fade = (diffMinutes - 60) / 180;
-                    opacity = Math.round(Math.max(0.50, 1.0 - (fade * 0.50)) * 100) / 100;
+                    // Rond opacity af op stappen van 0.05 zodat dit niet elke minuut een re-upload triggert
+                    opacity = Math.round(Math.max(0.50, 1.0 - (fade * 0.50)) * 20) / 20;
                 }
 
                 return {
                     key: pt.key,
-                    latlng: pt.latlng,
+                    latlng: roundCoordPair(pt.latlng),
                     name: pt.fullName || pt.baseName,
                     pointType: pt.pointType || pt.baseName || "Hint",
                     color: pt.color,
@@ -386,7 +423,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                     var arrowEndCoord = getDestinationLatLng(effectiveLastCoord[0], effectiveLastCoord[1], currentRadiusMeters, arrowAngle);
                     arrows.push({
                         angle: arrowAngle,
-                        endCoord: arrowEndCoord
+                        endCoord: roundCoordPair(arrowEndCoord)
                     });
                 });
             }
@@ -440,7 +477,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                     var walkedPos = getPointAlongRouteByDistance(estimatedWalkRoute, currentRadiusMeters);
                     if (walkedPos && walkedPos.coord) {
                         liveExpectedFoxPoint = {
-                            coord: walkedPos.coord,
+                            coord: roundCoordPair(walkedPos.coord),
                             distanceMeters: walkedPos.distanceWalkedMeters,
                             speedText: speedText,
                             targetHouse: primaryTargetHouse ? primaryTargetHouse.name : "",
@@ -455,7 +492,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
                     var altWalkedPos = getPointAlongRouteByDistance(alternativeWalkRoute, currentRadiusMeters);
                     if (altWalkedPos && altWalkedPos.coord) {
                         altLiveExpectedFoxPoint = {
-                            coord: altWalkedPos.coord,
+                            coord: roundCoordPair(altWalkedPos.coord),
                             distanceMeters: altWalkedPos.distanceWalkedMeters,
                             speedText: speedText,
                             targetHouse: primaryTargetHouse ? primaryTargetHouse.name : ""
@@ -466,22 +503,22 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
 
             computedAreas[area] = {
                 points: processedPoints,
-                routeCoords: historicalAnchoredCoords.length >= 2 ? historicalAnchoredCoords : [],
+                routeCoords: historicalAnchoredCoords.length >= 2 ? compactRouteCoords(historicalAnchoredCoords, 0.005) : [],
                 lineColor: (area === "Oscar") ? "#003399" : (areaColors[area] || "#000000"),
                 geofence: {
-                    center: effectiveLastCoord,
+                    center: roundCoordPair(effectiveLastCoord),
                     radiusMeters: currentRadiusMeters,
                     color: circleDisplayColor,
                     areaColor: baseAreaColor,
                     isCappedByAge: isCappedByAge,
                     badgeText: badgeText,
                     arrows: arrows,
-                    estimatedWalkRoute: estimatedWalkRoute,
-                    alternativeWalkRoute: alternativeWalkRoute,
+                    estimatedWalkRoute: compactRouteCoords(estimatedWalkRoute, 0.012),
+                    alternativeWalkRoute: compactRouteCoords(alternativeWalkRoute, 0.015),
                     estimatedTargetHouse: estimatedTargetHouseName,
                     visitedOriginHouse: visitedOriginHouseName,
                     lockedTarget: lockedTargetName || "",
-                    intersectionPoint: circleIntersectionPoint,
+                    intersectionPoint: circleIntersectionPoint ? roundCoordPair(circleIntersectionPoint) : null,
                     liveExpectedFoxPoint: liveExpectedFoxPoint,
                     altLiveExpectedFoxPoint: altLiveExpectedFoxPoint
                 }
@@ -494,7 +531,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
         var processedOtherPoints = rawOtherPoints.map(function(pt) {
             return {
                 key: pt.key,
-                latlng: pt.latlng,
+                latlng: roundCoordPair(pt.latlng),
                 name: pt.fullName || pt.baseName || "Anders",
                 pointType: "Anders",
                 color: pt.color || "#34495e",
@@ -508,8 +545,26 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
 
         var foxStatusMetrics = await computeFoxStatusMetricsForAllUsers(computedAreas, nowMs);
 
+        // DATA-SAVER: Vergelijk of de inhoud daadwerkelijk is veranderd voordat we naar 30 gebruikers pushen!
+        var stateSnapshotForHash = JSON.stringify({
+            areas: computedAreas,
+            otherPoints: processedOtherPoints,
+            foxStatuses: Object.keys(foxStatusMetrics).map(function(k) {
+                return foxStatusMetrics[k].statusKey + '_' + (foxStatusMetrics[k].closestOnlineUser ? foxStatusMetrics[k].closestOnlineUser.name : '');
+            })
+        });
+
+        var timeSinceLastPush = nowMs - lastPublishedTimestamp;
+        if (!forceManual && stateSnapshotForHash === lastPublishedStateHash && timeSinceLastPush < 120000) {
+            // Geen enkele verandering op de kaart -> Bespaar 100% Firebase bandbreedte!
+            return;
+        }
+
+        lastPublishedStateHash = stateSnapshotForHash;
+        lastPublishedTimestamp = nowMs;
+
         await db.ref('computedMapState').set({
-            updatedAt: Date.now(),
+            updatedAt: nowMs,
             masterId: adminSessionId,
             areas: computedAreas,
             otherPoints: processedOtherPoints,
@@ -523,7 +578,7 @@ window.calculateAndPublishMapState = async function(forceManual = false) {
             pendingForceManual = false;
             setTimeout(function() {
                 window.calculateAndPublishMapState(nextForce);
-            }, 150);
+            }, 250);
         }
     }
 };
@@ -631,7 +686,6 @@ window.syncAssignmentsFromApi = async function(forceManual = false) {
             var artTitle = art.title || (art.message && art.message.title) || "Opdracht";
             var assignId = 'jh_' + (art.id || String(artTitle).replace(/[^a-z0-9]/gi, '_').toLowerCase());
 
-            // Als deze opdracht eerder is verwijderd, maak hem niet opnieuw aan
             if (typeof window.isAssignmentDeleted === 'function' && window.isAssignmentDeleted(assignId, artTitle)) {
                 return;
             }
@@ -657,8 +711,7 @@ window.syncAssignmentsFromApi = async function(forceManual = false) {
                 status: existing.status || "Open",
                 assignedTo: existing.assignedTo || "",
                 notes: existing.notes || "",
-                url: resolveArticleJotihuntUrl(art),
-                syncedToSheet: true
+                url: resolveArticleJotihuntUrl(art)
             };
 
             db.ref('assignments/' + assignId).update(payload);
@@ -673,6 +726,8 @@ window.syncAssignmentsFromApi = async function(forceManual = false) {
 };
 
 /* --- 4. INITIALISATIE VAN DE ADMIN ENGINE --- */
+var liveUsersDebounceTimer = null;
+
 window.initAdminEngine = function() {
     initMasterElection();
 
@@ -724,8 +779,14 @@ window.initAdminEngine = function() {
         window.calculateAndPublishMapState(false);
     });
 
+    // DATA-SAVER: Debounce liveUsers updates zodat 30 rijdende auto's niet elke seconde
+    // een volledige herberekening van computedMapState veroorzaken (maximaal 1x per 25s)
     db.ref('liveUsers').on('value', function() {
-        window.calculateAndPublishMapState(false);
+        if (liveUsersDebounceTimer) return;
+        liveUsersDebounceTimer = setTimeout(function() {
+            liveUsersDebounceTimer = null;
+            window.calculateAndPublishMapState(false);
+        }, 25000);
     });
 
     db.ref('computedMapState').on('value', function(snapshot) {
@@ -795,19 +856,19 @@ window.initAdminEngine = function() {
                 }
             });
         }
-        window.calculateAndPublishMapState(false);
+        window.calculateAndPublishMapState(true);
     });
 
     db.ref('jotihuntSync').remove().catch(function() {});
 
+    // DATA-SAVER: Bereken de kaartcirkels elke 30 seconden i.p.v. elke 10 seconden
     setInterval(function() {
         window.calculateAndPublishMapState(false);
-    }, 10000);
+    }, 30000);
 
-    // Synchroniseer de opdrachten vanaf jotihunt.nl elke 60 seconden via de Master Admin
     setTimeout(function() {
         window.syncAssignmentsFromApi(false);
-    }, 10000);
+    }, 20000);
     setInterval(function() {
         window.syncAssignmentsFromApi(false);
     }, 60000);

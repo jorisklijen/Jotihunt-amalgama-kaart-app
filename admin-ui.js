@@ -844,7 +844,7 @@ function openRdModal(mode, existingKey, existingData) {
             }
         }
     } else {
-        titleEl.innerText = "📍 Nieuw RD-Punt Toevoegen";
+        titleEl.innerText = "Nieuw RD-Punt Toevoegen";
         typeSelect.value = "Hunt";
         locInput.value = "";
         areaSelect.value = "";

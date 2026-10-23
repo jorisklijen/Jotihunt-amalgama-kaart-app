@@ -1804,3 +1804,37 @@ textarea.table-text-input.is-expanded {
     background: #ffffff;
     box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
 }
+
+.points-card {
+    background: #2c3e50;
+    border: 1px solid #4a6278;
+    border-radius: 6px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between; /* Zorgt dat getallen altijd op exact dezelfde hoogte staan */
+    text-align: center;
+    min-width: 0;
+    min-height: 68px;
+}
+
+.points-label {
+    font-size: 0.74rem;
+    color: #bdc3c7;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    line-height: 1.2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.4em; /* Reserveert altijd ruimte voor 2 regels zodat elk getal recht uitlijnt */
+}
+
+.points-value {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.1;
+    margin-top: 4px;
+}
