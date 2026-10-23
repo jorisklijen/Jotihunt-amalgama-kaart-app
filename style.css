@@ -1751,3 +1751,56 @@ textarea.table-text-input.is-expanded {
 .assign-btn-save:hover { background: #2ecc71; }
 .assign-btn-cancel { background: #7f8c8d; }
 .assign-btn-cancel:hover { background: #95a5a6; }
+
+/* --- BEWERK-KNOP OPDRACHTEN & WITTE 30-SECONDEN VOORTGANGSBALK ONDER MELDINGEN --- */
+.row-admin-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.edit-assignment-btn {
+    background: #f39c12;
+    color: #ffffff;
+    border: 1px solid #d68910;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.edit-assignment-btn:hover {
+    background: #e67e22;
+}
+
+.admin-editable-deadline {
+    cursor: pointer;
+    text-decoration: underline dotted #5dade2;
+    text-underline-offset: 3px;
+}
+
+.admin-editable-deadline:hover {
+    color: #5dade2;
+}
+
+/* Witte balk onderaan de meldingen die in 30s van links naar rechts loopt */
+.toast-progress-wrap {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.22);
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.toast-progress-bar {
+    width: 0%;
+    height: 100%;
+    background: #ffffff;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}

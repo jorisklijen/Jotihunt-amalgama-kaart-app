@@ -1,9 +1,9 @@
 /* ==========================================================================
-   4. ASSIGNMENTS.JS - OPDRACHTEN TRACKER + TWEE-WEG GOOGLE SHEETS SYNC
-   - Verwijderen van opdrachten zonder dat ze terugkomen (via deletedAssignments)
-   - Sortering: Open -> Bezig -> Deadline verlopen -> Ingeleverd -> Afgerond
-   - Handmatige invoer via RD-stijl Modal met datetime-local picker
-   - Klik op opdrachtnaam opent specifieke Jotihunt-pagina of https://jotihunt.nl/
+   4. ASSIGNMENTS.JS - OPDRACHTEN TRACKER + VEILIGE TWEE-WEG GOOGLE SHEETS SYNC
+   - Admins kunnen Opdrachtnaam + Deadline (datum & tijd) bewerken via modal
+   - Handmatig gewijzigde status na Telegram/Afgerond blijft altijd behouden
+   - Nieuwe opdrachten in Google Sheets verdwijnen nooit meer bij het schrijven
+   - 10-minuten deadline melding met 30s witte voortgangsbalk (+ 0.5s sluit-delay)
    ========================================================================== */
 
 var assignmentsData = {};
@@ -12,6 +12,9 @@ var notifiedTenMinDeadlines = {};
 var expandedFieldMemory = {};
 var sheetWriteDebounceTimer = null;
 var isPushingToSheet = false;
+var currentEditingAssignmentKey = null;
+var deadlineBannerTimer = null;
+var deadlineBannerCloseTimeout = null;
 
 // Configuratie voor jullie live Google Sheet (tabblad gid=1344677603)
 var GOOGLE_SHEET_ID = "1lZTXRRbvy8ODGgZheOpm3qUdFOu8mM1muhxOyeStks4";
@@ -27,7 +30,7 @@ db.ref('adminSettings/sheetWebAppUrl').on('value', function(snap) {
     }
 });
 
-/* Luister naar verwijderde opdrachten zodat deze nooit meer ongewenst terugkomen */
+/* Luister naar handmatig verwijderde opdrachten (via de Wis-knop in de app) */
 db.ref('deletedAssignments').on('value', function(snapshot) {
     deletedAssignmentsMap = snapshot.val() || {};
     renderAssignmentsList();
@@ -53,7 +56,7 @@ db.ref('assignments').on('value', function(snapshot) {
     checkAdminDeadlineNotifications();
 });
 
-/* Luister naar binnenkomende Telegram beoordelingen en koppel ze direct aan Firebase én Google Sheets */
+/* Luister naar binnenkomende Telegram beoordelingen en koppel ze éénmalig aan de juiste opdracht */
 db.ref('telegramData/assignments').on('value', function(snapshot) {
     var tgItems = snapshot.val();
     if (!tgItems) return;
@@ -64,7 +67,6 @@ db.ref('telegramData/assignments').on('value', function(snapshot) {
         var tg = tgItems[tgKey];
         if (!tg || tg.linkedToAssignment || !tg.title) return;
 
-        // Als deze opdracht eerder handmatig is verwijderd, negeer hem dan
         if (window.isAssignmentDeleted(null, tg.title)) {
             db.ref('telegramData/assignments/' + tgKey).update({ linkedToAssignment: 'deleted' });
             return;
@@ -81,6 +83,7 @@ db.ref('telegramData/assignments').on('value', function(snapshot) {
                 earnedPoints: tg.points !== undefined ? tg.points : null,
                 feedback: tg.feedback || tg.rawMessage || "Beoordeeld via Telegram",
                 status: "Afgerond",
+                manualStatusOverride: false,
                 updatedAt: Date.now()
             });
             var p2 = db.ref('telegramData/assignments/' + tgKey).update({ linkedToAssignment: matchedId });
@@ -99,9 +102,9 @@ db.ref('telegramData/assignments').on('value', function(snapshot) {
                 earnedPoints: tg.points !== undefined ? tg.points : 0,
                 feedback: tg.feedback || tg.rawMessage || "",
                 status: "Afgerond",
+                manualStatusOverride: false,
                 assignedTo: "",
                 notes: "Automatisch aangemaakt vanuit Telegram",
-                syncedToSheet: true,
                 updatedAt: Date.now()
             };
             var p3 = db.ref('assignments/' + newId).set(newAssignmentObj);
@@ -112,7 +115,7 @@ db.ref('telegramData/assignments').on('value', function(snapshot) {
 
     if (updatesPromiseList.length > 0) {
         Promise.all(updatesPromiseList).then(function() {
-            schedulePushAssignmentsToGoogleSheet(300);
+            schedulePushAssignmentsToGoogleSheet(400);
         });
     }
 });
@@ -130,7 +133,6 @@ function toLocalDatetimeInputValue(dateObj) {
     return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
 }
 
-/* Formatteer een timestamp altijd als "DD-MM HH:MM" zodat er altijd een datum bij de tijd staat */
 function formatDeadlineDateAndTime(timestampMs, fallbackStr) {
     if (!timestampMs || isNaN(timestampMs)) {
         return fallbackStr || "Geen datum";
@@ -175,7 +177,6 @@ function parseSheetDeadline(deadlineStr, referenceCreatedMs) {
             0
         );
 
-        // Als de opdracht bijv. om 22:00 binnenkomt en de deadline is 01:00, tel 1 dag op
         if (candidate.getTime() < refTime.getTime() - (2 * 3600 * 1000)) {
             candidate.setDate(candidate.getDate() + 1);
         }
@@ -190,9 +191,10 @@ function parseSheetDeadline(deadlineStr, referenceCreatedMs) {
 }
 
 /* ==========================================================================
-   AUTOMATISCHE STATUS-REGELS:
-   1. Punten en/of feedback aanwezig -> Status altijd op 'Afgerond'
-   2. Deadline verlopen en NIET op 'Ingeleverd' of 'Afgerond' -> Status op 'Deadline verlopen'
+   AUTOMATISCHE STATUS-REGELS MET BEHOUD VAN HANDMATIGE STATUS-WIJZIGINGEN:
+   - Als iemand handmatig de status van een (Telegram) opdracht wijzigt
+     (manualStatusOverride === true), dwingt de app hem NIET meer terug naar 'Afgerond'!
+   - Deadline verlopen geldt alleen als de opdracht nog op 'Open' of 'Bezig' stond.
    ========================================================================== */
 
 function hasPointsOrFeedback(item) {
@@ -206,13 +208,14 @@ function hasPointsOrFeedback(item) {
 function computeDesiredStatus(item) {
     var currentStatus = item.status || 'Open';
 
-    if (hasPointsOrFeedback(item)) {
+    // Alleen automatisch op 'Afgerond' zetten bij punten/feedback als de gebruiker de status NIET zelf handmatig heeft aangepast
+    if (hasPointsOrFeedback(item) && !item.manualStatusOverride) {
         return 'Afgerond';
     }
 
     if (item.deadlineTimestamp && !isNaN(item.deadlineTimestamp)) {
         var isPast = Number(item.deadlineTimestamp) < Date.now();
-        if (isPast && currentStatus !== 'Ingeleverd' && currentStatus !== 'Afgerond') {
+        if (isPast && currentStatus !== 'Ingeleverd' && currentStatus !== 'Afgerond' && !item.manualStatusOverride) {
             return 'Deadline verlopen';
         }
         if (!isPast && currentStatus === 'Deadline verlopen') {
@@ -231,7 +234,6 @@ function enforceAutomaticAssignmentStatuses() {
         var item = assignmentsData[key];
         if (!item) return;
 
-        // Verwijder direct als hij op de blokkeerlijst staat
         if (window.isAssignmentDeleted(key, item.title)) {
             delete assignmentsData[key];
             batchUpdates[key] = null;
@@ -267,69 +269,32 @@ function enforceAutomaticAssignmentStatuses() {
 }
 
 /* ==========================================================================
-   GOOGLE SHEETS TWEE-WEG SYNCHRONISATIE (LEZEN, SCHRIJVEN ÉN VERWIJDEREN)
+   VEILIGE TWEE-WEG GOOGLE SHEETS SYNCHRONISATIE
+   Haalt altijd eerst eventuele nieuw toegevoegde rijen uit de Sheet op
+   voordat er teruggeschreven wordt, zodat nieuwe Sheet-opdrachten nooit verdwijnen!
    ========================================================================== */
 
-window.pushAssignmentsToGoogleSheet = async function() {
-    if (!GOOGLE_SHEET_WEBAPP_URL) return;
-    isPushingToSheet = true;
-
-    var sorted = getSortedAssignments();
-    var flagUpdates = {};
-
-    var rowsPayload = sorted.map(function(item) {
-        var hasEarned = item.earnedPoints !== undefined && item.earnedPoints !== null && item.earnedPoints !== '';
-        var hasMax = item.maxPoints !== undefined && item.maxPoints !== null && item.maxPoints !== '';
-        var pointsStr = "";
-        if (hasEarned && hasMax) {
-            pointsStr = item.earnedPoints + " / " + item.maxPoints;
-        } else if (hasEarned) {
-            pointsStr = String(item.earnedPoints);
-        } else if (hasMax) {
-            pointsStr = "- / " + item.maxPoints;
-        }
-
-        var dlFormatted = item.deadlineTimestamp
-            ? formatDeadlineDateAndTime(item.deadlineTimestamp, item.deadlineFormatted)
-            : (item.deadlineFormatted || "Geen datum");
-
-        if (!item.syncedToSheet && item.key) {
-            flagUpdates[item.key + '/syncedToSheet'] = true;
-        }
-
-        return {
-            title: item.title || "",
-            status: item.status || "Open",
-            deadlineFormatted: dlFormatted,
-            assignedTo: item.assignedTo || "",
-            pointsFormatted: pointsStr,
-            feedback: item.feedback || "",
-            notes: item.notes || ""
-        };
-    });
+async function fetchRawGoogleSheetCsv() {
+    var csvText = null;
+    var targetUrl = GOOGLE_SHEET_CSV_URL + "&t=" + Date.now();
 
     try {
-        await fetch(GOOGLE_SHEET_WEBAPP_URL, {
-            method: "POST",
-            mode: "no-cors",
-            headers: { "Content-Type": "text/plain;charset=utf-8" },
-            body: JSON.stringify({ rows: rowsPayload })
-        });
-        if (Object.keys(flagUpdates).length > 0) {
-            db.ref('assignments').update(flagUpdates);
-        }
-    } catch (err) {
-        console.warn("Kon niet naar Google Sheet schrijven:", err);
-    } finally {
-        setTimeout(function() { isPushingToSheet = false; }, 1500);
-    }
-};
+        var res = await fetch(targetUrl, { cache: "no-store" });
+        if (res.ok) csvText = await res.text();
+    } catch (e) {}
 
-function schedulePushAssignmentsToGoogleSheet(delayMs) {
-    if (sheetWriteDebounceTimer) clearTimeout(sheetWriteDebounceTimer);
-    sheetWriteDebounceTimer = setTimeout(function() {
-        window.pushAssignmentsToGoogleSheet();
-    }, delayMs || 800);
+    if (!csvText) {
+        try {
+            var proxyUrl = "https://jotihunt-proxy.joriskleijn2000.workers.dev/?url=" + encodeURIComponent(targetUrl);
+            var proxyRes = await fetch(proxyUrl, { cache: "no-store" });
+            if (proxyRes.ok) csvText = await proxyRes.text();
+        } catch (proxyErr) {}
+    }
+
+    if (!csvText || csvText.trim().startsWith("<!DOCTYPE html>")) {
+        return null;
+    }
+    return csvText;
 }
 
 function parseCSVToRows(csvText) {
@@ -382,39 +347,12 @@ function normalizeSheetStatus(rawStatus) {
     return 'Open';
 }
 
-/* Haal de Google Sheet CSV op en synchroniseer (inclusief detectie van in de Sheet verwijderde rijen) */
-window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
-    if (isPushingToSheet) return;
-
-    var csvText = null;
-    var targetUrl = GOOGLE_SHEET_CSV_URL + "&t=" + Date.now();
-
-    try {
-        var res = await fetch(targetUrl, { cache: "no-store" });
-        if (res.ok) {
-            csvText = await res.text();
-        }
-    } catch (e) {}
-
-    if (!csvText) {
-        try {
-            var proxyUrl = "https://jotihunt-proxy.joriskleijn2000.workers.dev/?url=" + encodeURIComponent(targetUrl);
-            var proxyRes = await fetch(proxyUrl, { cache: "no-store" });
-            if (proxyRes.ok) {
-                csvText = await proxyRes.text();
-            }
-        } catch (proxyErr) {
-            console.warn("Kon Google Sheet niet ophalen:", proxyErr);
-        }
-    }
-
-    if (!csvText || csvText.trim().startsWith("<!DOCTYPE html>")) {
-        if (showFeedback) alert("Kon de Google Sheet niet uitlezen. Controleer of het bestand openbaar staat ingesteld.");
-        return;
-    }
-
+/* Verwerk de CSV-rijen uit Google Sheets naar Firebase zonder nieuwe Sheet-rijen kwijt te raken */
+async function importRowsFromSheetCsv(csvText, isPrePushCheck) {
     var rows = parseCSVToRows(csvText);
-    var headers = rows.length > 0 ? rows[0].map(function(h) { return String(h || '').toLowerCase().trim(); }) : [];
+    if (rows.length < 2) return 0;
+
+    var headers = rows[0].map(function(h) { return String(h || '').toLowerCase().trim(); });
 
     function findCol(keywords, fallbackIdx) {
         var idx = headers.findIndex(function(h) {
@@ -433,8 +371,6 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
     var colNotes    = findCol(['opmerking', 'notitie', 'info', 'toelichting', 'omschrijving', 'wat willen we zien'], 6);
 
     var updatesBatch = {};
-    var deletedBatch = {};
-    var seenKeysInSheet = {};
     var syncedCount = 0;
 
     for (var r = 1; r < rows.length; r++) {
@@ -450,19 +386,25 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
         });
         var targetKey = existingId || itemId;
 
-        // Als deze opdracht in de app is verwijderd, negeer hem dan uit de gecachete CSV
+        // Negeer alleen als deze opdracht expliciet via de rode Wis-knop in de app is verwijderd
         if (window.isAssignmentDeleted(targetKey, title)) {
             continue;
         }
 
-        seenKeysInSheet[targetKey] = true;
-        var existingObj = assignmentsData[targetKey] || {};
+        var existingObj = assignmentsData[targetKey] || null;
 
-        // Als de opdracht korter dan 20 seconden geleden in de app is aangepast, laat de app-data voorrang houden op de CSV-cache
-        if (existingObj.updatedAt && (Date.now() - existingObj.updatedAt < 20000)) {
+        // Bij een pre-push check voegen we ALLEEN opdrachten toe die nieuw in de Google Sheet zijn getypt
+        // zodat we lokale wijzigingen in de app niet overschrijven met een oude CSV-cache.
+        if (isPrePushCheck && existingObj) {
             continue;
         }
 
+        // Als een bestaande opdracht korter dan 25s geleden in de app is gewijzigd, heeft de app voorrang
+        if (existingObj && existingObj.updatedAt && (Date.now() - existingObj.updatedAt < 25000)) {
+            continue;
+        }
+
+        var baseObj = existingObj || {};
         var rawStatus = row[colStatus] !== undefined ? row[colStatus] : "";
         var rawDeadline = row[colDeadline] !== undefined ? row[colDeadline] : "";
         var rawAssignee = row[colAssignee] !== undefined ? String(row[colAssignee]).trim() : "";
@@ -470,14 +412,12 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
         var rawNotes = row[colNotes] !== undefined ? String(row[colNotes]).trim() : "";
 
         if (rawAssignee.length > 35 || rawAssignee.toLowerCase().startsWith("wat willen we zien")) {
-            if (!rawNotes) {
-                rawNotes = rawAssignee;
-            }
-            rawAssignee = existingObj.assignedTo && existingObj.assignedTo.length <= 35 ? existingObj.assignedTo : "";
+            if (!rawNotes) rawNotes = rawAssignee;
+            rawAssignee = baseObj.assignedTo && baseObj.assignedTo.length <= 35 ? baseObj.assignedTo : "";
         }
 
-        var earnedPoints = existingObj.earnedPoints !== undefined ? existingObj.earnedPoints : null;
-        var maxPoints = existingObj.maxPoints !== undefined ? existingObj.maxPoints : null;
+        var earnedPoints = baseObj.earnedPoints !== undefined ? baseObj.earnedPoints : null;
+        var maxPoints = baseObj.maxPoints !== undefined ? baseObj.maxPoints : null;
 
         var rawPointsCell = row[colEarned] !== undefined ? String(row[colEarned]).trim() : "";
         if (rawPointsCell.includes('/')) {
@@ -489,7 +429,7 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
         } else if (rawPointsCell !== "" && rawPointsCell !== "-") {
             var numEarned = parseFloat(rawPointsCell.replace(',', '.'));
             if (!isNaN(numEarned)) {
-                if (colEarned === colMax && existingObj.earnedPoints === undefined) {
+                if (colEarned === colMax && baseObj.earnedPoints === undefined) {
                     maxPoints = numEarned;
                 } else {
                     earnedPoints = numEarned;
@@ -501,62 +441,121 @@ window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
             }
         }
 
-        var createdAtMs = existingObj.createdAt || Date.now();
-        var parsedDeadlineTs = parseSheetDeadline(rawDeadline, createdAtMs) || existingObj.deadlineTimestamp || null;
+        var createdAtMs = baseObj.createdAt || Date.now();
+        var parsedDeadlineTs = parseSheetDeadline(rawDeadline, createdAtMs) || baseObj.deadlineTimestamp || null;
         var formattedDeadline = parsedDeadlineTs
             ? formatDeadlineDateAndTime(parsedDeadlineTs, rawDeadline)
-            : (rawDeadline || existingObj.deadlineFormatted || "Geen datum");
+            : (rawDeadline || baseObj.deadlineFormatted || "Geen datum");
+
+        var sheetStatusNorm = rawStatus ? normalizeSheetStatus(rawStatus) : (baseObj.status || "Open");
 
         var mergedItem = {
             id: targetKey,
             title: title,
-            url: existingObj.url || "https://jotihunt.nl/",
+            url: baseObj.url || "https://jotihunt.nl/",
             createdAt: createdAtMs,
-            status: rawStatus ? normalizeSheetStatus(rawStatus) : (existingObj.status || "Open"),
+            status: sheetStatusNorm,
+            manualStatusOverride: baseObj.manualStatusOverride || false,
             deadlineFormatted: formattedDeadline,
             deadlineTimestamp: parsedDeadlineTs,
-            assignedTo: rawAssignee !== "" ? rawAssignee : "",
+            assignedTo: rawAssignee !== "" ? rawAssignee : (baseObj.assignedTo || ""),
             earnedPoints: earnedPoints,
             maxPoints: maxPoints,
-            feedback: rawFeedback !== "" ? rawFeedback : (existingObj.feedback || ""),
-            notes: rawNotes !== "" ? rawNotes : (existingObj.notes || ""),
-            syncedToSheet: true,
-            updatedAt: existingObj.updatedAt || Date.now()
+            feedback: rawFeedback !== "" ? rawFeedback : (baseObj.feedback || ""),
+            notes: rawNotes !== "" ? rawNotes : (baseObj.notes || ""),
+            updatedAt: baseObj.updatedAt || Date.now()
         };
 
         mergedItem.status = computeDesiredStatus(mergedItem);
+        assignmentsData[targetKey] = mergedItem;
         updatesBatch[targetKey] = mergedItem;
         syncedCount++;
-    }
-
-    // Detecteer opdrachten die eerder in de Sheet stonden (syncedToSheet === true), maar nu in de Sheet zijn verwijderd
-    Object.keys(assignmentsData).forEach(function(k) {
-        var item = assignmentsData[k];
-        if (!item) return;
-        var isRecentlyCreated = item.createdAt && (Date.now() - item.createdAt < 45000);
-        if (item.syncedToSheet && !seenKeysInSheet[k] && !isRecentlyCreated) {
-            updatesBatch[k] = null;
-            deletedBatch[k] = Date.now();
-            var slug = makeTitleSlug(item.title);
-            if (slug) deletedBatch['slug_' + slug] = Date.now();
-        }
-    });
-
-    if (Object.keys(deletedBatch).length > 0) {
-        await db.ref('deletedAssignments').update(deletedBatch);
     }
 
     if (Object.keys(updatesBatch).length > 0) {
         await db.ref('assignments').update(updatesBatch);
     }
+    return syncedCount;
+}
 
-    schedulePushAssignmentsToGoogleSheet(500);
-    if (showFeedback) {
-        alert("Synchronisatie voltooid (" + syncedCount + " actieve opdrachten).");
+window.pushAssignmentsToGoogleSheet = async function(skipPreFetch) {
+    if (!GOOGLE_SHEET_WEBAPP_URL || isPushingToSheet) return;
+    isPushingToSheet = true;
+
+    try {
+        // Haal eerst eventuele net in de Google Sheet getypte rijen op zodat die nooit worden overschreven!
+        if (!skipPreFetch) {
+            var latestCsv = await fetchRawGoogleSheetCsv();
+            if (latestCsv) {
+                await importRowsFromSheetCsv(latestCsv, true);
+            }
+        }
+
+        var sorted = getSortedAssignments();
+        var rowsPayload = sorted.map(function(item) {
+            var hasEarned = item.earnedPoints !== undefined && item.earnedPoints !== null && item.earnedPoints !== '';
+            var hasMax = item.maxPoints !== undefined && item.maxPoints !== null && item.maxPoints !== '';
+            var pointsStr = "";
+            if (hasEarned && hasMax) {
+                pointsStr = item.earnedPoints + " / " + item.maxPoints;
+            } else if (hasEarned) {
+                pointsStr = String(item.earnedPoints);
+            } else if (hasMax) {
+                pointsStr = "- / " + item.maxPoints;
+            }
+
+            var dlFormatted = item.deadlineTimestamp
+                ? formatDeadlineDateAndTime(item.deadlineTimestamp, item.deadlineFormatted)
+                : (item.deadlineFormatted || "Geen datum");
+
+            return {
+                title: item.title || "",
+                status: item.status || "Open",
+                deadlineFormatted: dlFormatted,
+                assignedTo: item.assignedTo || "",
+                pointsFormatted: pointsStr,
+                feedback: item.feedback || "",
+                notes: item.notes || ""
+            };
+        });
+
+        await fetch(GOOGLE_SHEET_WEBAPP_URL, {
+            method: "POST",
+            mode: "no-cors",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({ rows: rowsPayload })
+        });
+    } catch (err) {
+        console.warn("Kon niet naar Google Sheet schrijven:", err);
+    } finally {
+        setTimeout(function() { isPushingToSheet = false; }, 1200);
     }
 };
 
-/* Koppel de "Sync Jotihunt" knop zodat deze zowel Jotihunt.nl als de Google Sheet synchroniseert */
+function schedulePushAssignmentsToGoogleSheet(delayMs) {
+    if (sheetWriteDebounceTimer) clearTimeout(sheetWriteDebounceTimer);
+    sheetWriteDebounceTimer = setTimeout(function() {
+        window.pushAssignmentsToGoogleSheet(false);
+    }, delayMs || 800);
+}
+
+window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
+    if (isPushingToSheet) return;
+
+    var csvText = await fetchRawGoogleSheetCsv();
+    if (!csvText) {
+        if (showFeedback) alert("Kon de Google Sheet niet uitlezen. Controleer of het bestand openbaar staat ingesteld.");
+        return;
+    }
+
+    var count = await importRowsFromSheetCsv(csvText, false);
+    schedulePushAssignmentsToGoogleSheet(600);
+
+    if (showFeedback) {
+        alert("Google Sheet succesvol gesynchroniseerd (" + count + " opdrachten gecontroleerd).");
+    }
+};
+
 var originalSyncFromApi = window.syncAssignmentsFromApi;
 window.syncAssignmentsFromApi = function(showFeedback) {
     if (typeof originalSyncFromApi === 'function') {
@@ -583,14 +582,11 @@ window.deleteSingleAssignment = function(key) {
     delUpdates[key] = Date.now();
     if (slug) delUpdates['slug_' + slug] = Date.now();
 
-    // 1. Zet op de verwijderde lijst zodat API en CSV-cache hem nooit terugplaatsen
     db.ref('deletedAssignments').update(delUpdates).then(function() {
-        // 2. Verwijder direct uit Firebase en lokale state
         delete assignmentsData[key];
         return db.ref('assignments/' + key).remove();
     }).then(function() {
-        // 3. Schrijf de opgeschoonde lijst direct naar de Google Sheet
-        window.pushAssignmentsToGoogleSheet();
+        window.pushAssignmentsToGoogleSheet(true);
     });
 };
 
@@ -626,11 +622,7 @@ function updatePointsSummary() {
 
 /* ==========================================================================
    SORTERING OP STATUS-GROEP ÉN DEADLINE:
-   1. Open (bovenaan)
-   2. Bezig
-   3. Deadline verlopen
-   4. Ingeleverd
-   5. Afgerond (altijd helemaal onderaan)
+   1. Open (bovenaan) -> 2. Bezig -> 3. Deadline verlopen -> 4. Ingeleverd -> 5. Afgerond (onderaan)
    ========================================================================== */
 
 function getStatusSortRank(status) {
@@ -657,12 +649,10 @@ function getSortedAssignments() {
         var rankA = getStatusSortRank(a.status);
         var rankB = getStatusSortRank(b.status);
 
-        // Sorteer eerst strikt op de gevraagde status-volgorde
         if (rankA !== rankB) {
             return rankA - rankB;
         }
 
-        // Binnen dezelfde status: dichtstbijzijnde deadline altijd bovenaan
         var tA = a.deadlineTimestamp ? Number(a.deadlineTimestamp) : Infinity;
         var tB = b.deadlineTimestamp ? Number(b.deadlineTimestamp) : Infinity;
 
@@ -697,17 +687,8 @@ function formatRemainingTime(deadlineMs) {
 }
 
 /* ==========================================================================
-   OPDRACHT OPENEN OP JOTIHUNT.NL + UITKLAPPEN VAN TEKSTVELDEN
+   UITKLAPPEN VAN TEKSTVELDEN & RENDEREN VAN DE TABEL
    ========================================================================== */
-
-window.openAssignmentOnJotihunt = function(key) {
-    var item = assignmentsData[key];
-    var targetUrl = "https://jotihunt.nl/";
-    if (item && item.url && String(item.url).trim().startsWith("http")) {
-        targetUrl = String(item.url).trim();
-    }
-    window.open(targetUrl, '_blank', 'noopener');
-};
 
 window.toggleExpandText = function(el, memKey) {
     if (!el) return;
@@ -736,7 +717,6 @@ window.collapseTextareaInput = function(el, memKey) {
     }
 };
 
-/* Render de responsieve opdrachtenlijst (Google Sheets tabel op desktop, kaarten op mobiel) */
 window.renderAssignmentsList = function() {
     var container = document.getElementById('assignments-list-container');
     if (!container) return;
@@ -819,13 +799,16 @@ window.renderAssignmentsList = function() {
                    onchange="updateAssignmentField('${key}', 'feedback', this.value)">${escapeHtml(item.feedback || '')}</textarea>`
             : `<div class="feedback-text expandable-text ${fbExpanded}" onclick="toggleExpandText(this, '${key}_feedback')" title="Tik om volledig te lezen">${escapeHtml(item.feedback || 'Nog geen beoordeling')}</div>`;
 
-        var deleteBtnHtml = adminMode
-            ? `<button type="button" class="delete-assignment-btn" onclick="deleteSingleAssignment('${key}')" title="Verwijder deze opdracht definitief">Wis</button>`
+        var adminRowActionsHtml = adminMode
+            ? `<div class="row-admin-actions">
+                   <button type="button" class="edit-assignment-btn" onclick="openEditAssignmentModal('${key}')" title="Opdrachtnaam en deadline bewerken">Bewerk</button>
+                   <button type="button" class="delete-assignment-btn" onclick="deleteSingleAssignment('${key}')" title="Verwijder deze opdracht definitief">Wis</button>
+               </div>`
             : '';
 
         html += `
             <div class="assignment-row ${statusClass} ${isUrgent ? 'row-urgent' : ''}">
-                <!-- 1. Opdracht (Klik opent Jotihunt.nl opdracht of homepage) -->
+                <!-- 1. Opdracht (Klik opent Jotihunt.nl opdracht of homepage, Admin kan naam bewerken) -->
                 <div class="cell-block cell-title">
                     <span class="mobile-col-label">Opdracht</span>
                     <div class="title-row-wrap">
@@ -833,7 +816,7 @@ window.renderAssignmentsList = function() {
                            class="assignment-title-link expandable-text ${titleExpanded}"
                            onclick="event.stopPropagation();"
                            title="Klik om de opdracht op Jotihunt.nl te openen">${escapeHtml(item.title || 'Naamloze opdracht')}</a>
-                        ${deleteBtnHtml}
+                        ${adminRowActionsHtml}
                     </div>
                 </div>
 
@@ -849,10 +832,13 @@ window.renderAssignmentsList = function() {
                     </select>
                 </div>
 
-                <!-- 3. Deadline (Altijd met Datum + Tijd) -->
+                <!-- 3. Deadline (Voor Admins direct klikbaar om datum & tijd te wijzigen) -->
                 <div class="cell-block cell-deadline">
                     <span class="mobile-col-label">Deadline</span>
-                    <div class="deadline-main">${escapeHtml(deadlineDisplay)}</div>
+                    <div class="deadline-main ${adminMode ? 'admin-editable-deadline' : ''}"
+                         ${adminMode ? `onclick="openEditAssignmentModal('${key}')" title="Klik om deadline en opdracht te bewerken"` : ''}>
+                        ${escapeHtml(deadlineDisplay)}
+                    </div>
                     <div class="deadline-sub ${isUrgent || status === 'Deadline verlopen' ? 'urgent-text' : ''}">${remainingText}</div>
                 </div>
 
@@ -911,7 +897,6 @@ window.toggleClaimAssignment = function(key) {
         updatedAt: Date.now()
     };
 
-    // Zet alleen op 'Bezig' als iemand de opdracht oppakt én de status op 'Open' stond
     if (!isMe && (!item.status || item.status === 'Open')) {
         updates.status = 'Bezig';
     } else if (isMe && item.status === 'Bezig') {
@@ -936,12 +921,20 @@ window.updateAssignmentField = function(key, field, value) {
     var updates = { updatedAt: Date.now() };
     updates[field] = parsedVal;
 
-    // Als er behaalde punten of feedback wordt ingevuld, zet de status automatisch op 'Afgerond'
+    // Als iemand handmatig de status wijzigt in de dropdown, zet manualStatusOverride op true
+    // zodat ook Telegram-opdrachten die op 'Afgerond' stonden vrij van status kunnen veranderen!
+    if (field === 'status') {
+        updates.manualStatusOverride = true;
+    }
+
+    // Als er nieuwe behaalde punten of feedback worden ingevuld, springt hij naar 'Afgerond'
     if (field === 'earnedPoints' && parsedVal !== null && !isNaN(parsedVal)) {
         updates.status = 'Afgerond';
+        updates.manualStatusOverride = false;
     }
     if (field === 'feedback' && String(parsedVal || '').trim() !== '') {
         updates.status = 'Afgerond';
+        updates.manualStatusOverride = false;
     }
 
     if (field === 'deadlineFormatted') {
@@ -958,7 +951,7 @@ window.updateAssignmentField = function(key, field, value) {
 };
 
 /* ==========================================================================
-   SOEPELE MODAL VOOR NIEUWE OPDRACHT TOEVOEGEN (ZELFDE STIJL ALS + RD MODAL)
+   MODAL VOOR TOEVOEGEN ÉN BEWERKEN VAN OPDRACHTNAAM + DEADLINE (DATUM & TIJD)
    ========================================================================== */
 
 function ensureAssignmentModalInjected() {
@@ -969,7 +962,7 @@ function ensureAssignmentModalInjected() {
     overlay.style.display = 'none';
     overlay.innerHTML = `
         <div id="assignment-modal-box">
-            <h3>Nieuwe Opdracht Toevoegen</h3>
+            <h3 id="assign-modal-header-title">Nieuwe Opdracht Toevoegen</h3>
 
             <div class="assign-field-group">
                 <label for="assign-title-input">Titel van de opdracht:</label>
@@ -1010,7 +1003,9 @@ function ensureAssignmentModalInjected() {
 window.openCustomAssignmentModal = function() {
     if (typeof isAdmin === 'undefined' || !isAdmin) return;
     ensureAssignmentModalInjected();
+    currentEditingAssignmentKey = null;
 
+    document.getElementById('assign-modal-header-title').innerText = "Nieuwe Opdracht Toevoegen";
     var titleInput = document.getElementById('assign-title-input');
     var dtInput = document.getElementById('assign-datetime-input');
     var maxPtsInput = document.getElementById('assign-maxpts-input');
@@ -1024,7 +1019,6 @@ window.openCustomAssignmentModal = function() {
     notesInput.value = "";
     errBox.style.display = "none";
 
-    // Standaard deadline op +2 uur vanaf nu zetten voor snelle invoer
     var defaultDeadline = new Date(Date.now() + 2 * 3600 * 1000);
     defaultDeadline.setMinutes(0, 0, 0);
     dtInput.value = toLocalDatetimeInputValue(defaultDeadline);
@@ -1033,9 +1027,40 @@ window.openCustomAssignmentModal = function() {
     setTimeout(function() { titleInput.focus(); }, 50);
 };
 
+window.openEditAssignmentModal = function(key) {
+    if (typeof isAdmin === 'undefined' || !isAdmin || !key) return;
+    var item = assignmentsData[key];
+    if (!item) return;
+
+    ensureAssignmentModalInjected();
+    currentEditingAssignmentKey = key;
+
+    document.getElementById('assign-modal-header-title').innerText = "Opdracht & Deadline Bewerken";
+    var titleInput = document.getElementById('assign-title-input');
+    var dtInput = document.getElementById('assign-datetime-input');
+    var maxPtsInput = document.getElementById('assign-maxpts-input');
+    var urlInput = document.getElementById('assign-url-input');
+    var notesInput = document.getElementById('assign-notes-input');
+    var errBox = document.getElementById('assign-modal-error');
+
+    titleInput.value = item.title || "";
+    maxPtsInput.value = (item.maxPoints !== undefined && item.maxPoints !== null) ? item.maxPoints : "5";
+    urlInput.value = item.url || "https://jotihunt.nl/";
+    notesInput.value = item.notes || "";
+    errBox.style.display = "none";
+
+    var existingDate = item.deadlineTimestamp ? new Date(Number(item.deadlineTimestamp)) : new Date();
+    if (isNaN(existingDate.getTime())) existingDate = new Date();
+    dtInput.value = toLocalDatetimeInputValue(existingDate);
+
+    document.getElementById('assignment-modal-overlay').style.display = 'flex';
+    setTimeout(function() { titleInput.focus(); }, 50);
+};
+
 window.closeCustomAssignmentModal = function() {
     var overlay = document.getElementById('assignment-modal-overlay');
     if (overlay) overlay.style.display = 'none';
+    currentEditingAssignmentKey = null;
 };
 
 window.saveCustomAssignmentModal = function() {
@@ -1076,40 +1101,108 @@ window.saveCustomAssignmentModal = function() {
     var customUrl = urlInput.value.trim() || "https://jotihunt.nl/";
     var notes = notesInput.value.trim();
 
-    var safeSlug = makeTitleSlug(title);
-    var newId = "custom_" + (safeSlug || now);
+    if (currentEditingAssignmentKey && assignmentsData[currentEditingAssignmentKey]) {
+        // Bewerk bestaande opdracht
+        var editKey = currentEditingAssignmentKey;
+        var existingItem = assignmentsData[editKey];
+        var updatedFields = {
+            title: title,
+            url: customUrl,
+            deadlineTimestamp: dlTs,
+            deadlineFormatted: dlFormatted,
+            maxPoints: !isNaN(maxPts) ? maxPts : 5,
+            notes: notes,
+            updatedAt: now
+        };
 
-    // Mocht deze titel eerder verwijderd zijn, haal hem dan van de blokkeerlijst omdat hij nu bewust nieuw wordt aangemaakt
-    var unDelete = {};
-    unDelete[newId] = null;
-    if (safeSlug) unDelete['slug_' + safeSlug] = null;
-    db.ref('deletedAssignments').update(unDelete);
+        // Als de deadline naar de toekomst is verplaatst en hij stond op 'Deadline verlopen', zet terug op 'Open'/'Bezig'
+        if (dlTs > now && existingItem.status === 'Deadline verlopen') {
+            updatedFields.status = existingItem.assignedTo ? 'Bezig' : 'Open';
+        }
 
-    var newObj = {
-        id: newId,
-        title: title,
-        url: customUrl,
-        createdAt: now,
-        status: "Open",
-        deadlineTimestamp: dlTs,
-        deadlineFormatted: dlFormatted,
-        assignedTo: "",
-        earnedPoints: null,
-        maxPoints: !isNaN(maxPts) ? maxPts : 5,
-        feedback: "",
-        notes: notes,
-        syncedToSheet: true,
-        updatedAt: now
-    };
-    newObj.status = computeDesiredStatus(newObj);
+        db.ref('assignments/' + editKey).update(updatedFields).then(function() {
+            closeCustomAssignmentModal();
+            schedulePushAssignmentsToGoogleSheet(300);
+        });
+    } else {
+        // Maak nieuwe opdracht aan
+        var safeSlug = makeTitleSlug(title);
+        var newId = "custom_" + (safeSlug || now);
 
-    db.ref('assignments/' + newId).set(newObj).then(function() {
-        closeCustomAssignmentModal();
-        schedulePushAssignmentsToGoogleSheet(300);
-    });
+        var unDelete = {};
+        unDelete[newId] = null;
+        if (safeSlug) unDelete['slug_' + safeSlug] = null;
+        db.ref('deletedAssignments').update(unDelete);
+
+        var newObj = {
+            id: newId,
+            title: title,
+            url: customUrl,
+            createdAt: now,
+            status: "Open",
+            manualStatusOverride: false,
+            deadlineTimestamp: dlTs,
+            deadlineFormatted: dlFormatted,
+            assignedTo: "",
+            earnedPoints: null,
+            maxPoints: !isNaN(maxPts) ? maxPts : 5,
+            feedback: "",
+            notes: notes,
+            updatedAt: now
+        };
+        newObj.status = computeDesiredStatus(newObj);
+
+        db.ref('assignments/' + newId).set(newObj).then(function() {
+            closeCustomAssignmentModal();
+            schedulePushAssignmentsToGoogleSheet(300);
+        });
+    }
 };
 
-/* Neutrale 10-minuten deadline notificatie voor Admins */
+/* ==========================================================================
+   10-MINUTEN DEADLINE MELDING MET 30 SEC WITTE VOORTGANGSBALK (+ 0.5S SLUITEN)
+   ========================================================================== */
+
+function showDeadlineAlertWithProgressBar(messageText) {
+    var banner = document.getElementById('deadline-alert-banner');
+    var textEl = document.getElementById('deadline-alert-text');
+    if (!banner || !textEl) return;
+
+    textEl.innerText = messageText;
+    banner.style.position = 'relative';
+    banner.style.overflow = 'hidden';
+    banner.style.display = 'flex';
+
+    // Maak of reset de witte voortgangsbalk onderaan de melding
+    var barWrap = document.getElementById('deadline-alert-progress-wrap');
+    if (!barWrap) {
+        barWrap = document.createElement('div');
+        barWrap.id = 'deadline-alert-progress-wrap';
+        barWrap.className = 'toast-progress-wrap';
+        barWrap.innerHTML = '<div id="deadline-alert-progress-bar" class="toast-progress-bar"></div>';
+        banner.appendChild(barWrap);
+    }
+
+    var bar = document.getElementById('deadline-alert-progress-bar');
+    if (bar) {
+        bar.style.transition = 'none';
+        bar.style.width = '0%';
+        void bar.offsetWidth; // Forceer reflow zodat de 30s animatie altijd vanaf links (0%) start
+        bar.style.transition = 'width 30s linear';
+        bar.style.width = '100%';
+    }
+
+    if (deadlineBannerTimer) clearTimeout(deadlineBannerTimer);
+    if (deadlineBannerCloseTimeout) clearTimeout(deadlineBannerCloseTimeout);
+
+    // Na 30 seconden heeft de witte balk de rechterkant bereikt -> wacht 0.5 sec (500ms) en sluit
+    deadlineBannerTimer = setTimeout(function() {
+        deadlineBannerCloseTimeout = setTimeout(function() {
+            window.dismissDeadlineAlert();
+        }, 500);
+    }, 30000);
+}
+
 function checkAdminDeadlineNotifications() {
     if (typeof isAdmin === 'undefined' || !isAdmin) return;
     var now = Date.now();
@@ -1124,17 +1217,16 @@ function checkAdminDeadlineNotifications() {
         if (timeRemaining > 0 && timeRemaining <= tenMinutesMs && !notifiedTenMinDeadlines[key]) {
             notifiedTenMinDeadlines[key] = true;
             var minsLeft = Math.max(1, Math.ceil(timeRemaining / 60000));
-            var banner = document.getElementById('deadline-alert-banner');
-            var textEl = document.getElementById('deadline-alert-text');
-            if (banner && textEl) {
-                textEl.innerText = "Deadline melding: Opdracht '" + (item.title || "Onbekend") + "' verloopt over " + minsLeft + " minuten.";
-                banner.style.display = 'flex';
-            }
+            showDeadlineAlertWithProgressBar(
+                "Deadline melding: Opdracht '" + (item.title || "Onbekend") + "' verloopt over " + minsLeft + " minuten."
+            );
         }
     });
 }
 
 window.dismissDeadlineAlert = function() {
+    if (deadlineBannerTimer) clearTimeout(deadlineBannerTimer);
+    if (deadlineBannerCloseTimeout) clearTimeout(deadlineBannerCloseTimeout);
     var banner = document.getElementById('deadline-alert-banner');
     if (banner) banner.style.display = 'none';
 };

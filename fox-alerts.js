@@ -450,8 +450,16 @@ setInterval(function() {
 
 injectFoxStatusPanel();
 
-/* --- DUIDELIJKE IN-APP MELDING BIJ VOSSEN OP GROEN --- */
+/* --- DUIDELIJKE IN-APP MELDING BIJ VOSSEN OP GROEN (MET 30S WITTE BALK + 0.5S SLUITEN) --- */
 var greenAlertTimeout = null;
+var greenAlertCloseDelayTimeout = null;
+
+function closeGreenHuntToastNow() {
+    if (greenAlertTimeout) clearTimeout(greenAlertTimeout);
+    if (greenAlertCloseDelayTimeout) clearTimeout(greenAlertCloseDelayTimeout);
+    var toast = document.getElementById('green-hunt-alert-toast');
+    if (toast) toast.style.display = 'none';
+}
 
 function ensureGreenHuntBannerUI() {
     if (document.getElementById('green-hunt-alert-toast')) return;
@@ -459,6 +467,7 @@ function ensureGreenHuntBannerUI() {
     var toast = document.createElement('div');
     toast.id = 'green-hunt-alert-toast';
     toast.style.display = 'none';
+    toast.style.overflow = 'hidden';
     toast.innerHTML = `
         <div class="green-hunt-toast-content">
             <div class="green-hunt-toast-icon"></div>
@@ -471,11 +480,14 @@ function ensureGreenHuntBannerUI() {
                 <button type="button" id="green-hunt-toast-close-btn">✕</button>
             </div>
         </div>
+        <div class="toast-progress-wrap">
+            <div id="green-hunt-toast-progress-bar" class="toast-progress-bar"></div>
+        </div>
     `;
     mapWrapper.appendChild(toast);
 
     document.getElementById('green-hunt-toast-close-btn').addEventListener('click', function() {
-        toast.style.display = 'none';
+        closeGreenHuntToastNow();
     });
 }
 
@@ -488,6 +500,7 @@ function triggerAreaHuntableAlert(areaName, timeFormatted) {
     var titleEl = document.getElementById('green-hunt-toast-title');
     var subEl = document.getElementById('green-hunt-toast-sub');
     var zoomBtn = document.getElementById('green-hunt-toast-zoom-btn');
+    var progressBar = document.getElementById('green-hunt-toast-progress-bar');
 
     var timePart = timeFormatted ? ` (om ${timeFormatted})` : '';
     titleEl.textContent = `${areaName.toUpperCase()} MAG WEER GEHUNT WORDEN!`;
@@ -497,16 +510,30 @@ function triggerAreaHuntableAlert(areaName, timeFormatted) {
         window.zoomToLatestFoxArea(areaName);
         selectedFoxInfoArea = areaName;
         window.renderFoxStatusButtons();
-        toast.style.display = 'none';
+        closeGreenHuntToastNow();
     };
 
     toast.style.display = 'block';
-    if (greenAlertTimeout) clearTimeout(greenAlertTimeout);
-    greenAlertTimeout = setTimeout(function() {
-        toast.style.display = 'none';
-    }, 18000);
-}
 
+    // Start de witte voortgangsbalk van links (0%) naar rechts (100%) in exact 30 seconden
+    if (progressBar) {
+        progressBar.style.transition = 'none';
+        progressBar.style.width = '0%';
+        void progressBar.offsetWidth; // Forceer reflow
+        progressBar.style.transition = 'width 30s linear';
+        progressBar.style.width = '100%';
+    }
+
+    if (greenAlertTimeout) clearTimeout(greenAlertTimeout);
+    if (greenAlertCloseDelayTimeout) clearTimeout(greenAlertCloseDelayTimeout);
+
+    // Zodra de 30 seconden voorbij zijn en de overkant is bereikt: wacht 0.5 sec (500ms) en sluit
+    greenAlertTimeout = setTimeout(function() {
+        greenAlertCloseDelayTimeout = setTimeout(function() {
+            closeGreenHuntToastNow();
+        }, 500);
+    }, 30000);
+}
 var isInitialFoxStatusLoad = true;
 var prevFoxStatusMap = {};
 
