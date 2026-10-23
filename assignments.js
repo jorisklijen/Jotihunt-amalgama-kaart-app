@@ -1,11 +1,16 @@
 /* ==========================================================================
-   4. ASSIGNMENTS.JS - OPDRACHTEN TRACKER (REALTIME SYNC, DEADLINES & PUNTEN)
-   Vervanger van de Google Sheets tracker, geoptimaliseerd voor mobiel gebruik.
+   4. ASSIGNMENTS.JS - OPDRACHTEN TRACKER + LIVE GOOGLE SHEETS SYNC
+   Desktop: Google Sheets tabel-grid | Mobiel: Gestapelde kaarten
    Geen emoji's in de UI of knoppen.
    ========================================================================== */
 
 var assignmentsData = {};
 var notifiedTenMinDeadlines = {};
+
+// Configuratie voor jullie live Google Sheet (tabblad gid=1344677603)
+var GOOGLE_SHEET_ID = "1lZTXRRbvy8ODGgZheOpm3qUdFOu8mM1muhxOyeStks4";
+var GOOGLE_SHEET_GID = "1344677603";
+var GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/" + GOOGLE_SHEET_ID + "/export?format=csv&gid=" + GOOGLE_SHEET_GID;
 
 /* Luister realtime naar alle opdrachten in Firebase */
 db.ref('assignments').on('value', function(snapshot) {
@@ -17,7 +22,7 @@ db.ref('assignments').on('value', function(snapshot) {
 
 /* Luister naar binnenkomende Telegram beoordelingen en koppel ze automatisch aan de juiste opdracht */
 db.ref('telegramData/assignments').on('value', function(snapshot) {
-    if (!isAdmin) return; // Alleen een ingelogde Admin verwerkt de koppeling om dubbele writes te voorkomen
+    if (typeof isAdmin === 'undefined' || !isAdmin) return;
     var tgItems = snapshot.val();
     if (!tgItems) return;
 
@@ -40,7 +45,6 @@ db.ref('telegramData/assignments').on('value', function(snapshot) {
             });
             db.ref('telegramData/assignments/' + tgKey).update({ linkedToAssignment: matchedId });
         } else {
-            // Maak opdracht automatisch aan als deze alleen via Telegram binnenkwam
             var newId = 'tg_' + tgKey.replace(/[^a-zA-Z0-9_-]/g, '');
             db.ref('assignments/' + newId).set({
                 id: newId,
@@ -59,6 +63,236 @@ db.ref('telegramData/assignments').on('value', function(snapshot) {
         }
     });
 });
+
+/* ==========================================================================
+   GOOGLE SHEETS CSV PARSER & SYNCHRONISATIE NAAR FIREBASE
+   ========================================================================== */
+
+/* Parseer een volledige CSV-string (inclusief aanhalingstekens en komma's in tekst) */
+function parseCSVToRows(csvText) {
+    var rows = [];
+    var currentRow = [];
+    var currentVal = "";
+    var inQuotes = false;
+
+    for (var i = 0; i < csvText.length; i++) {
+        var char = csvText[i];
+        var nextChar = csvText[i + 1];
+
+        if (char === '"') {
+            if (inQuotes && nextChar === '"') {
+                currentVal += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (char === ',' && !inQuotes) {
+            currentRow.push(currentVal.trim());
+            currentVal = "";
+        } else if ((char === '\r' || char === '\n') && !inQuotes) {
+            if (char === '\r' && nextChar === '\n') i++;
+            currentRow.push(currentVal.trim());
+            if (currentRow.some(function(cell) { return cell !== ""; })) {
+                rows.push(currentRow);
+            }
+            currentRow = [];
+            currentVal = "";
+        } else {
+            currentVal += char;
+        }
+    }
+    if (currentVal !== "" || currentRow.length > 0) {
+        currentRow.push(currentVal.trim());
+        if (currentRow.some(function(cell) { return cell !== ""; })) {
+            rows.push(currentRow);
+        }
+    }
+    return rows;
+}
+
+/* Zet een datum/tijd-string uit Google Sheets om naar een timestamp voor sortering */
+function parseSheetDeadline(deadlineStr) {
+    if (!deadlineStr) return null;
+    var clean = String(deadlineStr).trim();
+    if (!clean) return null;
+
+    // Probeer standaard Date.parse
+    var parsed = Date.parse(clean);
+    if (!isNaN(parsed)) return parsed;
+
+    // Ondersteun NL formaat zoals "23-10 21:00" of "23-10-2026 21:00" of alleen "21:00"
+    var now = new Date();
+    var currentYear = now.getFullYear();
+
+    var dmyMatch = clean.match(/^(\d{1,2})[-/](\d{1,2})(?:[-/](\d{2,4}))?\s+(\d{1,2}):(\d{2})/);
+    if (dmyMatch) {
+        var day = parseInt(dmyMatch[1], 10);
+        var month = parseInt(dmyMatch[2], 10) - 1;
+        var year = dmyMatch[3] ? parseInt(dmyMatch[3], 10) : currentYear;
+        if (year < 100) year += 2000;
+        var hour = parseInt(dmyMatch[4], 10);
+        var min = parseInt(dmyMatch[5], 10);
+        return new Date(year, month, day, hour, min, 0).getTime();
+    }
+
+    var timeOnlyMatch = clean.match(/^(\d{1,2}):(\d{2})$/);
+    if (timeOnlyMatch) {
+        var d = new Date();
+        d.setHours(parseInt(timeOnlyMatch[1], 10), parseInt(timeOnlyMatch[2], 10), 0, 0);
+        return d.getTime();
+    }
+
+    return null;
+}
+
+/* Normaliseer statuswaarden vanuit de Google Sheet naar de 4 app-statussen */
+function normalizeSheetStatus(rawStatus) {
+    var s = String(rawStatus || '').toLowerCase().trim();
+    if (s.includes('afgerond') || s.includes('klaar') || s.includes('gereed') || s.includes('beoordeeld') || s === 'done') return 'Afgerond';
+    if (s.includes('ingeleverd') || s.includes('verstuurd') || s.includes('verzonden')) return 'Ingeleverd';
+    if (s.includes('bezig') || s.includes('actief') || s.includes('opgepakt') || s.includes('doing')) return 'Bezig';
+    return 'Open';
+}
+
+/* Haal de Google Sheet CSV op en synchroniseer deze naar Firebase db.ref('assignments') */
+window.syncAssignmentsFromGoogleSheet = async function(showFeedback) {
+    var csvText = null;
+    var targetUrl = GOOGLE_SHEET_CSV_URL + "&t=" + Date.now();
+
+    // Poging 1: Directe publieke CSV-export van Google Sheets
+    try {
+        var res = await fetch(targetUrl, { cache: "no-store" });
+        if (res.ok) {
+            csvText = await res.text();
+        }
+    } catch (e) {}
+
+    // Poging 2: Fallback via jullie Cloudflare Worker mocht de browser CORS blokkeren
+    if (!csvText) {
+        try {
+            var proxyUrl = "https://jotihunt-proxy.joriskleijn2000.workers.dev/?url=" + encodeURIComponent(targetUrl);
+            var proxyRes = await fetch(proxyUrl, { cache: "no-store" });
+            if (proxyRes.ok) {
+                csvText = await proxyRes.text();
+            }
+        } catch (proxyErr) {
+            console.warn("Kon Google Sheet niet ophalen:", proxyErr);
+        }
+    }
+
+    if (!csvText || csvText.trim().startsWith("<!DOCTYPE html>")) {
+        if (showFeedback) alert("Kon de Google Sheet niet uitlezen. Controleer of het bestand openbaar staat ingesteld ('Iedereen met de link kan bekijken').");
+        return;
+    }
+
+    var rows = parseCSVToRows(csvText);
+    if (rows.length < 2) return;
+
+    // Zoek de juiste kolom-indexen op basis van de eerste rij (headers), met vaste fallback-volgorde
+    var headers = rows[0].map(function(h) { return String(h || '').toLowerCase().trim(); });
+
+    function findCol(keywords, fallbackIdx) {
+        var idx = headers.findIndex(function(h) {
+            return keywords.some(function(kw) { return h.includes(kw); });
+        });
+        return idx !== -1 ? idx : fallbackIdx;
+    }
+
+    var colTitle    = findCol(['opdracht', 'titel', 'naam', 'onderwerp', 'taak'], 0);
+    var colStatus   = findCol(['status', 'voortgang', 'staat'], 1);
+    var colDeadline = findCol(['deadline', 'tijd', 'inlever', 'eindtijd'], 2);
+    var colAssignee = findCol(['opgepakt', 'wie', 'persoon', 'door', 'naam'], 3);
+    var colEarned   = findCol(['behaald', 'gekregen', 'score'], 4);
+    var colMax      = findCol(['max', 'te behalen', 'punten', 'totaal'], 4);
+    var colFeedback = findCol(['feedback', 'beoordeling', 'jury', 'telegram'], 5);
+    var colNotes    = findCol(['opmerking', 'notitie', 'info', 'toelichting'], 6);
+
+    var updatesBatch = {};
+    var syncedCount = 0;
+
+    for (var r = 1; r < rows.length; r++) {
+        var row = rows[r];
+        var title = row[colTitle] ? String(row[colTitle]).trim() : "";
+        if (!title) continue;
+
+        // Maak een stabiel Firebase ID op basis van de opdrachttitel
+        var safeSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').substring(0, 48);
+        var itemId = "sheet_" + (safeSlug || ("row_" + r));
+
+        // Kijk of deze opdracht al onder een ander ID in Firebase staat
+        var existingId = Object.keys(assignmentsData).find(function(k) {
+            return k === itemId || (assignmentsData[k] && String(assignmentsData[k].title || '').toLowerCase().trim() === title.toLowerCase());
+        });
+        var targetKey = existingId || itemId;
+        var existingObj = assignmentsData[targetKey] || {};
+
+        var rawStatus = row[colStatus] !== undefined ? row[colStatus] : "";
+        var rawDeadline = row[colDeadline] !== undefined ? row[colDeadline] : "";
+        var rawAssignee = row[colAssignee] !== undefined ? row[colAssignee] : "";
+        var rawFeedback = row[colFeedback] !== undefined ? row[colFeedback] : "";
+        var rawNotes = row[colNotes] !== undefined ? row[colNotes] : "";
+
+        // Verwerk punten (ondersteunt zowel losse kolommen als "4 / 5" in één kolom)
+        var earnedPoints = existingObj.earnedPoints !== undefined ? existingObj.earnedPoints : null;
+        var maxPoints = existingObj.maxPoints !== undefined ? existingObj.maxPoints : null;
+
+        var rawPointsCell = row[colEarned] !== undefined ? String(row[colEarned]).trim() : "";
+        if (rawPointsCell.includes('/')) {
+            var parts = rawPointsCell.split('/');
+            var pEarned = parseFloat(parts[0].replace(',', '.'));
+            var pMax = parseFloat(parts[1].replace(',', '.'));
+            if (!isNaN(pEarned)) earnedPoints = pEarned;
+            if (!isNaN(pMax)) maxPoints = pMax;
+        } else {
+            var numEarned = parseFloat(rawPointsCell.replace(',', '.'));
+            if (!isNaN(numEarned)) {
+                if (colEarned === colMax) {
+                    maxPoints = numEarned;
+                } else {
+                    earnedPoints = numEarned;
+                }
+            }
+            if (colMax !== colEarned && row[colMax] !== undefined) {
+                var numMax = parseFloat(String(row[colMax]).replace(',', '.'));
+                if (!isNaN(numMax)) maxPoints = numMax;
+            }
+        }
+
+        var parsedDeadlineTs = parseSheetDeadline(rawDeadline);
+
+        updatesBatch[targetKey] = {
+            id: targetKey,
+            title: title,
+            url: existingObj.url || "",
+            status: rawStatus ? normalizeSheetStatus(rawStatus) : (existingObj.status || "Open"),
+            deadlineFormatted: rawDeadline || existingObj.deadlineFormatted || "Geen datum",
+            deadlineTimestamp: parsedDeadlineTs || existingObj.deadlineTimestamp || null,
+            assignedTo: rawAssignee !== "" ? rawAssignee : (existingObj.assignedTo || ""),
+            earnedPoints: earnedPoints,
+            maxPoints: maxPoints,
+            feedback: rawFeedback !== "" ? rawFeedback : (existingObj.feedback || ""),
+            notes: rawNotes !== "" ? rawNotes : (existingObj.notes || ""),
+            updatedAt: Date.now()
+        };
+        syncedCount++;
+    }
+
+    if (syncedCount > 0) {
+        await db.ref('assignments').update(updatesBatch);
+        if (showFeedback) {
+            alert("Google Sheet succesvol gesynchroniseerd (" + syncedCount + " opdrachten bijgewerkt).");
+        }
+    }
+};
+
+/* Koppel de "Sync Jotihunt" knop zodat deze direct ook de Google Sheet synchroniseert */
+var originalSyncFromApi = window.syncAssignmentsFromApi;
+window.syncAssignmentsFromApi = function(showFeedback) {
+    window.syncAssignmentsFromGoogleSheet(showFeedback);
+    if (typeof originalSyncFromApi === 'function') {
+        originalSyncFromApi(false);
+    }
+};
 
 /* Bereken totaaloverzicht van behaalde en maximaal te behalen punten */
 function updatePointsSummary() {
@@ -103,21 +337,16 @@ function getSortedAssignments() {
         var aDone = (a.status === 'Afgerond' || a.status === 'Ingeleverd');
         var bDone = (b.status === 'Afgerond' || b.status === 'Ingeleverd');
 
-        // Actieve opdrachten altijd boven al ingeleverde/afgeronde opdrachten
         if (aDone !== bDone) return aDone ? 1 : -1;
 
         var tA = a.deadlineTimestamp ? Number(a.deadlineTimestamp) : Infinity;
         var tB = b.deadlineTimestamp ? Number(b.deadlineTimestamp) : Infinity;
 
-        var aFuture = tA >= (now - 600000); // Tot 10 min na deadline nog hoog houden
+        var aFuture = tA >= (now - 600000);
         var bFuture = tB >= (now - 600000);
 
-        if (aFuture && bFuture) {
-            return tA - tB; // Dichtstbijzijnde deadline eerst
-        }
-        if (aFuture !== bFuture) {
-            return aFuture ? -1 : 1; // Toekomstige deadlines boven verlopen deadlines
-        }
+        if (aFuture && bFuture) return tA - tB;
+        if (aFuture !== bFuture) return aFuture ? -1 : 1;
         return tB - tA;
     });
 
@@ -125,7 +354,7 @@ function getSortedAssignments() {
 }
 
 function formatRemainingTime(deadlineMs) {
-    if (!deadlineMs || isNaN(deadlineMs)) return "Geen deadline";
+    if (!deadlineMs || isNaN(deadlineMs)) return "Geen eindtijd";
     var diffMs = Number(deadlineMs) - Date.now();
     var diffMin = Math.ceil(diffMs / 60000);
 
@@ -145,12 +374,12 @@ function formatRemainingTime(deadlineMs) {
     return "Over " + hours + "u " + mins + "m";
 }
 
-/* Render de responsieve opdrachtenlijst */
+/* Render de responsieve opdrachtenlijst (Google Sheets tabel op desktop, kaarten op mobiel) */
 window.renderAssignmentsList = function() {
     var container = document.getElementById('assignments-list-container');
     if (!container) return;
 
-    // Niet opnieuw opbouwen als de gebruiker net een opmerking of puntenveld typt
+    // Onderbreek het typen niet als een gebruiker een cel bewerkt
     var activeEl = document.activeElement;
     if (activeEl && activeEl.classList && activeEl.classList.contains('live-edit-field')) {
         return;
@@ -172,7 +401,7 @@ window.renderAssignmentsList = function() {
     });
 
     if (sorted.length === 0) {
-        container.innerHTML = '<div class="empty-assignments-msg">Geen opdrachten gevonden. Gebruik Sync Jotihunt of voeg een opdracht toe.</div>';
+        container.innerHTML = '<div class="empty-assignments-msg">Geen opdrachten gevonden. Gebruik Sync Jotihunt of controleer de Google Sheet.</div>';
         return;
     }
 
@@ -183,10 +412,13 @@ window.renderAssignmentsList = function() {
             <div>Deadline</div>
             <div>Opgepakt door</div>
             <div>Punten</div>
-            <div>Feedback (Telegram)</div>
+            <div>Feedback</div>
             <div>Opmerkingen / Notities</div>
         </div>
     `;
+
+    var adminMode = (typeof isAdmin !== 'undefined' && isAdmin);
+    var activeUserName = (typeof currentUserName !== 'undefined' && currentUserName) ? currentUserName : '';
 
     sorted.forEach(function(item) {
         var key = item.key;
@@ -196,13 +428,13 @@ window.renderAssignmentsList = function() {
         var isUrgent = item.deadlineTimestamp && (item.deadlineTimestamp - Date.now() <= 600000) && (item.deadlineTimestamp - Date.now() > 0) && status !== 'Afgerond' && status !== 'Ingeleverd';
 
         var assignedTo = item.assignedTo || '';
-        var isAssignedToMe = currentUserName && assignedTo.toLowerCase() === currentUserName.toLowerCase();
+        var isAssignedToMe = activeUserName && assignedTo.toLowerCase() === activeUserName.toLowerCase();
         var claimBtnLabel = isAssignedToMe ? 'Loslaten' : 'Oppakken';
 
         var earnedVal = (item.earnedPoints !== undefined && item.earnedPoints !== null && item.earnedPoints !== '') ? item.earnedPoints : '-';
         var maxVal = (item.maxPoints !== undefined && item.maxPoints !== null && item.maxPoints !== '') ? item.maxPoints : '-';
 
-        var pointsCellHtml = isAdmin
+        var pointsCellHtml = adminMode
             ? `<div class="points-edit-wrap">
                    <input type="number" class="live-edit-field points-input" value="${earnedVal !== '-' ? earnedVal : ''}" placeholder="-" onchange="updateAssignmentField('${key}', 'earnedPoints', this.value)" title="Behaalde punten">
                    <span>/</span>
@@ -210,17 +442,17 @@ window.renderAssignmentsList = function() {
                </div>`
             : `<div class="points-display-badge">${earnedVal} / ${maxVal} pt</div>`;
 
-        var feedbackHtml = isAdmin
+        var feedbackHtml = adminMode
             ? `<input type="text" class="live-edit-field table-text-input" value="${escapeHtml(item.feedback || '')}" placeholder="Geen feedback" onchange="updateAssignmentField('${key}', 'feedback', this.value)">`
             : `<div class="feedback-text">${escapeHtml(item.feedback || 'Nog geen beoordeling')}</div>`;
 
         html += `
             <div class="assignment-row ${statusClass} ${isUrgent ? 'row-urgent' : ''}">
-                <!-- 1. Titel / Opdracht -->
+                <!-- 1. Opdracht -->
                 <div class="cell-block cell-title">
                     <span class="mobile-col-label">Opdracht</span>
                     <div class="assignment-title-text">${escapeHtml(item.title || 'Naamloze opdracht')}</div>
-                    ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" class="assignment-link">Bekijk op Jotihunt.nl</a>` : ''}
+                    ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" class="assignment-link">Bekijk opdracht</a>` : ''}
                 </div>
 
                 <!-- 2. Status -->
@@ -245,7 +477,7 @@ window.renderAssignmentsList = function() {
                 <div class="cell-block cell-assignee">
                     <span class="mobile-col-label">Opgepakt door</span>
                     <div class="assignee-row">
-                        <span class="assignee-name">${assignedTo ? escapeHtml(assignedTo) : 'Niemand'}</span>
+                        <span class="assignee-name" title="${escapeHtml(assignedTo || 'Niemand')}">${assignedTo ? escapeHtml(assignedTo) : 'Niemand'}</span>
                         <button type="button" class="claim-btn ${isAssignedToMe ? 'btn-release' : 'btn-claim'}" onclick="toggleClaimAssignment('${key}')">${claimBtnLabel}</button>
                     </div>
                 </div>
@@ -276,8 +508,8 @@ window.renderAssignmentsList = function() {
 
 /* Eén-klik taak oppakken of loslaten voor ingelogde Hunter of Admin */
 window.toggleClaimAssignment = function(key) {
-    if (!currentUserName) {
-        alert("Log eerst in om een opdracht op te pakken.");
+    if (typeof currentUserName === 'undefined' || !currentUserName) {
+        alert("Log eerst in met je naam om een opdracht op te pakken.");
         return;
     }
     var item = assignmentsData[key];
@@ -291,7 +523,6 @@ window.toggleClaimAssignment = function(key) {
         updatedAt: Date.now()
     };
 
-    // Zet status automatisch op 'Bezig' zodra iemand een Open opdracht oppakt
     if (!isMe && (!item.status || item.status === 'Open')) {
         updates.status = 'Bezig';
     }
@@ -313,7 +544,7 @@ window.updateAssignmentField = function(key, field, value) {
 
 /* Neutrale 10-minuten deadline notificatie voor Admins */
 function checkAdminDeadlineNotifications() {
-    if (!isAdmin) return;
+    if (typeof isAdmin === 'undefined' || !isAdmin) return;
     var now = Date.now();
     var tenMinutesMs = 10 * 60 * 1000;
 
@@ -336,10 +567,27 @@ function checkAdminDeadlineNotifications() {
     });
 }
 
+window.dismissDeadlineAlert = function() {
+    var banner = document.getElementById('deadline-alert-banner');
+    if (banner) banner.style.display = 'none';
+};
+
+/* Start periodieke controles (elke 20s UI-tijdklok, elke 60s Google Sheet sync door Admin) */
 setInterval(function() {
     checkAdminDeadlineNotifications();
     renderAssignmentsList();
 }, 20000);
+
+setInterval(function() {
+    if (typeof isAdmin !== 'undefined' && isAdmin) {
+        window.syncAssignmentsFromGoogleSheet(false);
+    }
+}, 60000);
+
+// Voer direct bij het laden éénmalig een Google Sheet sync uit zodra Firebase verbonden is
+setTimeout(function() {
+    window.syncAssignmentsFromGoogleSheet(false);
+}, 2500);
 
 function escapeHtml(str) {
     return String(str || '')
