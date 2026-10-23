@@ -1255,3 +1255,34 @@ function escapeHtml(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 }
+
+/* ==========================================================================
+   PERIODICKE OPRUIMING DELETED ASSIGNMENTS (Elke 5 minuten)
+   Verwijdert items uit de prullenbak die ouder zijn dan 2 uur.
+   ========================================================================== */
+setInterval(function() {
+    // Alleen uitvoeren als de gebruiker ingelogd is als Admin
+    if (typeof isAdmin === 'undefined' || !isAdmin) return;
+    
+    db.ref('deletedAssignments').once('value', function(snapshot) {
+        var data = snapshot.val();
+        if (!data) return;
+
+        var now = Date.now();
+        var maxAgeMs = 2 * 3600 * 1000; // 2 uur oud
+        var updates = {};
+        var hasExpired = false;
+
+        Object.keys(data).forEach(function(key) {
+            var timestamp = Number(data[key]);
+            if (!isNaN(timestamp) && (now - timestamp > maxAgeMs)) {
+                updates[key] = null; // null verwijdert de sleutel uit Firebase Realtime Database
+                hasExpired = true;
+            }
+        });
+
+        if (hasExpired) {
+            db.ref('deletedAssignments').update(updates);
+        }
+    });
+}, 5 * 60 * 1000); // 5 minuten in milliseconden
